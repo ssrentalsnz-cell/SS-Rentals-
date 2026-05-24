@@ -8,6 +8,7 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -304,6 +305,106 @@ const statusBadge = s => {
   return `badge badge-${m[s]||'gray'}`;
 };
 
+/* ─── GOOGLE SHEETS SYNC ENGINE ──────────────────── */
+const SHEETS_CONFIG_KEY = 'ss_rentals_sheets_config';
+
+const loadSheetsConfig = () => {
+  try { return JSON.parse(localStorage.getItem(SHEETS_CONFIG_KEY) || 'null'); } catch { return null; }
+};
+const saveSheetsConfig = cfg => localStorage.setItem(SHEETS_CONFIG_KEY, JSON.stringify(cfg));
+
+const buildSheetRows = () => ({
+  fleet: [
+    ['Rego','Make','Model','Year','Type','Status','Odometer','COF Expiry','Rego Expiry','Hirer','Weekly Rate','RUC Balance','Location','Rev YTD','Maint YTD'],
+    ...TRUCKS.map(t=>[t.rego,t.make,t.model,t.year,t.type,t.status,t.odometer,t.cof_expiry,t.rego_expiry,
+      t.hirer?CUSTOMERS.find(c=>c.id===t.hirer)?.company||t.hirer:'',
+      t.weekly_rate,t.ruc_balance,t.location,t.rev_ytd,t.maint_ytd]),
+    ...TRAILERS.map(t=>[t.rego,t.make,t.model,t.year,t.model,'trailer:'+t.status,0,t.cof_expiry,t.rego_expiry,
+      t.hirer?CUSTOMERS.find(c=>c.id===t.hirer)?.company||t.hirer:'',
+      t.weekly_rate||0,0,t.location,0,0]),
+  ],
+  customers: [
+    ['ID','Company','Contact','Phone','Email','Status','Credit Rating','Outstanding','YTD Revenue','Weekly Rate','Payment Terms','Joined','Notes'],
+    ...CUSTOMERS.map(c=>[c.id,c.company,c.contact,c.phone,c.email,c.status,c.credit_rating,
+      c.outstanding,c.ytd_revenue,c.weekly_truck+c.weekly_trailer,c.payment_terms,c.joined,c.notes]),
+  ],
+  hires: [
+    ['Hire ID','Customer','Truck','Trailer','Start','End','Status','Weekly Rate','Mileage Rate','RUC Rate','Bond','Bond Paid','Signed','Insurance','Notes'],
+    ...HIRES.map(h=>[h.id,
+      CUSTOMERS.find(c=>c.id===h.customer)?.company||h.customer,
+      TRUCKS.find(t=>t.id===h.truck)?.rego||h.truck||'',
+      h.trailer?TRAILERS.find(t=>t.id===h.trailer)?.rego||h.trailer:'',
+      h.start,h.end,h.status,h.weekly_truck+h.weekly_trailer,h.mileage_rate,h.ruc_rate,h.bond,h.bond_paid?'Yes':'No',h.signed?'Yes':'No',h.insurance_verified?'Yes':'No',h.notes]),
+  ],
+  invoices: [
+    ['Invoice ID','Customer','Period','Date','Due Date','Truck Hire','Trailer Hire','Mileage','RUC','Damage','Extras','Total','Status','Xero ID'],
+    ...INVOICES.map(i=>[i.id,
+      CUSTOMERS.find(c=>c.id===i.customer)?.company||i.customer,
+      i.period,i.date,i.due,i.truck_hire,i.trailer_hire,i.mileage,i.ruc,i.damage,i.extras,i.total,i.status,i.xero_id||'']),
+  ],
+  maintenance: [
+    ['ID','Vehicle Rego','Type','Description','Date','Cost','Status','Workshop','Odometer'],
+    ...MAINTENANCE.map(m=>[m.id,m.rego,m.type,m.description,m.date,m.cost,m.status,m.workshop,m.odometer||'']),
+  ],
+  pnl: [
+    ['Month','Revenue','Insurance','Navman/RUC','RUC','Other Expenses','Repairs','Flexi','Heartland','Total Expenses','Net Profit'],
+    ...PNL_DETAIL.map(r=>[r.month,r.revenue,r.insurance,r.navman_ruc,r.ruc,r.other,r.repairs,r.flexi,r.heartland,r.expenses,r.net]),
+  ],
+});
+
+const syncSheetTab = async (accessToken, spreadsheetId, sheetName, rows) => {
+  // Clear then write
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:clear`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+  });
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}?valueInputOption=RAW`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: rows }),
+  });
+  if (!res.ok) { const err = await res.json(); throw new Error(err.error?.message || 'Sheets write failed'); }
+};
+
+const ensureSheets = async (accessToken, spreadsheetId, neededSheets) => {
+  const meta = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const data = await meta.json();
+  const existing = (data.sheets || []).map(s => s.properties.title);
+  const toAdd = neededSheets.filter(n => !existing.includes(n));
+  if (toAdd.length === 0) return;
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: toAdd.map(t => ({ addSheet: { properties: { title: t } } })) }),
+  });
+};
+
+const runFullSync = async (config, onProgress, onDone, onError) => {
+  try {
+    const { accessToken, spreadsheetId } = config;
+    const allRows = buildSheetRows();
+    const tabMap = {
+      'Fleet & Trailers': allRows.fleet,
+      'Customers': allRows.customers,
+      'Hire Management': allRows.hires,
+      'Invoices': allRows.invoices,
+      'Maintenance': allRows.maintenance,
+      'P&L Detail': allRows.pnl,
+    };
+    onProgress('Checking sheets…', 0);
+    await ensureSheets(accessToken, spreadsheetId, Object.keys(tabMap));
+    const tabs = Object.entries(tabMap);
+    for (let i = 0; i < tabs.length; i++) {
+      const [name, rows] = tabs[i];
+      onProgress(`Syncing ${name}…`, Math.round(((i) / tabs.length) * 100));
+      await syncSheetTab(accessToken, spreadsheetId, name, rows);
+    }
+    onDone(new Date());
+  } catch (e) { onError(e.message || 'Unknown sync error'); }
+};
+
 /* ─── SVG ICONS ───────────────────────────────────── */
 const Icon = ({name,size=16,color='currentColor'}) => {
   const paths = {
@@ -334,6 +435,9 @@ const Icon = ({name,size=16,color='currentColor'}) => {
     user:'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
     search:'M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
     refresh:'M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
+    sheets:'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3h5v2h-5V6zm0 4h5v2h-5v-2zm0 4h5v2h-5v-2zM7 6h3v2H7V6zm0 4h3v2H7v-2zm0 4h3v2H7v-2z',
+    link:'M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z',
+    sync:'M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z',
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{flexShrink:0}}>
@@ -412,7 +516,7 @@ const Sidebar = ({page,setPage}) => {
 
 /* ─── HEADER ──────────────────────────────────────── */
 const TITLES = {dashboard:'Dashboard',fleet:'Fleet Management',customers:'Customers',hires:'Hire Management',invoicing:'Invoicing',reports:'Financial Reports',maintenance:'Maintenance',navman:'Navman GPS',documents:'Documents',settings:'Settings'};
-const Header = ({page,theme,toggleTheme}) => {
+const Header = ({page,theme,toggleTheme,syncState,onManualSync,onOpenSetup}) => {
   const overdueCount = INVOICES.filter(i=>i.status==='overdue').length;
   return (
     <div className="header">
@@ -421,6 +525,7 @@ const Header = ({page,theme,toggleTheme}) => {
         <div className="header-sub">{new Date().toLocaleDateString('en-NZ',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</div>
       </div>
       <div className="header-actions">
+        {syncState&&<SyncStatusBar syncState={syncState} onManualSync={onManualSync} onOpenSetup={onOpenSetup}/>}
         <div className="icon-btn" onClick={toggleTheme} title="Toggle theme"><Icon name={theme==='dark'?'sun':'moon'} size={17}/></div>
         <div className="icon-btn" style={{position:'relative'}} title="Notifications">
           <Icon name="bell" size={17}/>
@@ -1595,7 +1700,7 @@ const NavmanPage = () => {
 };
 
 /* ─── SETTINGS PAGE ───────────────────────────────── */
-const SettingsPage = () => {
+const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync}) => {
   const [tab,setTab]=useState('users');
   const users=[
     {name:'Sukhdeep Singh',email:'raj.sukha036@gmail.com',role:'Director / Admin',status:'active',mfa:true},
@@ -1644,7 +1749,61 @@ const SettingsPage = () => {
       )}
 
       {tab==='integrations'&&(
-        <div className="grid" style={{gap:16}}>
+        <div style={{display:'flex',flexDirection:'column',gap:16}}>
+          {/* Google Sheets Live Sync Panel */}
+          <div className="card" style={{borderLeft:`3px solid ${sheetsConfig?.accessToken?'#34A853':'var(--border2)'}`}}>
+            <div style={{display:'flex',alignItems:'center',gap:16}}>
+              <div style={{width:48,height:48,borderRadius:12,background:sheetsConfig?.accessToken?'rgba(52,168,83,0.15)':'var(--bg3)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <Icon name="sheets" size={26} color={sheetsConfig?.accessToken?'#34A853':'var(--text3)'}/>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:14,marginBottom:2,display:'flex',alignItems:'center',gap:8}}>
+                  Google Sheets Live Sync
+                  {sheetsConfig?.accessToken&&<span className="badge badge-green">Connected</span>}
+                </div>
+                <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}>Auto-syncs fleet, customers, hires, invoices, maintenance &amp; P&L every 5 minutes</div>
+                <div style={{fontSize:11,color:'var(--text3)'}}>
+                  {syncState?.lastSync?`Last sync: ${syncState.lastSync.toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit',second:'2-digit'})} — ${syncState.lastSync.toLocaleDateString('en-NZ')}`:'Not yet synced'}
+                  {sheetsConfig?.spreadsheetId&&<span style={{marginLeft:12}}>Spreadsheet: <code style={{fontSize:10,background:'var(--bg4)',padding:'1px 5px',borderRadius:3}}>{sheetsConfig.spreadsheetId.slice(0,20)}…</code></span>}
+                </div>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-end'}}>
+                {sheetsConfig?.accessToken ? (
+                  <>
+                    <button className="btn btn-primary btn-sm" onClick={onManualSync} disabled={syncState?.syncing}>
+                      <Icon name="sync" size={13}/> {syncState?.syncing?'Syncing…':'Sync Now'}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={onSheetsSetup}>Reconfigure</button>
+                  </>
+                ) : (
+                  <button className="btn btn-primary btn-sm" onClick={onSheetsSetup} style={{background:'#34A853'}}>
+                    <Icon name="sheets" size={13}/> Connect
+                  </button>
+                )}
+              </div>
+            </div>
+            {syncState?.syncing&&(
+              <div style={{marginTop:14,padding:'10px 12px',background:'rgba(52,168,83,0.06)',borderRadius:8,border:'1px solid rgba(52,168,83,0.15)'}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+                  <span style={{fontSize:12,color:'#34A853',fontWeight:600}}>{syncState.syncMsg||'Syncing…'}</span>
+                  <span style={{fontSize:12,color:'var(--text3)'}}>{syncState.syncPct}%</span>
+                </div>
+                <div className="progress"><div className="progress-bar" style={{width:`${syncState.syncPct}%`,background:'#34A853'}}/></div>
+              </div>
+            )}
+            {sheetsConfig?.accessToken&&!syncState?.syncing&&(
+              <div style={{marginTop:14,display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:8}}>
+                {['Fleet & Trailers','Customers','Hire Management','Invoices','Maintenance','P&L Detail'].map(t=>(
+                  <div key={t} style={{padding:'8px 10px',background:'var(--bg3)',borderRadius:7,textAlign:'center',border:'1px solid rgba(52,168,83,0.2)'}}>
+                    <div style={{fontSize:9,color:'#34A853',fontWeight:700,textTransform:'uppercase',letterSpacing:.3,marginBottom:2}}>✓</div>
+                    <div style={{fontSize:10,color:'var(--text2)',lineHeight:1.3}}>{t}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {syncState?.error&&<div className="alert alert-red" style={{marginTop:12}}><Icon name="warning" size={14}/><span>{syncState.error}</span></div>}
+          </div>
+          {/* Other integrations */}
           {integrations.map(i=>(
             <div key={i.name} className="card" style={{display:'flex',alignItems:'center',gap:16,borderLeft:`3px solid ${i.status==='connected'?'var(--green)':'var(--border2)'}`}}>
               <div style={{width:48,height:48,borderRadius:12,background:i.status==='connected'?'rgba(39,174,96,.15)':'var(--bg3)',display:'flex',alignItems:'center',justifyContent:'center'}}>
@@ -1707,14 +1866,212 @@ const SettingsPage = () => {
   );
 };
 
+/* ─── GOOGLE SHEETS SETUP MODAL ───────────────────── */
+const SheetsSetupModal = ({open, onClose, onSave, initialConfig}) => {
+  const [clientId, setClientId] = useState(initialConfig?.clientId||'');
+  const [spreadsheetId, setSpreadsheetId] = useState(initialConfig?.spreadsheetId||'');
+  const [step, setStep] = useState(1);
+  const [status, setStatus] = useState(null); // {ok, msg}
+  const [authing, setAuthing] = useState(false);
+
+  const handleAuth = () => {
+    if (!clientId || !spreadsheetId) { setStatus({ok:false,msg:'Please fill in both fields first.'}); return; }
+    if (!window.google?.accounts?.oauth2) {
+      setStatus({ok:false,msg:'Google Identity Services not loaded yet. Wait a moment and try again.'}); return;
+    }
+    setAuthing(true);
+    setStatus(null);
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: 'https://www.googleapis.com/auth/spreadsheets',
+      callback: (resp) => {
+        setAuthing(false);
+        if (resp.error) {
+          setStatus({ok:false, msg:`Auth error: ${resp.error} — ${resp.error_description||''}`});
+          return;
+        }
+        onSave({
+          clientId,
+          spreadsheetId,
+          accessToken: resp.access_token,
+          tokenExpiry: Date.now() + (resp.expires_in||3600)*1000
+        });
+        onClose();
+      },
+      error_callback: (err) => {
+        setAuthing(false);
+        setStatus({ok:false, msg: err.type==='popup_closed' ? 'Popup was closed — please try again.' : `Error: ${err.type}`});
+      }
+    });
+    client.requestAccessToken({prompt:'consent'});
+  };
+
+  if (!open) return null;
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:600}}>
+        <div className="modal-header">
+          <span className="modal-title" style={{display:'flex',alignItems:'center',gap:10}}>
+            <Icon name="sheets" size={20} color="#34A853"/> Google Sheets Live Sync
+          </span>
+          <button className="icon-btn" onClick={onClose}><Icon name="close" size={18}/></button>
+        </div>
+        <div className="modal-body">
+          <div style={{background:'rgba(52,168,83,0.08)',border:'1px solid rgba(52,168,83,0.25)',borderRadius:10,padding:'14px 16px',marginBottom:20,fontSize:13,lineHeight:1.7}}>
+            <strong style={{color:'#34A853'}}>What gets synced (6 tabs):</strong><br/>
+            Fleet &amp; Trailers &nbsp;·&nbsp; Customers &nbsp;·&nbsp; Hire Management &nbsp;·&nbsp; Invoices &nbsp;·&nbsp; Maintenance &nbsp;·&nbsp; P&amp;L Detail<br/>
+            <span style={{color:'var(--text3)'}}>Auto-syncs every 5 minutes. Manual trigger available anytime.</span>
+          </div>
+
+          <div style={{display:'flex',gap:0,borderRadius:8,overflow:'hidden',border:'1px solid var(--border2)',marginBottom:20}}>
+            {['1. Credentials','2. Authorise'].map((s,i)=>(
+              <div key={s} style={{flex:1,padding:'10px',textAlign:'center',background:step===i+1?'var(--red)':'var(--bg3)',color:step===i+1?'#fff':'var(--text2)',fontSize:13,fontWeight:600,cursor:'pointer'}} onClick={()=>setStep(i+1)}>{s}</div>
+            ))}
+          </div>
+
+          {step===1&&(
+            <div>
+              <div className="form-group">
+                <label>Google OAuth 2.0 Client ID</label>
+                <input value={clientId} onChange={e=>setClientId(e.target.value)} placeholder="123456789-abc...apps.googleusercontent.com"/>
+                <div style={{fontSize:11,color:'var(--text3)',marginTop:5}}>
+                  <strong>console.cloud.google.com</strong> → APIs &amp; Services → Enable <em>Google Sheets API</em> → Credentials → Create OAuth 2.0 Client ID (Web Application type).
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Google Spreadsheet ID</label>
+                <input value={spreadsheetId} onChange={e=>setSpreadsheetId(e.target.value)} placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"/>
+                <div style={{fontSize:11,color:'var(--text3)',marginTop:5}}>
+                  From your Google Sheet URL: docs.google.com/spreadsheets/d/<strong style={{color:'var(--text)'}}>THIS_PART</strong>/edit
+                </div>
+              </div>
+              <div style={{padding:'12px 14px',background:'var(--bg3)',borderRadius:8,marginBottom:16,fontSize:12,lineHeight:1.8,borderLeft:'3px solid var(--orange)'}}>
+                <strong>Required setup in Google Cloud Console:</strong><br/>
+                1. OAuth consent screen → App name: <em>SS Rentals</em> → User type: <em>External</em><br/>
+                2. OAuth Client → Authorised JavaScript Origins → add: <code style={{background:'var(--bg4)',padding:'1px 6px',borderRadius:3}}>{window.location.origin}</code><br/>
+                3. Make sure your Google account has <strong>edit access</strong> to the spreadsheet
+              </div>
+              <button className="btn btn-primary" onClick={()=>setStep(2)} disabled={!clientId||!spreadsheetId}>Continue →</button>
+            </div>
+          )}
+
+          {step===2&&(
+            <div>
+              <div className="alert alert-green" style={{marginBottom:16}}>
+                <Icon name="info" size={15}/>
+                <div>Uses Google Identity Services (GIS) — Google's current secure auth method. A consent popup will appear. Your token stays in your browser only.</div>
+              </div>
+              <div style={{padding:'12px 14px',background:'var(--bg3)',borderRadius:8,marginBottom:16,fontSize:12,lineHeight:1.8}}>
+                <strong>Client ID:</strong> <code style={{fontSize:11,wordBreak:'break-all'}}>{clientId}</code><br/>
+                <strong>Spreadsheet:</strong> <code style={{fontSize:11}}>{spreadsheetId}</code>
+              </div>
+              {status&&(
+                <div className={`alert alert-${status.ok?'green':'red'}`} style={{marginBottom:14}}>
+                  <Icon name={status.ok?'check':'warning'} size={15}/>
+                  <span>{status.msg}</span>
+                </div>
+              )}
+              <button className="btn btn-primary" onClick={handleAuth} disabled={authing} style={{background:'#34A853'}}>
+                {authing
+                  ? <><div style={{width:14,height:14,border:'2px solid #fff',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}/> Waiting for Google…</>
+                  : <><Icon name="sheets" size={15}/> Sign in with Google &amp; Authorise</>
+                }
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── SYNC STATUS BAR (header widget) ─────────────── */
+const SyncStatusBar = ({syncState, onManualSync, onOpenSetup}) => {
+  const [countdown, setCountdown] = useState(300);
+  useEffect(()=>{
+    if (!syncState.configured) return;
+    const iv = setInterval(()=>{
+      const elapsed = syncState.lastSync ? Math.floor((Date.now()-syncState.lastSync.getTime())/1000) : 300;
+      setCountdown(Math.max(0,300-elapsed));
+    },1000);
+    return ()=>clearInterval(iv);
+  },[syncState.lastSync, syncState.configured]);
+
+  const mm = String(Math.floor(countdown/60)).padStart(2,'0');
+  const ss2 = String(countdown%60).padStart(2,'0');
+  const pct = (countdown/300)*100;
+
+  if (!syncState.configured) {
+    return (
+      <button className="btn btn-ghost btn-sm" onClick={onOpenSetup} style={{gap:6,borderColor:'rgba(52,168,83,0.4)',color:'#34A853'}}>
+        <Icon name="sheets" size={14} color="#34A853"/> Connect Sheets
+      </button>
+    );
+  }
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:8}}>
+      {syncState.syncing ? (
+        <div style={{display:'flex',alignItems:'center',gap:7,padding:'5px 12px',background:'rgba(52,168,83,0.1)',border:'1px solid rgba(52,168,83,0.3)',borderRadius:7}}>
+          <div style={{width:14,height:14,border:'2px solid #34A853',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}/>
+          <span style={{fontSize:12,fontWeight:600,color:'#34A853'}}>{syncState.syncMsg||'Syncing…'}</span>
+          {syncState.syncPct>0&&<span style={{fontSize:11,color:'var(--text3)'}}>{syncState.syncPct}%</span>}
+        </div>
+      ) : (
+        <div style={{display:'flex',alignItems:'center',gap:6,padding:'5px 10px',background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:7,cursor:'pointer'}} onClick={onManualSync} title="Click to sync now">
+          <div style={{width:7,height:7,borderRadius:'50%',background:'#34A853',boxShadow:'0 0 0 3px rgba(52,168,83,0.2)'}}/>
+          <span style={{fontSize:12,fontWeight:600,color:'var(--text2)'}}>Sheets</span>
+          {syncState.lastSync&&<span style={{fontSize:11,color:'var(--text3)'}}>synced {syncState.lastSync.toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'})}</span>}
+          <span style={{fontSize:11,color:'var(--text3)',fontFamily:'monospace'}}>{mm}:{ss2}</span>
+          <div style={{width:28,height:3,background:'var(--border2)',borderRadius:2,overflow:'hidden'}}>
+            <div style={{height:'100%',width:`${100-pct}%`,background:'#34A853',borderRadius:2,transition:'width 1s linear'}}/>
+          </div>
+        </div>
+      )}
+      {syncState.error&&<span style={{fontSize:11,color:'var(--red-light)',maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={syncState.error}>⚠ {syncState.error}</span>}
+    </div>
+  );
+};
+
 /* ─── MAIN APP ────────────────────────────────────── */
 const App = () => {
   const [theme,setTheme]=useState('dark');
   const [page,setPage]=useState('dashboard');
+  const [sheetsSetupOpen, setSheetsSetupOpen] = useState(false);
+  const [sheetsConfig, setSheetsConfig] = useState(()=>loadSheetsConfig());
+  const [syncState, setSyncState] = useState({configured:false,syncing:false,lastSync:null,error:null,syncMsg:'',syncPct:0});
+  const autoSyncTimer = useRef(null);
+  const syncInProgress = useRef(false);
+
+  useEffect(()=>{document.body.className=theme==='light'?'light':'';},[theme]);
 
   useEffect(()=>{
-    document.body.className=theme==='light'?'light':'';
-  },[theme]);
+    setSyncState(s=>({...s,configured:!!(sheetsConfig?.accessToken&&sheetsConfig?.spreadsheetId)}));
+  },[sheetsConfig]);
+
+  const doSync = useCallback(async (cfg) => {
+    if (syncInProgress.current) return;
+    const config = cfg || sheetsConfig;
+    if (!config?.accessToken || !config?.spreadsheetId) return;
+    syncInProgress.current = true;
+    setSyncState(s=>({...s,syncing:true,error:null,syncMsg:'Starting…',syncPct:0}));
+    await runFullSync(
+      config,
+      (msg,pct)=>setSyncState(s=>({...s,syncMsg:msg,syncPct:pct})),
+      (ts)=>{setSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',syncPct:0}));syncInProgress.current=false;},
+      (err)=>{setSyncState(s=>({...s,syncing:false,error:err,syncMsg:'',syncPct:0}));syncInProgress.current=false;}
+    );
+  },[sheetsConfig]);
+
+  // 5-minute auto-sync trigger
+  useEffect(()=>{
+    if (!sheetsConfig?.accessToken) return;
+    if (autoSyncTimer.current) clearInterval(autoSyncTimer.current);
+    doSync(sheetsConfig);
+    autoSyncTimer.current = setInterval(()=>doSync(), 5*60*1000);
+    return ()=>clearInterval(autoSyncTimer.current);
+  },[sheetsConfig]);
+
+  const handleSaveConfig = (cfg) => { saveSheetsConfig(cfg); setSheetsConfig(cfg); };
 
   const pages={
     dashboard:<Dashboard theme={theme} setPage={setPage}/>,
@@ -1726,18 +2083,19 @@ const App = () => {
     reports:<ReportsPage theme={theme}/>,
     documents:<DocumentsPage/>,
     navman:<NavmanPage/>,
-    settings:<SettingsPage/>,
+    settings:<SettingsPage sheetsConfig={sheetsConfig} syncState={syncState} onSheetsSetup={()=>setSheetsSetupOpen(true)} onManualSync={()=>doSync()}/>,
   };
 
   return (
     <div className="app">
       <Sidebar page={page} setPage={setPage}/>
       <div className="main">
-        <Header page={page} theme={theme} toggleTheme={()=>setTheme(t=>t==='dark'?'light':'dark')}/>
-        <div className="content">
-          {pages[page]||<Dashboard theme={theme} setPage={setPage}/>}
-        </div>
+        <Header page={page} theme={theme} toggleTheme={()=>setTheme(t=>t==='dark'?'light':'dark')}
+          syncState={syncState} onManualSync={()=>doSync()} onOpenSetup={()=>setSheetsSetupOpen(true)}/>
+        <div className="content">{pages[page]||<Dashboard theme={theme} setPage={setPage}/>}</div>
       </div>
+      <SheetsSetupModal open={sheetsSetupOpen} onClose={()=>setSheetsSetupOpen(false)} onSave={handleSaveConfig} initialConfig={sheetsConfig}/>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 };
