@@ -466,7 +466,7 @@ const parseHirePeriod = (str) => {
 };
 
 // Pull hire data from Sheet1 (the original customer sheet with Hire period column)
-const pullHiresFromSheet1 = (rows) => {
+const pullHiresFromSheet1 = (rows, extLog) => {
   if (!rows || rows.length < 2) return 0;
   // Find header row (row with "Company name" or "Hire period")
   let headerIdx = 0;
@@ -476,11 +476,14 @@ const pullHiresFromSheet1 = (rows) => {
     }
   }
   const headers = rows[headerIdx].map(h => (h||'').toLowerCase().trim());
-  const compIdx = headers.findIndex(h => h.includes('company'));
+  const compIdx = headers.findIndex(h => h.includes('company') || h.includes('company name'));
   const periodIdx = headers.findIndex(h => h.includes('hire period'));
-  const regoIdx = headers.findIndex(h => h.includes('rego'));
-  const rateIdx = headers.findIndex(h => h.includes('weekly') || h.includes('charge'));
+  const regoIdx = headers.findIndex(h => h.includes("rego"));
+  const rateIdx = headers.findIndex(h => h.includes('weekly charges') || h.includes('weekly'));
   if (periodIdx === -1) return 0;
+  // Debug: log what we found
+  console.log('Headers:', headers);
+  console.log('compIdx:', compIdx, 'periodIdx:', periodIdx, 'regoIdx:', regoIdx, 'rateIdx:', rateIdx);
 
   let updated = 0;
   rows.slice(headerIdx + 1).forEach(row => {
@@ -562,8 +565,10 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
         debugLog.push('Sheet1 row2: ' + JSON.stringify(sheet1Rows[1]));
         debugLog.push('Sheet1 row3: ' + JSON.stringify(sheet1Rows[2]));
       }
-      if (sheet1Rows) pullUpdates += pullHiresFromSheet1(sheet1Rows);
+      const sheet1Log = [];
+      if (sheet1Rows) pullUpdates += pullHiresFromSheet1(sheet1Rows, sheet1Log);
       debugLog.push('After Sheet1 pull: ' + pullUpdates + ' updates');
+      if (sheet1Log.length) debugLog.push(...sheet1Log.slice(0,10));
       // Read Hire Management tab
       const hireRows = await readSheetTab(accessToken, spreadsheetId, 'Hire Management');
       if (hireRows) pullUpdates += pullHiresFromSheet(hireRows);
