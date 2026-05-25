@@ -436,8 +436,10 @@ const startXeroAuth = async () => {
   const verifier = generateCodeVerifier();
   const challenge = await generateCodeChallenge(verifier);
   sessionStorage.setItem('xero_verifier', verifier);
+  localStorage.setItem('xero_verifier_backup', verifier);
   const state = Math.random().toString(36).slice(2);
   sessionStorage.setItem('xero_state', state);
+  localStorage.setItem('xero_state_backup', state);
   const url = 'https://login.xero.com/identity/connect/authorize'
     + '?response_type=code'
     + '&client_id=' + encodeURIComponent(XERO_CLIENT_ID)
@@ -451,8 +453,9 @@ const startXeroAuth = async () => {
 
 // Token exchange via proxy to avoid CORS
 const exchangeXeroCode = async (code) => {
-  const verifier = sessionStorage.getItem('xero_verifier');
-  if (!verifier) throw new Error('No code verifier — please reconnect Xero');
+  const verifier = sessionStorage.getItem('xero_verifier') || localStorage.getItem('xero_verifier_backup');
+  if (!verifier) throw new Error('No code verifier found — please try connecting again');
+  localStorage.removeItem('xero_verifier_backup');
   // Try direct first (Xero may allow it), fall back to proxy
   const body = new URLSearchParams({
     grant_type:'authorization_code', code,
@@ -497,25 +500,26 @@ const refreshXeroToken = async (refreshToken) => {
 };
 
 const getXeroTenantId = async (accessToken) => {
-  const res = await fetch('https://api.xero.com/connections', {
-    headers:{ Authorization:'Bearer '+accessToken, 'Content-Type':'application/json' }
+  // Route through proxy to avoid CORS
+  const res = await fetch(XERO_PROXY + '/xero-api/connections', {
+    headers:{ Authorization:'Bearer '+accessToken }
   });
   if (!res.ok) {
     const txt = await res.text().catch(()=>'');
-    throw new Error('Cannot reach Xero API (' + res.status + '). ' + (txt||'Check your connection.'));
+    throw new Error('Cannot reach Xero API (' + res.status + '). ' + (txt.slice(0,200)||'Check your connection.'));
   }
   const tenants = await res.json();
-  if (!tenants.length) throw new Error('No Xero organisations found — make sure you approved access during login');
+  if (!Array.isArray(tenants) || !tenants.length) throw new Error('No Xero organisations found — make sure you approved access during login');
   return tenants[0].tenantId;
 };
 
 const fetchXeroInvoices = async (accessToken, tenantId) => {
-  const res = await fetch('https://api.xero.com/api.xro/2.0/Invoices?Type=ACCREC&Statuses=DRAFT,SUBMITTED,AUTHORISED,PAID&page=1', {
-    headers:{ Authorization:'Bearer '+accessToken, 'Xero-tenant-id':tenantId, Accept:'application/json' }
+  const res = await fetch(XERO_PROXY + '/xero-api/api.xro/2.0/Invoices?Type=ACCREC&Statuses=DRAFT,SUBMITTED,AUTHORISED,PAID&page=1', {
+    headers:{ Authorization:'Bearer '+accessToken, 'Xero-tenant-id':tenantId }
   });
   if (!res.ok) {
     const txt = await res.text().catch(()=>'');
-    throw new Error('Invoice fetch failed (' + res.status + '): ' + txt.slice(0,120));
+    throw new Error('Invoice fetch failed (' + res.status + '): ' + txt.slice(0,200));
   }
   const data = await res.json();
   return data.Invoices || [];
@@ -2465,14 +2469,20 @@ const App = () => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const state = params.get('state');
-    const savedState = sessionStorage.getItem('xero_state');
+    const savedState = sessionStorage.getItem('xero_state') || localStorage.getItem('xero_state_backup');
+    localStorage.removeItem('xero_state_backup');
     if (code && state && state === savedState) {
       window.history.replaceState({}, '', window.location.pathname);
       exchangeXeroCode(code).then(tokens => {
         const cfg = { ...tokens, tenantId: null };
         saveXeroConfig(cfg);
         setXeroConfig(cfg);
-      }).catch(e => setXeroSyncState(s=>({...s, error:'Auth failed: '+e.message})));
+        setXeroSyncState(s=>({...s, error:null, configured:true}));
+      }).catch(e => {
+        const msg = 'Token exchange failed: ' + e.message;
+        setXeroSyncState(s=>({...s, error:msg}));
+        alert('Xero auth error: ' + e.message + '\n\nPlease go to Settings → Integrations and try Disconnect then Connect Xero again.');
+      });
     }
   }, []);
 
@@ -2481,14 +2491,24 @@ const App = () => {
   },[xeroConfig]);
 
   const doXeroSync = useCallback(async () => {
-    if (xeroSyncInProgress.current || !xeroConfig?.accessToken) return;
+    if (xeroSyncInProgress.current) return;
+    if (!xeroConfig?.accessToken) { alert('Xero not connected — please connect first.'); return; }
     xeroSyncInProgress.current = true;
     setXeroSyncState(s=>({...s,syncing:true,error:null,syncMsg:'Starting…'}));
     await syncXeroToApp(
       xeroConfig,
       (msg,pct)=>setXeroSyncState(s=>({...s,syncMsg:msg})),
-      (ts,updates,total)=>{setXeroSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',updates}));xeroSyncInProgress.current=false;},
-      (err)=>{setXeroSyncState(s=>({...s,syncing:false,error:err,syncMsg:''}));xeroSyncInProgress.current=false;}
+      (ts,updates,total)=>{
+        setXeroSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',updates}));
+        xeroSyncInProgress.current=false;
+        if(updates.length>0) alert('Xero sync complete! Updated '+updates.length+' invoice(s): '+updates.map(u=>u.id+' → '+u.newStatus).join(', '));
+        else alert('Xero sync complete — '+total+' invoices checked, no status changes found.\n\nNote: invoices must have matching numbers in both Xero and this app (e.g. INV-0268).');
+      },
+      (err)=>{
+        setXeroSyncState(s=>({...s,syncing:false,error:err,syncMsg:''}));
+        xeroSyncInProgress.current=false;
+        alert('Xero sync failed: '+err);
+      }
     );
   },[xeroConfig]);
 
@@ -2531,7 +2551,7 @@ const App = () => {
     reports:<ReportsPage theme={theme}/>,
     documents:<DocumentsPage/>,
     navman:<NavmanPage/>,
-    settings:<SettingsPage sheetsConfig={sheetsConfig} syncState={syncState} onSheetsSetup={()=>setSheetsSetupOpen(true)} onManualSync={()=>doSync()} xeroConfig={xeroConfig} xeroSyncState={xeroSyncState} onXeroConnect={startXeroAuth} onXeroSync={doXeroSync} onXeroDisconnect={()=>{clearXeroConfig();setXeroConfig(null);}} onXeroDiag={async()=>{ try { const t=xeroConfig?.accessToken; if(!t){alert('Not connected');return;} const r=await fetch('https://api.xero.com/connections',{headers:{Authorization:'Bearer '+t}}); const d=await r.json(); alert('Connection OK! Orgs: '+JSON.stringify(d.map(x=>x.tenantName))); } catch(e){alert('Error: '+e.message);}}}/>,
+    settings:<SettingsPage sheetsConfig={sheetsConfig} syncState={syncState} onSheetsSetup={()=>setSheetsSetupOpen(true)} onManualSync={()=>doSync()} xeroConfig={xeroConfig} xeroSyncState={xeroSyncState} onXeroConnect={startXeroAuth} onXeroSync={doXeroSync} onXeroDisconnect={()=>{clearXeroConfig();setXeroConfig(null);}} onXeroDiag={async()=>{ try { const t=xeroConfig?.accessToken; if(!t){alert('Not connected');return;} const r=await fetch('https://xero-proxy.ssrentalsnz.workers.dev/xero-api/connections',{headers:{Authorization:'Bearer '+t}}); const d=await r.json(); alert('Connection OK! Orgs: '+JSON.stringify(d.map(x=>x.tenantName))); } catch(e){alert('Error: '+e.message);}}}/>,
   };
 
   return (
