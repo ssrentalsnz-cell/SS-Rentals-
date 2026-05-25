@@ -1256,12 +1256,12 @@ const FleetPage = ({theme}) => {
                   <td style={{fontWeight:700}}>{v.rego}</td>
                   <td>{v.make} {v.model}</td>
                   <td>{v.year}</td>
-                  <td><span className={statusBadge(v.status)}>{statusLabel(v.status)}</span></td>
+                  <td>{(()=>{const h=getEffectiveHires().find(h=>(h.truck===v.id||h.trailer===v.id)&&h.status==='active');const st=h?'on_hire':v.status;return <span className={statusBadge(st)}>{statusLabel(st)}</span>;})()}</td>
                   <td>{v.odometer?(v.odometer.toLocaleString()+' km'):'—'}</td>
                   <td><span style={{color:cof==='red'?'var(--red-light)':cof==='orange'?'var(--orange)':'var(--green)',fontWeight:600,fontSize:12}}>{fmt(v.cof_expiry)}</span></td>
                   <td><span style={{color:reg==='red'?'var(--red-light)':reg==='orange'?'var(--orange)':'var(--green)',fontWeight:600,fontSize:12}}>{fmt(v.rego_expiry)}</span></td>
-                  <td>{(()=>{const h=getEffectiveHires().find(h=>h.truck===v.id&&h.status==='active');return h?custName(h.customer):v.hirer?custName(v.hirer):'—';})()}</td>
-                  <td>{(()=>{const h=getEffectiveHires().find(h=>h.truck===v.id&&h.status==='active');return h?fmtCur(h.weekly_truck)+'/wk':v.weekly_rate?fmtCur(v.weekly_rate)+'/wk':'—';})()}</td>
+                  <td>{(()=>{const h=getEffectiveHires().find(h=>(h.truck===v.id||h.trailer===v.id)&&h.status==='active');return h?custName(h.customer):v.hirer?custName(v.hirer):'—';})()}</td>
+                  <td>{(()=>{const h=getEffectiveHires().find(h=>(h.truck===v.id||h.trailer===v.id)&&h.status==='active');return h&&h.weekly_truck>0?fmtCur(h.weekly_truck)+'/wk':v.weekly_rate?fmtCur(v.weekly_rate)+'/wk':'—';})()}</td>
                   <td><button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setSel(v)}}><Icon name="eye" size={13}/></button></td>
                 </tr>
               );
