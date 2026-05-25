@@ -501,10 +501,9 @@ const pullHiresFromSheet1 = (rows) => {
     );
     if (!cust) return;
 
-    // Find matching hire for this customer
-    const hire = HIRES.find(h => h.customer === cust.id &&
-      (h.status === 'active' || Math.abs(new Date(h.start) - new Date(period.start)) < 7*86400000)
-    );
+    // Find best matching hire for this customer — match by start date proximity
+    const hire = HIRES.filter(h => h.customer === cust.id)
+      .sort((a,b) => Math.abs(new Date(a.start)-new Date(period.start)) - Math.abs(new Date(b.start)-new Date(period.start)))[0];
     if (!hire) return;
 
     let changed = false;
@@ -519,21 +518,25 @@ const pullHiresFromSheet1 = (rows) => {
       }
     }
 
-    // Update truck status based on hire end date
+    // Update hire status and truck status based on end date
     if (changed) {
       const truck = TRUCKS.find(t => t.id === hire.truck);
-      if (truck) {
-        const endDate = new Date(period.end);
-        const today = new Date();
-        if (endDate > today && hire.status === 'active') {
+      const endDate = new Date(period.end);
+      const today = new Date();
+      if (endDate >= today) {
+        // Extended — reactivate if was completed
+        hire.status = 'active';
+        if (truck) {
           truck.status = 'on_hire';
+          truck.hirer = cust.id;
           truck.hire_end = period.end;
-        } else if (endDate <= today) {
-          hire.status = 'completed';
-          if (truck && truck.hirer === cust.id) {
-            truck.status = 'available';
-            truck.hirer = null;
-          }
+        }
+      } else {
+        // Past end date — mark completed
+        hire.status = 'completed';
+        if (truck && truck.hirer === cust.id) {
+          truck.status = 'available';
+          truck.hirer = null;
         }
       }
       updated++;
