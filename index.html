@@ -2573,18 +2573,115 @@ const logMessage = (entry) => {
   return log;
 };
 
-// Simulate SMS send via browser (opens SMS app on mobile)
-const sendSMS = (phone, message) => {
-  const url = `sms:${phone.replace(/\s/g,'')}?body=${encodeURIComponent(message)}`;
-  window.open(url, '_blank');
-  return {status:'opened', channel:'sms'};
+const SMS_PROXY = 'https://xero-proxy.ssrentalsnz.workers.dev';
+
+// Send SMS via ClickSend through Cloudflare Worker
+const sendSMSReal = async (phone, message) => {
+  try {
+    const res = await fetch(SMS_PROXY + '/sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: phone, message, from_name: 'SS Rentals' })
+    });
+    const data = await res.json();
+    const msgStatus = data?.data?.messages?.[0]?.status;
+    if (msgStatus === 'SUCCESS' || res.ok) return { status: 'sent', messageId: data?.data?.messages?.[0]?.message_id };
+    return { status: 'failed', error: data?.data?.messages?.[0]?.status || 'Unknown error' };
+  } catch(e) { return { status: 'failed', error: e.message }; }
 };
 
-// Simulate email send via mailto
+// Send bulk SMS via ClickSend
+const sendBulkSMSReal = async (messages) => {
+  try {
+    const res = await fetch(SMS_PROXY + '/sms/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages })
+    });
+    const data = await res.json();
+    return data?.data?.messages || [];
+  } catch(e) { return []; }
+};
+
+// Fetch SMS delivery history from ClickSend
+const fetchSMSHistory = async () => {
+  try {
+    const res = await fetch(SMS_PROXY + '/sms/history');
+    const data = await res.json();
+    return data?.data?.data || [];
+  } catch(e) { return []; }
+};
+
+// Email via mailto (no email API yet)
 const sendEmail = (email, subject, body) => {
-  const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const url = 'mailto:'+email+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
   window.open(url, '_blank');
   return {status:'opened', channel:'email'};
+};
+
+/* ─── DELIVERY STATUS TAB ────────────────────────── */
+const DeliveryStatusTab = () => {
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [lastFetch, setLastFetch] = useState(null);
+
+  const fetchHistory = async () => {
+    setLoading(true);
+    const data = await fetchSMSHistory();
+    setHistory(data);
+    setLastFetch(new Date());
+    setLoading(false);
+  };
+
+  useEffect(()=>{ fetchHistory(); }, []);
+
+  const statusColor = (s) => ({
+    'Sent':       'var(--blue)',
+    'Delivered':  'var(--green)',
+    'Failed':     'var(--red-light)',
+    'Expired':    'var(--orange)',
+    'Undelivered':'var(--orange)',
+  }[s] || 'var(--text3)');
+
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:14}}>ClickSend Delivery Status</div>
+          {lastFetch&&<div style={{fontSize:12,color:'var(--text3)'}}>Last refreshed: {lastFetch.toLocaleTimeString('en-NZ')}</div>}
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={fetchHistory} disabled={loading}>
+          <Icon name="refresh" size={13}/> {loading?'Loading…':'Refresh'}
+        </button>
+      </div>
+      {loading&&<div style={{textAlign:'center',padding:40,color:'var(--text2)'}}>Loading delivery status from ClickSend…</div>}
+      {!loading&&history.length===0&&(
+        <div className="card" style={{textAlign:'center',padding:40}}>
+          <Icon name="sms" size={32} color="var(--text3)"/>
+          <div style={{fontSize:14,color:'var(--text2)',marginTop:12}}>No SMS history yet — send messages first</div>
+        </div>
+      )}
+      {!loading&&history.length>0&&(
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>To</th><th>Message</th><th>Status</th><th>Cost</th><th>Message ID</th></tr></thead>
+            <tbody>
+              {history.map((m,i)=>(
+                <tr key={m.message_id||i}>
+                  <td style={{fontSize:11,color:'var(--text3)',whiteSpace:'nowrap'}}>{m.date ? new Date(m.date*1000).toLocaleString('en-NZ',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—'}</td>
+                  <td style={{fontSize:12,fontWeight:600}}>{m.to||'—'}</td>
+                  <td style={{fontSize:12,color:'var(--text2)',maxWidth:250,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.body||'—'}</td>
+                  <td><span style={{fontSize:11,fontWeight:700,color:statusColor(m.status),background:'var(--bg3)',padding:'2px 8px',borderRadius:4}}>{m.status||'—'}</span></td>
+                  <td style={{fontSize:12,color:'var(--text3)'}}>{m.message_price?'$'+parseFloat(m.message_price).toFixed(4):'—'}</td>
+                  <td style={{fontSize:10,color:'var(--text3)',fontFamily:'monospace'}}>{(m.message_id||'').slice(0,12)}…</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 };
 
 /* ─── COMMUNICATIONS PAGE ─────────────────────────── */
@@ -2643,41 +2740,66 @@ const CommunicationsPage = () => {
   const handleSend = async () => {
     if (selectedCustomers.length===0) { alert('Select at least one customer.'); return; }
     setSending(true); setSendResult(null);
-    const results = [];
     const msg = useCustom ? customMsg : tpl;
 
-    for (const custId of selectedCustomers) {
+    // Build all messages first
+    const allMessages = selectedCustomers.map(custId => {
       const cust = CUSTOMERS.find(c=>c.id===custId);
-      if (!cust) continue;
+      if (!cust) return null;
       const vars = buildVars(cust);
-      const smsText = fillTemplate(msg.sms||'', vars);
-      const emailSubj = fillTemplate(msg.subject||'', vars);
-      const emailBody = fillTemplate(msg.email||'', vars);
-      let status = 'sent';
-
-      if (channel==='sms'||channel==='both') {
-        if (cust.phone) { sendSMS(cust.phone, smsText); }
-        else { status = 'no_phone'; }
-      }
-      if (channel==='email'||channel==='both') {
-        if (cust.email) { sendEmail(cust.email, emailSubj, emailBody); }
-        else if (status!=='no_phone') status = 'no_email';
-      }
-
-      const logEntry = {
-        customerId: custId, customerName: cust.company, channel,
-        templateId: useCustom?'custom':selectedTemplate,
-        templateName: useCustom?'Custom Message':tpl.name,
-        subject: emailSubj, preview: smsText.slice(0,80)+'…',
-        status, phone: cust.phone, email: cust.email,
+      return {
+        custId, cust,
+        smsText: fillTemplate(msg.sms||'', vars),
+        emailSubj: fillTemplate(msg.subject||'', vars),
+        emailBody: fillTemplate(msg.email||'', vars),
       };
-      results.push(logEntry);
-      logMessage(logEntry);
+    }).filter(Boolean);
+
+    const results = [];
+
+    // Send SMS via ClickSend API (bulk for efficiency)
+    if (channel==='sms'||channel==='both') {
+      const smsMessages = allMessages.filter(m=>m.cust.phone).map(m=>({ to: m.cust.phone, body: m.smsText }));
+      if (smsMessages.length > 0) {
+        setSendResult({sending:true, msg:'Sending '+smsMessages.length+' SMS via ClickSend…'});
+        const bulkResults = await sendBulkSMSReal(smsMessages);
+        allMessages.forEach((m,i) => {
+          const r = bulkResults[i];
+          const status = r?.status==='SUCCESS'?'sent':m.cust.phone?'failed':'no_phone';
+          results.push({
+            custId:m.custId, customerName:m.cust.company, channel:'sms',
+            templateId:useCustom?'custom':selectedTemplate,
+            templateName:useCustom?'Custom Message':tpl.name,
+            subject:m.emailSubj, preview:m.smsText.slice(0,80)+'…',
+            status, phone:m.cust.phone, messageId:r?.message_id,
+            deliveryStatus:r?.status,
+          });
+        });
+        allMessages.filter(m=>!m.cust.phone).forEach(m=>{
+          results.push({custId:m.custId,customerName:m.cust.company,channel:'sms',status:'no_phone',phone:'',preview:m.smsText.slice(0,60)+'…',templateName:useCustom?'Custom':tpl.name});
+        });
+      }
     }
 
-    const newLog = loadCommLog();
-    setCommLog(newLog);
-    setSendResult({sent:results.filter(r=>r.status==='sent').length, failed:results.filter(r=>r.status!=='sent').length, total:results.length});
+    // Send email via mailto
+    if (channel==='email'||channel==='both') {
+      for (const m of allMessages) {
+        if (m.cust.email) {
+          sendEmail(m.cust.email, m.emailSubj, m.emailBody);
+          if (!results.find(r=>r.custId===m.custId&&r.channel==='email')) {
+            results.push({custId:m.custId,customerName:m.cust.company,channel:'email',templateName:useCustom?'Custom':tpl.name,subject:m.emailSubj,preview:m.emailSubj,status:'opened',email:m.cust.email});
+          }
+        }
+      }
+    }
+
+    // Log all
+    results.forEach(r=>logMessage(r));
+    setCommLog(loadCommLog());
+    const sent = results.filter(r=>r.status==='sent'||r.status==='opened').length;
+    const failed = results.filter(r=>r.status==='failed').length;
+    const noContact = results.filter(r=>r.status==='no_phone'||r.status==='no_email').length;
+    setSendResult({sent, failed, noContact, total:results.length});
     setSending(false);
     setSelectedCustomers([]);
   };
@@ -2691,9 +2813,9 @@ const CommunicationsPage = () => {
   return (
     <div>
       <div className="tabs mb-4">
-        {['compose','log','templates','schedule'].map(t=>(
+        {['compose','log','delivery','templates','schedule'].map(t=>(
           <button key={t} className={`tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>
-            {({compose:'Compose & Send',log:'Message History',templates:'Templates',schedule:'Auto Reminders'})[t]}
+            {({compose:'Compose & Send',log:'Message History',delivery:'Delivery Status',templates:'Templates',schedule:'Auto Reminders'})[t]}
             {t==='log'&&commLog.length>0&&<span style={{marginLeft:5,background:'var(--red)',color:'#fff',fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:8}}>{commLog.length}</span>}
           </button>
         ))}
@@ -2817,17 +2939,27 @@ const CommunicationsPage = () => {
             </div>
 
             {/* Send button */}
-            {sendResult&&(
-              <div className={`alert alert-${sendResult.failed===0?'green':'red'}`}>
-                <Icon name={sendResult.failed===0?'check':'warning'} size={15}/>
-                <span>Sent to {sendResult.sent} customer{sendResult.sent!==1?'s':''}. {sendResult.failed>0?`${sendResult.failed} failed.`:''} Your SMS/email app opened for each message.</span>
+            {sendResult&&!sendResult.sending&&(
+              <div className={`alert alert-${sendResult.failed>0?'red':'green'}`}>
+                <Icon name={sendResult.failed>0?'warning':'check'} size={15}/>
+                <div>
+                  {sendResult.sent>0&&<div><strong>{sendResult.sent} message{sendResult.sent!==1?'s':''} sent</strong> via ClickSend SMS + email app</div>}
+                  {sendResult.failed>0&&<div style={{color:'var(--red-light)'}}>{sendResult.failed} failed — check customer phone numbers</div>}
+                  {sendResult.noContact>0&&<div style={{color:'var(--text3)',fontSize:11}}>{sendResult.noContact} skipped — no contact info</div>}
+                </div>
+              </div>
+            )}
+            {sendResult?.sending&&(
+              <div className="alert alert-green">
+                <div style={{width:14,height:14,border:'2px solid var(--green)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}/>
+                <span>{sendResult.msg}</span>
               </div>
             )}
             <button className="btn btn-primary" onClick={handleSend} disabled={sending||selectedCustomers.length===0} style={{fontSize:14,padding:'12px 20px'}}>
               {sending?'Sending…':<><Icon name="send" size={15}/> Send to {selectedCustomers.length||0} Customer{selectedCustomers.length!==1?'s':''}</>}
             </button>
             <div style={{fontSize:11,color:'var(--text3)',textAlign:'center',lineHeight:1.5}}>
-              Messages open in your SMS and email app for final review before sending. Nothing is sent automatically without your confirmation.
+              SMS sent directly via ClickSend from <strong>SS Rentals</strong> number. Email opens in your mail app. Check Delivery Status tab for real-time status.
             </div>
           </div>
         </div>
@@ -2866,6 +2998,13 @@ const CommunicationsPage = () => {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── DELIVERY STATUS TAB ── */}
+      {tab==='delivery'&&(
+        <div>
+          <DeliveryStatusTab/>
         </div>
       )}
 
