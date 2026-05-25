@@ -833,18 +833,32 @@ const Modal = ({open,onClose,title,children,footer,size=''}) => {
 };
 
 /* ─── SIDEBAR ─────────────────────────────────────── */
-const NAV = [
+const NAV_BASE = [
   {id:'dashboard',label:'Dashboard',icon:'dashboard',section:'main'},
-  {id:'fleet',label:'Fleet',icon:'fleet',section:'main',badge:2},
+  {id:'fleet',label:'Fleet',icon:'fleet',section:'main'},
   {id:'customers',label:'Customers',icon:'customers',section:'main'},
   {id:'hires',label:'Hire Management',icon:'hires',section:'main'},
-  {id:'invoicing',label:'Invoicing',icon:'invoice',section:'finance',badge:2},
+  {id:'invoicing',label:'Invoicing',icon:'invoice',section:'finance'},
   {id:'reports',label:'Financial Reports',icon:'reports',section:'finance'},
-  {id:'maintenance',label:'Maintenance',icon:'maintenance',section:'operations',badge:1},
+  {id:'maintenance',label:'Maintenance',icon:'maintenance',section:'operations'},
   {id:'navman',label:'Navman GPS',icon:'navman',section:'operations'},
   {id:'documents',label:'Documents',icon:'documents',section:'operations'},
   {id:'settings',label:'Settings',icon:'settings',section:'system'},
 ];
+const getNavBadges = () => {
+  const allV = [...TRUCKS,...TRAILERS];
+  const effectiveH = getEffectiveHires();
+  // Fleet: COF/rego expiring within 30 days
+  const fleetAlerts = allV.filter(v=>daysDiff(v.cof_expiry)<=30||daysDiff(v.rego_expiry)<=30).length;
+  // Invoicing: draft + overdue invoices
+  const invoiceAlerts = INVOICES.filter(i=>i.status==='draft'||i.status==='overdue').length;
+  // Maintenance: overdue or scheduled within 30 days
+  const maintAlerts = MAINTENANCE.filter(m=>m.status==='scheduled'&&daysDiff(m.date)<=30).length;
+  // Hires: active hires expiring within 7 days
+  const hireAlerts = effectiveH.filter(h=>h.status==='active'&&daysDiff(h.end)<=7&&daysDiff(h.end)>=0).length;
+  return { fleet:fleetAlerts||undefined, invoicing:invoiceAlerts||undefined, maintenance:maintAlerts||undefined, hires:hireAlerts||undefined };
+};
+const NAV = NAV_BASE;
 const Sidebar = ({page,setPage}) => {
   const sections = [...new Set(NAV.map(n=>n.section))];
   return (
@@ -865,7 +879,7 @@ const Sidebar = ({page,setPage}) => {
             <button key={n.id} className={`nav-item ${page===n.id?'active':''}`} onClick={()=>setPage(n.id)}>
               <Icon name={n.icon} size={17}/>
               <span>{n.label}</span>
-              {n.badge&&<span className="nav-badge">{n.badge}</span>}
+              {(()=>{const badges=getNavBadges();const b=badges[n.id];return b?<span className="nav-badge">{b}</span>:null;})()}
             </button>
           ))}
         </div>
