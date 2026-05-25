@@ -1118,6 +1118,11 @@ const FleetPage = ({theme}) => {
   const [tab,setTab]=useState('trucks');
   const [sel,setSel]=useState(null);
   const [search,setSearch]=useState('');
+  const effectiveHires = getEffectiveHires().filter(h=>h.status==='active');
+  const getVehicleStatus = (v) => {
+    const onHire = effectiveHires.some(h=>h.truck===v.id||h.trailer===v.id);
+    return onHire ? 'on_hire' : v.status==='on_hire' ? 'available' : v.status;
+  };
   const vehicles = tab==='trucks' ? TRUCKS : TRAILERS;
   const filtered = vehicles.filter(v=>
     v.rego.toLowerCase().includes(search.toLowerCase())||
@@ -1232,9 +1237,9 @@ const FleetPage = ({theme}) => {
       {/* Compliance summary */}
       <div className="grid grid-4 mb-4">
         {[
-          {label:'On Hire',count:vehicles.filter(v=>v.status==='on_hire').length,color:'var(--blue)'},
-          {label:'Available',count:vehicles.filter(v=>v.status==='available').length,color:'var(--green)'},
-          {label:'Maintenance',count:vehicles.filter(v=>v.status==='maintenance').length,color:'var(--orange)'},
+          {label:'On Hire',count:vehicles.filter(v=>getVehicleStatus(v)==='on_hire').length,color:'var(--blue)'},
+          {label:'Available',count:vehicles.filter(v=>getVehicleStatus(v)==='available').length,color:'var(--green)'},
+          {label:'Maintenance',count:vehicles.filter(v=>getVehicleStatus(v)==='maintenance').length,color:'var(--orange)'},
           {label:'COF Alerts',count:vehicles.filter(v=>complianceStatus(v.cof_expiry)!=='green').length,color:'var(--red)'},
         ].map(s=>(
           <div key={s.label} className="card card-sm flex items-center gap-3">
@@ -1256,7 +1261,7 @@ const FleetPage = ({theme}) => {
                   <td style={{fontWeight:700}}>{v.rego}</td>
                   <td>{v.make} {v.model}</td>
                   <td>{v.year}</td>
-                  <td>{(()=>{const h=getEffectiveHires().find(h=>(h.truck===v.id||h.trailer===v.id)&&h.status==='active');const st=h?'on_hire':v.status;return <span className={statusBadge(st)}>{statusLabel(st)}</span>;})()}</td>
+                  <td><span className={statusBadge(getVehicleStatus(v))}>{statusLabel(getVehicleStatus(v))}</span></td>
                   <td>{v.odometer?(v.odometer.toLocaleString()+' km'):'—'}</td>
                   <td><span style={{color:cof==='red'?'var(--red-light)':cof==='orange'?'var(--orange)':'var(--green)',fontWeight:600,fontSize:12}}>{fmt(v.cof_expiry)}</span></td>
                   <td><span style={{color:reg==='red'?'var(--red-light)':reg==='orange'?'var(--orange)':'var(--green)',fontWeight:600,fontSize:12}}>{fmt(v.rego_expiry)}</span></td>
