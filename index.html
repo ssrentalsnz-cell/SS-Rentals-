@@ -405,6 +405,168 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
   } catch (e) { onError(e.message || 'Unknown sync error'); }
 };
 
+
+/* ─── XERO INTEGRATION ENGINE ────────────────────── */
+const XERO_CLIENT_ID = '4FB523DA93F24256BBD50A07CA9E9C9A';
+const XERO_REDIRECT_URI = 'https://ssrentalsnz-cell.github.io/SS-Rentals-/';
+const XERO_SCOPES = 'openid profile email accounting.invoices.read accounting.contacts.read offline_access';
+const XERO_CONFIG_KEY = 'ss_rentals_xero_config';
+// Cloudflare Worker proxy URL — handles token exchange to avoid CORS
+const XERO_PROXY = 'https://xero-proxy.ssrentalsnz.workers.dev';
+
+const loadXeroConfig = () => { try { return JSON.parse(localStorage.getItem(XERO_CONFIG_KEY)||'null'); } catch { return null; } };
+const saveXeroConfig = cfg => localStorage.setItem(XERO_CONFIG_KEY, JSON.stringify(cfg));
+const clearXeroConfig = () => localStorage.removeItem(XERO_CONFIG_KEY);
+
+// PKCE helpers
+const generateCodeVerifier = () => {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  const b64 = btoa(String.fromCharCode(...arr));
+  return b64.replace(/[+]/g,'-').replace(/[/]/g,'_').replace(/[=]/g,'');
+};
+const generateCodeChallenge = async (verifier) => {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(digest)));
+  return b64.replace(/[+]/g,'-').replace(/[/]/g,'_').replace(/[=]/g,'');
+};
+
+const startXeroAuth = async () => {
+  const verifier = generateCodeVerifier();
+  const challenge = await generateCodeChallenge(verifier);
+  sessionStorage.setItem('xero_verifier', verifier);
+  const state = Math.random().toString(36).slice(2);
+  sessionStorage.setItem('xero_state', state);
+  const url = 'https://login.xero.com/identity/connect/authorize'
+    + '?response_type=code'
+    + '&client_id=' + encodeURIComponent(XERO_CLIENT_ID)
+    + '&redirect_uri=' + encodeURIComponent(XERO_REDIRECT_URI)
+    + '&scope=' + encodeURIComponent(XERO_SCOPES)
+    + '&state=' + state
+    + '&code_challenge=' + challenge
+    + '&code_challenge_method=S256';
+  window.location.href = url;
+};
+
+// Token exchange via proxy to avoid CORS
+const exchangeXeroCode = async (code) => {
+  const verifier = sessionStorage.getItem('xero_verifier');
+  if (!verifier) throw new Error('No code verifier — please reconnect Xero');
+  // Try direct first (Xero may allow it), fall back to proxy
+  const body = new URLSearchParams({
+    grant_type:'authorization_code', code,
+    redirect_uri:XERO_REDIRECT_URI,
+    client_id:XERO_CLIENT_ID,
+    code_verifier:verifier
+  });
+  let res = await fetch('https://identity.xero.com/connect/token', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body
+  }).catch(()=>null);
+  if (!res || !res.ok) {
+    // Fall back to proxy
+    res = await fetch(XERO_PROXY + '/token', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ grant_type:'authorization_code', code, redirect_uri:XERO_REDIRECT_URI, client_id:XERO_CLIENT_ID, code_verifier:verifier })
+    });
+  }
+  if (!res.ok) {
+    const e = await res.json().catch(()=>({}));
+    throw new Error(e.error_description || e.error || 'Token exchange failed — CORS issue. A proxy server is needed.');
+  }
+  const data = await res.json();
+  sessionStorage.removeItem('xero_verifier');
+  sessionStorage.removeItem('xero_state');
+  return { accessToken:data.access_token, refreshToken:data.refresh_token, tokenExpiry:Date.now()+(data.expires_in||1800)*1000 };
+};
+
+const refreshXeroToken = async (refreshToken) => {
+  const body = new URLSearchParams({ grant_type:'refresh_token', refresh_token:refreshToken, client_id:XERO_CLIENT_ID });
+  let res = await fetch('https://identity.xero.com/connect/token', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body
+  }).catch(()=>null);
+  if (!res || !res.ok) {
+    res = await fetch(XERO_PROXY + '/token', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ grant_type:'refresh_token', refresh_token:refreshToken, client_id:XERO_CLIENT_ID })
+    });
+  }
+  if (!res.ok) throw new Error('Session expired — please reconnect Xero');
+  const data = await res.json();
+  return { accessToken:data.access_token, refreshToken:data.refresh_token||refreshToken, tokenExpiry:Date.now()+(data.expires_in||1800)*1000 };
+};
+
+const getXeroTenantId = async (accessToken) => {
+  const res = await fetch('https://api.xero.com/connections', {
+    headers:{ Authorization:'Bearer '+accessToken, 'Content-Type':'application/json' }
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(()=>'');
+    throw new Error('Cannot reach Xero API (' + res.status + '). ' + (txt||'Check your connection.'));
+  }
+  const tenants = await res.json();
+  if (!tenants.length) throw new Error('No Xero organisations found — make sure you approved access during login');
+  return tenants[0].tenantId;
+};
+
+const fetchXeroInvoices = async (accessToken, tenantId) => {
+  const res = await fetch('https://api.xero.com/api.xro/2.0/Invoices?Type=ACCREC&Statuses=DRAFT,SUBMITTED,AUTHORISED,PAID&page=1', {
+    headers:{ Authorization:'Bearer '+accessToken, 'Xero-tenant-id':tenantId, Accept:'application/json' }
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(()=>'');
+    throw new Error('Invoice fetch failed (' + res.status + '): ' + txt.slice(0,120));
+  }
+  const data = await res.json();
+  return data.Invoices || [];
+};
+
+const mapXeroStatus = s => ({'DRAFT':'draft','SUBMITTED':'sent','AUTHORISED':'sent','PAID':'paid','VOIDED':'void'}[s]||'draft');
+
+const syncXeroToApp = async (config, onProgress, onDone, onError) => {
+  try {
+    let { accessToken, refreshToken, tokenExpiry, tenantId } = config;
+    onProgress('Connecting to Xero…', 10);
+    if (Date.now() > tokenExpiry - 60000) {
+      onProgress('Refreshing session…', 15);
+      try {
+        const refreshed = await refreshXeroToken(refreshToken);
+        accessToken = refreshed.accessToken;
+        refreshToken = refreshed.refreshToken;
+        tokenExpiry = refreshed.tokenExpiry;
+        saveXeroConfig({ ...config, accessToken, refreshToken, tokenExpiry });
+      } catch(e) {
+        onError('Session expired: ' + e.message + ' — click Disconnect and reconnect Xero.');
+        return;
+      }
+    }
+    if (!tenantId) {
+      onProgress('Finding Xero organisation…', 25);
+      tenantId = await getXeroTenantId(accessToken);
+      saveXeroConfig({ ...config, accessToken, refreshToken, tokenExpiry, tenantId });
+    }
+    onProgress('Fetching invoices from Xero…', 45);
+    const xeroInvs = await fetchXeroInvoices(accessToken, tenantId);
+    onProgress('Matching ' + xeroInvs.length + ' invoices…', 75);
+    const statusMap = {};
+    xeroInvs.forEach(xi => {
+      if (xi.InvoiceNumber) statusMap[xi.InvoiceNumber] = { status:mapXeroStatus(xi.Status), xeroId:xi.InvoiceID };
+    });
+    const updates = [];
+    INVOICES.forEach(inv => {
+      const match = statusMap[inv.id];
+      if (match) {
+        if (match.status !== inv.status || match.xeroId !== inv.xero_id) {
+          updates.push({ id:inv.id, oldStatus:inv.status, newStatus:match.status });
+          inv.status = match.status;
+          inv.xero_id = match.xeroId;
+        }
+      }
+    });
+    onDone(new Date(), updates, xeroInvs.length);
+  } catch(e) { onError(e.message||'Xero sync failed'); }
+};
+
 /* ─── SVG ICONS ───────────────────────────────────── */
 const Icon = ({name,size=16,color='currentColor'}) => {
   const paths = {
@@ -516,7 +678,7 @@ const Sidebar = ({page,setPage}) => {
 
 /* ─── HEADER ──────────────────────────────────────── */
 const TITLES = {dashboard:'Dashboard',fleet:'Fleet Management',customers:'Customers',hires:'Hire Management',invoicing:'Invoicing',reports:'Financial Reports',maintenance:'Maintenance',navman:'Navman GPS',documents:'Documents',settings:'Settings'};
-const Header = ({page,theme,toggleTheme,syncState,onManualSync,onOpenSetup}) => {
+const Header = ({page,theme,toggleTheme,syncState,onManualSync,onOpenSetup,xeroSyncState,onXeroSync}) => {
   const overdueCount = INVOICES.filter(i=>i.status==='overdue').length;
   return (
     <div className="header">
@@ -525,6 +687,13 @@ const Header = ({page,theme,toggleTheme,syncState,onManualSync,onOpenSetup}) => 
         <div className="header-sub">{new Date().toLocaleDateString('en-NZ',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</div>
       </div>
       <div className="header-actions">
+        {xeroSyncState&&xeroSyncState.configured&&(
+          <div style={{display:'flex',alignItems:'center',gap:6,padding:'5px 10px',background:'rgba(0,184,217,0.08)',border:'1px solid rgba(0,184,217,0.25)',borderRadius:7,cursor:'pointer'}} onClick={onXeroSync} title="Click to sync Xero now">
+            <div style={{width:7,height:7,borderRadius:'50%',background:'#00B8D9',boxShadow:'0 0 0 3px rgba(0,184,217,0.2)'}}/>
+            <span style={{fontSize:12,fontWeight:600,color:'#00B8D9'}}>Xero</span>
+            {xeroSyncState.lastSync&&<span style={{fontSize:11,color:'var(--text3)'}}>synced {xeroSyncState.lastSync.toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'})}</span>}
+          </div>
+        )}
         {syncState&&<SyncStatusBar syncState={syncState} onManualSync={onManualSync} onOpenSetup={onOpenSetup}/>}
         <div className="icon-btn" onClick={toggleTheme} title="Toggle theme"><Icon name={theme==='dark'?'sun':'moon'} size={17}/></div>
         <div className="icon-btn" style={{position:'relative'}} title="Notifications">
@@ -1638,69 +1807,256 @@ const DocumentsPage = () => {
 };
 
 /* ─── NAVMAN PAGE ─────────────────────────────────── */
+const NAVMAN_DATA_KEY = 'ss_rentals_navman_data';
+const loadNavmanData = () => { try { return JSON.parse(localStorage.getItem(NAVMAN_DATA_KEY)||'null'); } catch { return null; } };
+const saveNavmanData = d => localStorage.setItem(NAVMAN_DATA_KEY, JSON.stringify(d));
+
 const NavmanPage = () => {
-  const [sel,setSel]=useState(null);
+  const initKm = () => {
+    const saved = loadNavmanData();
+    const defaults = {};
+    TRUCKS.forEach(t => { defaults[t.id] = { weekly_km: t.weekly_km, odometer: t.odometer, location: t.location, updated: null }; });
+    return saved ? { ...defaults, ...saved } : defaults;
+  };
+  const [kmData, setKmData] = useState(initKm);
+  const [editing, setEditing] = useState(false);
+  const [editVals, setEditVals] = useState({});
+  const [saved, setSaved] = useState(false);
+  const [tab, setTab] = useState('weekly');
+  const [history] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ss_rentals_navman_history')||'[]'); } catch { return []; }
+  });
+
+  const totalKm = Object.values(kmData).reduce((a,v)=>a+(v.weekly_km||0),0);
+  const totalRUC = TRUCKS.reduce((a,t)=>{
+    const h = HIRES.find(h=>h.truck===t.id&&h.status==='active');
+    const rate = h?.ruc_rate||0.062;
+    return a + (kmData[t.id]?.weekly_km||0)*rate;
+  },0);
+  const totalMileage = TRUCKS.reduce((a,t)=>{
+    const h = HIRES.find(h=>h.truck===t.id&&h.status==='active');
+    const rate = h?.mileage_rate||0;
+    return a + (kmData[t.id]?.weekly_km||0)*rate;
+  },0);
+
+  const startEdit = () => {
+    const vals = {};
+    TRUCKS.forEach(t => { vals[t.id] = { weekly_km: kmData[t.id]?.weekly_km||0, odometer: kmData[t.id]?.odometer||t.odometer, location: kmData[t.id]?.location||t.location }; });
+    setEditVals(vals);
+    setEditing(true);
+  };
+
+  const saveEdit = () => {
+    const now = new Date().toISOString();
+    const updated = {};
+    TRUCKS.forEach(t => { updated[t.id] = { ...editVals[t.id], updated: now }; });
+    setKmData(updated);
+    saveNavmanData(updated);
+    // Save to history
+    const hist = JSON.parse(localStorage.getItem('ss_rentals_navman_history')||'[]');
+    hist.unshift({ date: now, entries: updated });
+    if (hist.length > 12) hist.pop();
+    localStorage.setItem('ss_rentals_navman_history', JSON.stringify(hist));
+    setEditing(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  const weekStr = () => {
+    const now = new Date();
+    const mon = new Date(now); mon.setDate(now.getDate() - now.getDay() + 1);
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    return `${mon.toLocaleDateString('en-NZ',{day:'2-digit',month:'short'})} – ${sun.toLocaleDateString('en-NZ',{day:'2-digit',month:'short',year:'numeric'})}`;
+  };
+
   return (
     <div>
-      <div className="card card-sm mb-4" style={{borderLeft:'3px solid var(--green)',display:'flex',alignItems:'center',gap:16}}>
-        <Icon name="navman" size={22} color="var(--green)"/>
-        <div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>Navman Integration — Live</div><div style={{fontSize:12,color:'var(--text2)'}}>Last data pull: 24 May 2026 10:45 AM · {TRUCKS.filter(t=>t.status==='on_hire').length} vehicles live</div></div>
-        <button className="btn btn-ghost btn-sm"><Icon name="refresh" size={13}/> Sync Data</button>
-        <span className="badge badge-green">Live</span>
+      {/* Status bar */}
+      <div className="card card-sm mb-4" style={{borderLeft:'3px solid var(--orange)',display:'flex',alignItems:'center',gap:16}}>
+        <Icon name="navman" size={22} color="var(--orange)"/>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:13}}>Teletrac Navman — Manual Entry Mode</div>
+          <div style={{fontSize:12,color:'var(--text2)'}}>API key requested — awaiting Teletrac Navman approval. Enter weekly km manually below. Will auto-upgrade to live data once API key arrives.</div>
+        </div>
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          {saved&&<span className="badge badge-green">✓ Saved</span>}
+          <button className="btn btn-primary btn-sm" onClick={startEdit}><Icon name="edit" size={13}/> Update This Week</button>
+        </div>
       </div>
 
-      <div className="grid mb-4" style={{gridTemplateColumns:'1fr 1fr 1fr 1fr'}}>
-        {[{l:'Active Vehicles',v:TRUCKS.filter(t=>t.status==='on_hire').length},{l:'Total KM This Week',v:TRUCKS.reduce((a,t)=>a+t.weekly_km,0).toLocaleString()},{l:'Est. RUC This Week',v:fmtCur(TRUCKS.reduce((a,t)=>a+t.weekly_km,0)*0.062)},{l:'Mileage Revenue (est.)',v:fmtCur(TRUCKS.reduce((a,t)=>a+t.weekly_km*0.18,0))}].map(k=>(
+      {/* KPI row */}
+      <div className="grid grid-4 mb-4">
+        {[
+          {l:'Active Vehicles',v:TRUCKS.filter(t=>t.status==='on_hire').length+' of '+TRUCKS.length},
+          {l:'Total KM This Week',v:totalKm.toLocaleString()+' km'},
+          {l:'RUC Charges This Week',v:fmtCur(totalRUC)},
+          {l:'Mileage Revenue This Week',v:fmtCur(totalMileage)},
+        ].map(k=>(
           <div key={k.l} className="card card-sm"><div className="kpi-label">{k.l}</div><div style={{fontSize:20,fontWeight:800,marginTop:4}}>{k.v}</div></div>
         ))}
       </div>
 
-      {/* Simulated map */}
-      <div className="card mb-4" style={{padding:0,overflow:'hidden'}}>
-        <div style={{background:'var(--bg3)',height:280,display:'flex',alignItems:'center',justifyContent:'center',position:'relative',backgroundImage:'repeating-linear-gradient(0deg,transparent,transparent 39px,var(--border) 39px,var(--border) 40px),repeating-linear-gradient(90deg,transparent,transparent 39px,var(--border) 39px,var(--border) 40px)'}}>
-          <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:8}}>
-            <Icon name="navman" size={32} color="var(--red)"/>
-            <div style={{fontSize:14,fontWeight:700}}>Live Fleet Map</div>
-            <div style={{fontSize:12,color:'var(--text2)'}}>4 vehicles tracked across NZ</div>
+      <div className="tabs mb-4">
+        {['weekly','history'].map(t=><button key={t} className={`tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>{t==='weekly'?'This Week':'Entry History'}</button>)}
+      </div>
+
+      {tab==='weekly'&&(
+        <div>
+          {/* Week header */}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+            <div>
+              <div style={{fontWeight:700,fontSize:15}}>Week: {weekStr()}</div>
+              <div style={{fontSize:12,color:'var(--text2)',marginTop:2}}>Enter odometer readings and km travelled per truck this week</div>
+            </div>
           </div>
-          {/* Vehicle pins */}
-          {[{r:'KRB423',top:'35%',left:'25%',label:'Auckland'},{r:'LQD891',top:'68%',left:'28%',label:'Wellington'},{r:'MJP334',top:'82%',left:'55%',label:'Christchurch'},{r:'RGT467',top:'44%',left:'30%',label:'Hamilton'}].map(p=>(
-            <div key={p.r} onClick={()=>setSel(p.r)} style={{position:'absolute',top:p.top,left:p.left,cursor:'pointer'}}>
-              <div style={{background:'var(--red)',color:'#fff',borderRadius:'50% 50% 50% 0',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:700,transform:'rotate(-45deg)',boxShadow:'0 2px 8px rgba(0,0,0,0.4)'}}>
-                <span style={{transform:'rotate(45deg)'}}>{p.r.slice(0,3)}</span>
+
+          {/* Per-truck entry cards */}
+          <div className="grid" style={{gap:14,marginBottom:20}}>
+            {TRUCKS.map(t => {
+              const d = kmData[t.id] || {};
+              const h = HIRES.find(h=>h.truck===t.id&&h.status==='active');
+              const milRate = h?.mileage_rate||0;
+              const rucRate = h?.ruc_rate||0.062;
+              const km = d.weekly_km||0;
+              const milCharge = km * milRate;
+              const rucCharge = km * rucRate;
+              const ev = editVals[t.id] || {};
+              return (
+                <div key={t.id} className="card" style={{borderLeft:`3px solid ${t.status==='on_hire'?'var(--blue)':'var(--border2)'}`}}>
+                  <div style={{display:'flex',alignItems:'flex-start',gap:16}}>
+                    <div style={{flex:1}}>
+                      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+                        <span style={{fontWeight:800,fontSize:16}}>{t.rego}</span>
+                        <span style={{fontSize:12,color:'var(--text2)'}}>{t.make} {t.model}</span>
+                        <span className={statusBadge(t.status)}>{statusLabel(t.status)}</span>
+                        {t.hirer&&<span style={{fontSize:12,color:'var(--text3)'}}>→ {custName(t.hirer)}</span>}
+                      </div>
+                      {editing ? (
+                        <div className="grid" style={{gridTemplateColumns:'1fr 1fr 1fr',gap:12}}>
+                          <div className="form-group" style={{marginBottom:0}}>
+                            <label>Weekly KM</label>
+                            <input type="number" value={ev.weekly_km||''} onChange={e=>setEditVals(v=>({...v,[t.id]:{...v[t.id],weekly_km:parseInt(e.target.value)||0}}))} placeholder="e.g. 3500"/>
+                          </div>
+                          <div className="form-group" style={{marginBottom:0}}>
+                            <label>Current Odometer (km)</label>
+                            <input type="number" value={ev.odometer||''} onChange={e=>setEditVals(v=>({...v,[t.id]:{...v[t.id],odometer:parseInt(e.target.value)||0}}))} placeholder="e.g. 354000"/>
+                          </div>
+                          <div className="form-group" style={{marginBottom:0}}>
+                            <label>Current Location</label>
+                            <input value={ev.location||''} onChange={e=>setEditVals(v=>({...v,[t.id]:{...v[t.id],location:e.target.value}}))} placeholder="e.g. Auckland — On Road"/>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10}}>
+                          {[
+                            ['Weekly KM', km>0?km.toLocaleString()+' km':'Not set', km>0?'var(--text)':'var(--text3)'],
+                            ['Odometer', (d.odometer||t.odometer).toLocaleString()+' km','var(--text)'],
+                            ['Location', d.location||t.location,'var(--text2)'],
+                            ['Mileage Rate', milRate>0?'$'+milRate+'/km':'No charge','var(--text2)'],
+                            ['Mileage Charge', milRate>0?fmtCur(milCharge):'—', milCharge>0?'var(--orange)':'var(--text3)'],
+                            ['RUC Charge', fmtCur(rucCharge), 'var(--red-light)'],
+                          ].map(([l,v,c])=>(
+                            <div key={l} style={{padding:'8px 10px',background:'var(--bg3)',borderRadius:8}}>
+                              <div style={{fontSize:10,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',marginBottom:4}}>{l}</div>
+                              <div style={{fontSize:13,fontWeight:700,color:c}}>{v}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {!editing&&km>0&&(
+                    <div style={{marginTop:12}}>
+                      <div style={{fontSize:11,color:'var(--text3)',marginBottom:6}}>Weekly progress vs 3,000km target</div>
+                      <div className="progress">
+                        <div className="progress-bar" style={{width:`${Math.min(100,(km/3000)*100)}%`,background:km>4000?'var(--red)':km>3000?'var(--orange)':'var(--blue)'}}/>
+                      </div>
+                      <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>{km.toLocaleString()} km ({Math.round((km/3000)*100)}% of 3,000km target){km>4000?' — ⚠️ Excessive mileage':''}</div>
+                    </div>
+                  )}
+                  {d.updated&&<div style={{fontSize:10,color:'var(--text3)',marginTop:8}}>Last updated: {new Date(d.updated).toLocaleString('en-NZ')}</div>}
+                </div>
+              );
+            })}
+          </div>
+
+          {editing&&(
+            <div style={{display:'flex',gap:10,justifyContent:'flex-end',marginBottom:20}}>
+              <button className="btn btn-ghost" onClick={()=>setEditing(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveEdit}><Icon name="check" size={14}/> Save Weekly Data</button>
+            </div>
+          )}
+
+          {/* Weekly summary */}
+          <div className="card" style={{borderLeft:'3px solid var(--green)'}}>
+            <div className="card-header"><span className="card-title">Weekly Invoice Summary — Charges to Bill</span><span className="badge badge-blue">{weekStr()}</span></div>
+            <div className="table-wrap" style={{border:'none',borderRadius:0,margin:'0 -20px'}}>
+              <table>
+                <thead><tr><th>Truck</th><th>Customer</th><th>Weekly Hire</th><th>KM This Week</th><th>Mileage Charge</th><th>RUC Charge</th><th>Total to Invoice</th></tr></thead>
+                <tbody>
+                  {TRUCKS.filter(t=>t.status==='on_hire').map(t=>{
+                    const h = HIRES.find(h=>h.truck===t.id&&h.status==='active');
+                    const km = kmData[t.id]?.weekly_km||0;
+                    const milCharge = km*(h?.mileage_rate||0);
+                    const rucCharge = km*(h?.ruc_rate||0.062);
+                    const total = (h?.weekly_truck||0)+(h?.weekly_trailer||0)+milCharge+rucCharge;
+                    return (
+                      <tr key={t.id}>
+                        <td style={{fontWeight:700}}>{t.rego}</td>
+                        <td>{custName(t.hirer)}</td>
+                        <td style={{fontWeight:700}}>{fmtCur((h?.weekly_truck||0)+(h?.weekly_trailer||0))}</td>
+                        <td style={{fontWeight:700}}>{km.toLocaleString()} km</td>
+                        <td style={{color:'var(--orange)'}}>{milCharge>0?fmtCur(milCharge):'—'}</td>
+                        <td style={{color:'var(--red-light)'}}>{fmtCur(rucCharge)}</td>
+                        <td style={{fontWeight:800,fontSize:15}}>{fmtCur(total)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab==='history'&&(
+        <div>
+          {history.length===0&&(
+            <div className="card" style={{textAlign:'center',padding:40}}>
+              <Icon name="navman" size={32} color="var(--text3)"/>
+              <div style={{fontSize:14,color:'var(--text2)',marginTop:12}}>No history yet — save your first weekly entry to start tracking.</div>
+            </div>
+          )}
+          {history.map((h,i)=>(
+            <div key={i} className="card mb-4">
+              <div className="card-header">
+                <span className="card-title">Entry — {new Date(h.date).toLocaleDateString('en-NZ',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})}</span>
+                <span style={{fontSize:12,color:'var(--text3)'}}>{new Date(h.date).toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'})}</span>
               </div>
-              <div style={{fontSize:10,color:'var(--text)',fontWeight:600,textAlign:'center',marginTop:2,background:'var(--card)',padding:'1px 4px',borderRadius:3}}>{p.label}</div>
+              <div className="grid grid-4">
+                {TRUCKS.map(t=>{
+                  const d = h.entries?.[t.id];
+                  if (!d) return null;
+                  return (
+                    <div key={t.id} style={{padding:'10px 12px',background:'var(--bg3)',borderRadius:8}}>
+                      <div style={{fontWeight:700,marginBottom:6}}>{t.rego}</div>
+                      <div style={{fontSize:12,color:'var(--text2)'}}>KM: <strong style={{color:'var(--text)'}}>{(d.weekly_km||0).toLocaleString()}</strong></div>
+                      <div style={{fontSize:12,color:'var(--text2)'}}>Odo: <strong style={{color:'var(--text)'}}>{(d.odometer||0).toLocaleString()}</strong></div>
+                      <div style={{fontSize:11,color:'var(--text3)',marginTop:4}}>{d.location}</div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ))}
         </div>
-      </div>
-
-      <div className="table-wrap">
-        <table>
-          <thead><tr><th>Vehicle</th><th>Make / Model</th><th>Driver</th><th>Location</th><th>This Week KM</th><th>Est. Mileage Charge</th><th>Est. RUC</th><th>Odometer</th><th>Status</th></tr></thead>
-          <tbody>
-            {TRUCKS.map(t=>(
-              <tr key={t.id} className="tr-link" onClick={()=>setSel(t.rego)}>
-                <td style={{fontWeight:700}}>{t.rego}</td>
-                <td>{t.make} {t.model}</td>
-                <td style={{fontSize:12,color:'var(--text2)'}}>{t.hirer?CUSTOMERS.find(c=>c.id===t.hirer)?.contact:'—'}</td>
-                <td style={{fontSize:12}}>{t.location}</td>
-                <td style={{fontWeight:700}}>{t.weekly_km.toLocaleString()} km</td>
-                <td>{t.weekly_km>0?fmtCur(t.weekly_km*0.18):'—'}</td>
-                <td>{t.weekly_km>0?fmtCur(t.weekly_km*0.062):'—'}</td>
-                <td>{t.odometer.toLocaleString()} km</td>
-                <td><span className={statusBadge(t.status)}>{statusLabel(t.status)}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      )}
     </div>
   );
 };
 
 /* ─── SETTINGS PAGE ───────────────────────────────── */
-const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync}) => {
+const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xeroConfig, xeroSyncState, onXeroConnect, onXeroSync, onXeroDisconnect, onXeroDiag}) => {
   const [tab,setTab]=useState('users');
   const users=[
     {name:'Sukhdeep Singh',email:'raj.sukha036@gmail.com',role:'Director / Admin',status:'active',mfa:true},
@@ -1710,7 +2066,7 @@ const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync}) =>
     {name:'Sarah Lee',email:'sarah@ssrentals.co.nz',role:'Read-only',status:'inactive',mfa:false},
   ];
   const integrations=[
-    {name:'Xero Accounting',status:'connected',icon:'xero',desc:'Invoicing, payment sync, customer data',last:'24 May 2026 09:14 AM'},
+    {name:'Navman GPS',status:'connected',icon:'navman',desc:'Live tracking, mileage, RUC data',last:'24 May 2026 10:45 AM'},
     {name:'Navman GPS',status:'connected',icon:'navman',desc:'Live tracking, mileage, RUC data',last:'24 May 2026 10:45 AM'},
     {name:'E-Road RUC',status:'disconnected',icon:'truck2',desc:'Automated RUC licence purchasing',last:'Never'},
     {name:'SendGrid Email',status:'connected',icon:'bell',desc:'Invoice delivery, automated reminders',last:'24 May 2026 08:00 AM'},
@@ -1750,6 +2106,62 @@ const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync}) =>
 
       {tab==='integrations'&&(
         <div style={{display:'flex',flexDirection:'column',gap:16}}>
+          {/* Xero Integration Panel */}
+          <div className="card" style={{borderLeft:`3px solid ${xeroConfig?.accessToken?'#00B8D9':'var(--border2)'}`}}>
+            <div style={{display:'flex',alignItems:'center',gap:16}}>
+              <div style={{width:48,height:48,borderRadius:12,background:xeroConfig?.accessToken?'rgba(0,184,217,0.12)':'var(--bg3)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <Icon name="xero" size={26} color={xeroConfig?.accessToken?'#00B8D9':'var(--text3)'}/>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:14,marginBottom:2,display:'flex',alignItems:'center',gap:8}}>
+                  Xero Accounting
+                  {xeroConfig?.accessToken?<span className="badge badge-blue">Connected</span>:<span className="badge badge-gray">Not Connected</span>}
+                </div>
+                <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}>Pulls invoice payment status from Xero — marks invoices as paid, overdue, or sent automatically</div>
+                <div style={{fontSize:11,color:'var(--text3)'}}>
+                  {xeroSyncState?.lastSync?`Last sync: ${xeroSyncState.lastSync.toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit',second:'2-digit'})} — updated ${xeroSyncState.updates?.length||0} invoices`:'Not yet synced'}
+                </div>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-end'}}>
+                {xeroConfig?.accessToken ? (
+                  <>
+                    <button className="btn btn-primary btn-sm" onClick={onXeroSync} disabled={xeroSyncState?.syncing} style={{background:'#00B8D9',borderColor:'#0099b5'}}>
+                      <Icon name="sync" size={13}/> {xeroSyncState?.syncing?xeroSyncState.syncMsg||'Syncing…':'Sync Now'}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={onXeroDiag}>Test Connection</button>
+                    <button className="btn btn-ghost btn-sm" onClick={onXeroDisconnect}>Disconnect</button>
+                  </>
+                ) : (
+                  <button className="btn btn-primary btn-sm" onClick={onXeroConnect} style={{background:'#00B8D9',borderColor:'#0099b5'}}>
+                    <Icon name="xero" size={13}/> Connect Xero
+                  </button>
+                )}
+              </div>
+            </div>
+            {xeroSyncState?.updates?.length>0&&(
+              <div style={{marginTop:14,padding:'10px 12px',background:'rgba(0,184,217,0.06)',borderRadius:8,border:'1px solid rgba(0,184,217,0.15)'}}>
+                <div style={{fontSize:12,fontWeight:600,color:'#00B8D9',marginBottom:8}}>Last sync updated {xeroSyncState.updates.length} invoice{xeroSyncState.updates.length>1?'s':''}:</div>
+                {xeroSyncState.updates.map(u=>(
+                  <div key={u.id} style={{fontSize:12,color:'var(--text2)',display:'flex',gap:8,marginBottom:4}}>
+                    <span style={{fontWeight:600,color:'var(--text)'}}>{u.id}</span>
+                    <span style={{color:'var(--text3)'}}>→</span>
+                    <span className={`badge badge-${u.newStatus==='paid'?'green':u.newStatus==='overdue'?'red':'blue'}`} style={{fontSize:10}}>{u.newStatus.toUpperCase()}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!xeroConfig?.accessToken&&(
+              <div style={{marginTop:14,padding:'12px 14px',background:'var(--bg3)',borderRadius:8,fontSize:12,lineHeight:1.8,borderLeft:'3px solid rgba(0,184,217,0.4)'}}>
+                <strong>How it works:</strong><br/>
+                1. Click <strong>Connect Xero</strong> — you'll be redirected to Xero to approve access<br/>
+                2. After approving, you'll be redirected back here automatically<br/>
+                3. Click <strong>Sync Now</strong> to pull invoice statuses from Xero<br/>
+                4. Invoice statuses (paid/overdue/sent) will update in real time
+              </div>
+            )}
+            {xeroSyncState?.error&&<div className="alert alert-red" style={{marginTop:12}}><Icon name="warning" size={14}/><span>{xeroSyncState.error}</span></div>}
+          </div>
+
           {/* Google Sheets Live Sync Panel */}
           <div className="card" style={{borderLeft:`3px solid ${sheetsConfig?.accessToken?'#34A853':'var(--border2)'}`}}>
             <div style={{display:'flex',alignItems:'center',gap:16}}>
@@ -2041,8 +2453,44 @@ const App = () => {
   const [syncState, setSyncState] = useState({configured:false,syncing:false,lastSync:null,error:null,syncMsg:'',syncPct:0});
   const autoSyncTimer = useRef(null);
   const syncInProgress = useRef(false);
+  // Xero state
+  const [xeroConfig, setXeroConfig] = useState(()=>loadXeroConfig());
+  const [xeroSyncState, setXeroSyncState] = useState({configured:false,syncing:false,lastSync:null,error:null,syncMsg:'',updates:[]});
+  const xeroSyncInProgress = useRef(false);
 
   useEffect(()=>{document.body.className=theme==='light'?'light':'';},[theme]);
+
+  // Handle Xero OAuth callback (PKCE redirect back to app)
+  useEffect(()=>{
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+    const savedState = sessionStorage.getItem('xero_state');
+    if (code && state && state === savedState) {
+      window.history.replaceState({}, '', window.location.pathname);
+      exchangeXeroCode(code).then(tokens => {
+        const cfg = { ...tokens, tenantId: null };
+        saveXeroConfig(cfg);
+        setXeroConfig(cfg);
+      }).catch(e => setXeroSyncState(s=>({...s, error:'Auth failed: '+e.message})));
+    }
+  }, []);
+
+  useEffect(()=>{
+    setXeroSyncState(s=>({...s, configured:!!(xeroConfig?.accessToken)}));
+  },[xeroConfig]);
+
+  const doXeroSync = useCallback(async () => {
+    if (xeroSyncInProgress.current || !xeroConfig?.accessToken) return;
+    xeroSyncInProgress.current = true;
+    setXeroSyncState(s=>({...s,syncing:true,error:null,syncMsg:'Starting…'}));
+    await syncXeroToApp(
+      xeroConfig,
+      (msg,pct)=>setXeroSyncState(s=>({...s,syncMsg:msg})),
+      (ts,updates,total)=>{setXeroSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',updates}));xeroSyncInProgress.current=false;},
+      (err)=>{setXeroSyncState(s=>({...s,syncing:false,error:err,syncMsg:''}));xeroSyncInProgress.current=false;}
+    );
+  },[xeroConfig]);
 
   useEffect(()=>{
     setSyncState(s=>({...s,configured:!!(sheetsConfig?.accessToken&&sheetsConfig?.spreadsheetId)}));
@@ -2083,7 +2531,7 @@ const App = () => {
     reports:<ReportsPage theme={theme}/>,
     documents:<DocumentsPage/>,
     navman:<NavmanPage/>,
-    settings:<SettingsPage sheetsConfig={sheetsConfig} syncState={syncState} onSheetsSetup={()=>setSheetsSetupOpen(true)} onManualSync={()=>doSync()}/>,
+    settings:<SettingsPage sheetsConfig={sheetsConfig} syncState={syncState} onSheetsSetup={()=>setSheetsSetupOpen(true)} onManualSync={()=>doSync()} xeroConfig={xeroConfig} xeroSyncState={xeroSyncState} onXeroConnect={startXeroAuth} onXeroSync={doXeroSync} onXeroDisconnect={()=>{clearXeroConfig();setXeroConfig(null);}} onXeroDiag={async()=>{ try { const t=xeroConfig?.accessToken; if(!t){alert('Not connected');return;} const r=await fetch('https://api.xero.com/connections',{headers:{Authorization:'Bearer '+t}}); const d=await r.json(); alert('Connection OK! Orgs: '+JSON.stringify(d.map(x=>x.tenantName))); } catch(e){alert('Error: '+e.message);}}}/>,
   };
 
   return (
@@ -2091,7 +2539,8 @@ const App = () => {
       <Sidebar page={page} setPage={setPage}/>
       <div className="main">
         <Header page={page} theme={theme} toggleTheme={()=>setTheme(t=>t==='dark'?'light':'dark')}
-          syncState={syncState} onManualSync={()=>doSync()} onOpenSetup={()=>setSheetsSetupOpen(true)}/>
+          syncState={syncState} onManualSync={()=>doSync()} onOpenSetup={()=>setSheetsSetupOpen(true)}
+          xeroSyncState={xeroSyncState} onXeroSync={doXeroSync}/>
         <div className="content">{pages[page]||<Dashboard theme={theme} setPage={setPage}/>}</div>
       </div>
       <SheetsSetupModal open={sheetsSetupOpen} onClose={()=>setSheetsSetupOpen(false)} onSave={handleSaveConfig} initialConfig={sheetsConfig}/>
