@@ -612,7 +612,7 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
 /* ─── XERO INTEGRATION ENGINE ────────────────────── */
 const XERO_CLIENT_ID = '4FB523DA93F24256BBD50A07CA9E9C9A';
 const XERO_REDIRECT_URI = 'https://ssrentalsnz-cell.github.io/SS-Rentals-/';
-const XERO_SCOPES = 'openid profile email accounting.invoices.read accounting.contacts.read offline_access';
+const XERO_SCOPES = 'openid profile email accounting.invoices.read accounting.contacts.read accounting.transactions.read accounting.bankaccounts.read offline_access';
 const XERO_CONFIG_KEY = 'ss_rentals_xero_config';
 // Cloudflare Worker proxy URL — handles token exchange to avoid CORS
 const XERO_PROXY = 'https://xero-proxy.ssrentalsnz.workers.dev';
@@ -2021,7 +2021,7 @@ const fetchXeroBankTxns = async (xeroConfig, onProgress) => {
   // Get last 90 days
   const fromDate = new Date(); fromDate.setDate(fromDate.getDate()-90);
   const from = fromDate.toISOString().slice(0,10);
-  const res = await fetch(`https://xero-proxy.ssrentalsnz.workers.dev/xero-api/api.xro/2.0/BankTransactions?fromDate=${from}&page=1`, {
+  const res = await fetch('https://xero-proxy.ssrentalsnz.workers.dev/xero-api/api.xro/2.0/BankTransactions?fromDate='+from+'&page=1', {
     headers:{ Authorization:'Bearer '+accessToken, 'Xero-tenant-id':tenantId }
   });
   if (!res.ok) throw new Error('Bank transaction fetch failed: '+res.status);
