@@ -519,7 +519,7 @@ const pullHiresFromSheet1 = (rows, extLog) => {
 
     // Parse weekly rate
     if (rateStr) {
-      const rateNum = parseFloat(rateStr.replace(/[^0-9.]/g, ''));
+      const rateNum = parseFloat(rateStr.replace(/[^0-9.]/g,''));
       if (!isNaN(rateNum) && rateNum > 0 && rateNum !== hire.weekly_truck) {
         hire.weekly_truck = rateNum; changed = true;
       }
@@ -2789,7 +2789,7 @@ const App = () => {
     await runFullSync(
       config,
       (msg,pct)=>setSyncState(s=>({...s,syncMsg:msg,syncPct:pct})),
-      (ts)=>{setSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',syncPct:0}));syncInProgress.current=false;},
+      (ts)=>{setSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',syncPct:0}));syncInProgress.current=false;setDataRefreshKey(k=>k+1);},
       (err)=>{setSyncState(s=>({...s,syncing:false,error:err,syncMsg:'',syncPct:0}));syncInProgress.current=false;}
     );
   },[sheetsConfig]);
