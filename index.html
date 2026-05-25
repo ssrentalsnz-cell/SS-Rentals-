@@ -813,6 +813,12 @@ const Icon = ({name,size=16,color='currentColor'}) => {
     sheets:'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3h5v2h-5V6zm0 4h5v2h-5v-2zm0 4h5v2h-5v-2zM7 6h3v2H7V6zm0 4h3v2H7v-2zm0 4h3v2H7v-2z',
     link:'M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z',
     sync:'M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z',
+    sms:'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z',
+    email:'M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z',
+    send:'M2.01 21L23 12 2.01 3 2 10l15 2-15 2z',
+    chat:'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z',
+    template:'M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z',
+    schedule:'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z',
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{flexShrink:0}}>
@@ -849,6 +855,7 @@ const NAV_BASE = [
   {id:'maintenance',label:'Maintenance',icon:'maintenance',section:'operations'},
   {id:'navman',label:'Navman GPS',icon:'navman',section:'operations'},
   {id:'documents',label:'Documents',icon:'documents',section:'operations'},
+  {id:'communications',label:'Communications',icon:'chat',section:'finance'},
   {id:'settings',label:'Settings',icon:'settings',section:'system'},
 ];
 const getNavBadges = () => {
@@ -862,7 +869,8 @@ const getNavBadges = () => {
   const maintAlerts = MAINTENANCE.filter(m=>m.status==='scheduled'&&daysDiff(m.date)<=30).length;
   // Hires: active hires expiring within 7 days
   const hireAlerts = effectiveH.filter(h=>h.status==='active'&&daysDiff(h.end)<=7&&daysDiff(h.end)>=0).length;
-  return { fleet:fleetAlerts||undefined, invoicing:invoiceAlerts||undefined, maintenance:maintAlerts||undefined, hires:hireAlerts||undefined };
+  const commAlerts = INVOICES.filter(i=>i.status==='overdue').length;
+  return { fleet:fleetAlerts||undefined, invoicing:invoiceAlerts||undefined, maintenance:maintAlerts||undefined, hires:hireAlerts||undefined, communications:commAlerts||undefined };
 };
 const NAV = NAV_BASE;
 const Sidebar = ({page,setPage}) => {
@@ -2507,6 +2515,471 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
   );
 };
 
+/* ─── COMMUNICATIONS ENGINE ──────────────────────── */
+const COMM_LOG_KEY = 'ss_rentals_comm_log';
+const COMM_TEMPLATES_KEY = 'ss_rentals_comm_templates';
+const COMM_SCHEDULE_KEY = 'ss_rentals_comm_schedule';
+
+const loadCommLog = () => { try { return JSON.parse(localStorage.getItem(COMM_LOG_KEY)||'[]'); } catch { return []; } };
+const saveCommLog = log => localStorage.setItem(COMM_LOG_KEY, JSON.stringify(log));
+const loadTemplates = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COMM_TEMPLATES_KEY)||'null');
+    return saved || DEFAULT_TEMPLATES;
+  } catch { return DEFAULT_TEMPLATES; }
+};
+const saveTemplates = t => localStorage.setItem(COMM_TEMPLATES_KEY, JSON.stringify(t));
+const loadSchedule = () => { try { return JSON.parse(localStorage.getItem(COMM_SCHEDULE_KEY)||'[]'); } catch { return []; } };
+const saveSchedule = s => localStorage.setItem(COMM_SCHEDULE_KEY, JSON.stringify(s));
+
+const DEFAULT_TEMPLATES = [
+  {
+    id:'t001', name:'Payment Reminder — Friendly', type:'both', category:'reminder',
+    subject:'Invoice Payment Reminder — {{company}}',
+    sms:'Hi {{contact}}, this is a friendly reminder that invoice {{invoice_id}} for {{amount}} was due on {{due_date}}. Please arrange payment at your earliest convenience. SS Rentals — 02108198727',
+    email:`Dear {{contact}},\n\nI hope this message finds you well.\n\nThis is a friendly reminder that the following invoice is now due:\n\nInvoice: {{invoice_id}}\nAmount: {{amount}}\nDue Date: {{due_date}}\nDays Overdue: {{days_overdue}} days\n\nPlease arrange payment at your earliest convenience. If you have already made payment, please disregard this message.\n\nFor any queries, please contact us at sukh@ssrentals.co.nz or 021 081 98727.\n\nKind regards,\nSukhdeep Singh\nSS Rentals\n📞 021 081 98727`
+  },
+  {
+    id:'t002', name:'Overdue — Urgent Notice', type:'both', category:'overdue',
+    subject:'URGENT: Overdue Invoice {{invoice_id}} — Action Required',
+    sms:'URGENT: Invoice {{invoice_id}} for {{amount}} is {{days_overdue}} days overdue. Please pay immediately to avoid service interruption. SS Rentals 021-081-98727',
+    email:`Dear {{contact}},\n\nThis is an urgent notice regarding your outstanding invoice.\n\nInvoice: {{invoice_id}}\nAmount Due: {{amount}}\nOriginal Due Date: {{due_date}}\nDays Overdue: {{days_overdue}} days\n\nIf payment is not received within 48 hours, we may need to review your hire agreement.\n\nPlease contact us immediately to arrange payment or discuss your account.\n\nRegards,\nSukhdeep Singh\nSS Rentals\n📞 021 081 98727\n✉ sukh@ssrentals.co.nz`
+  },
+  {
+    id:'t003', name:'Weekly Invoice Ready', type:'both', category:'invoice',
+    subject:'Your Weekly Invoice is Ready — {{company}}',
+    sms:'Hi {{contact}}, your weekly invoice {{invoice_id}} for {{amount}} is ready. Due {{due_date}}. View at ssrentalsnz-cell.github.io/SS-Rentals-/ — SS Rentals',
+    email:`Dear {{contact}},\n\nYour weekly invoice is now ready for payment.\n\nInvoice: {{invoice_id}}\nPeriod: {{period}}\nAmount: {{amount}}\nDue Date: {{due_date}}\n\nPlease arrange payment by the due date.\n\nThank you for your continued business.\n\nKind regards,\nSukhdeep Singh\nSS Rentals`
+  },
+  {
+    id:'t004', name:'Hire Expiry Reminder', type:'both', category:'hire',
+    subject:'Hire Agreement Expiring Soon — {{company}}',
+    sms:'Hi {{contact}}, your hire agreement for {{vehicle}} expires on {{end_date}}. Please contact us to discuss renewal. SS Rentals 021-081-98727',
+    email:`Dear {{contact}},\n\nThis is a reminder that your current hire agreement is approaching its end date.\n\nVehicle: {{vehicle}}\nExpiry Date: {{end_date}}\n\nPlease contact us to discuss renewal or return arrangements.\n\nKind regards,\nSukhdeep Singh\nSS Rentals`
+  },
+];
+
+const fillTemplate = (template, vars) => {
+  let text = template;
+  Object.entries(vars).forEach(([k,v])=>{ text = text.replace(new RegExp('{{'+k+'}}','g'), v||''); });
+  return text;
+};
+
+const logMessage = (entry) => {
+  const log = loadCommLog();
+  log.unshift({...entry, id:'MSG'+Date.now(), sentAt: new Date().toISOString()});
+  if (log.length > 500) log.pop();
+  saveCommLog(log);
+  return log;
+};
+
+// Simulate SMS send via browser (opens SMS app on mobile)
+const sendSMS = (phone, message) => {
+  const url = `sms:${phone.replace(/\s/g,'')}?body=${encodeURIComponent(message)}`;
+  window.open(url, '_blank');
+  return {status:'opened', channel:'sms'};
+};
+
+// Simulate email send via mailto
+const sendEmail = (email, subject, body) => {
+  const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.open(url, '_blank');
+  return {status:'opened', channel:'email'};
+};
+
+/* ─── COMMUNICATIONS PAGE ─────────────────────────── */
+const CommunicationsPage = () => {
+  const [tab,setTab]=useState('compose');
+  const [commLog,setCommLog]=useState(()=>loadCommLog());
+  const [templates,setTemplates]=useState(()=>loadTemplates());
+  const [schedule,setSchedule]=useState(()=>loadSchedule());
+  const [selectedCustomers,setSelectedCustomers]=useState([]);
+  const [selectedTemplate,setSelectedTemplate]=useState('t001');
+  const [channel,setChannel]=useState('both');
+  const [customMsg,setCustomMsg]=useState({subject:'',sms:'',email:''});
+  const [useCustom,setUseCustom]=useState(false);
+  const [sending,setSending]=useState(false);
+  const [sendResult,setSendResult]=useState(null);
+  const [editingTemplate,setEditingTemplate]=useState(null);
+  const [filterStatus,setFilterStatus]=useState('overdue');
+
+  // Get customers with outstanding balances
+  const overdueCustomers = CUSTOMERS.filter(c=>c.status==='active'&&INVOICES.some(i=>i.customer===c.id&&i.status==='overdue'));
+  const activeCustomers = CUSTOMERS.filter(c=>c.status==='active');
+  const displayCustomers = filterStatus==='overdue'?overdueCustomers:filterStatus==='active'?activeCustomers:CUSTOMERS;
+
+  const getCustomerInvoices = (custId) => INVOICES.filter(i=>i.customer===custId&&(i.status==='overdue'||i.status==='draft'));
+  const getCustomerOverdue = (custId) => INVOICES.filter(i=>i.customer===custId&&i.status==='overdue').reduce((a,i)=>a+i.total,0);
+
+  const buildVars = (cust) => {
+    const invs = getCustomerInvoices(cust.id);
+    const overdue = invs.filter(i=>i.status==='overdue');
+    const latest = overdue[0]||invs[0];
+    const hire = getEffectiveHires().find(h=>h.customer===cust.id&&h.status==='active');
+    const truck = hire ? TRUCKS.find(t=>t.id===hire.truck) : null;
+    return {
+      company: cust.company,
+      contact: cust.contact.split(' ')[0],
+      phone: cust.phone,
+      email: cust.email,
+      invoice_id: latest?.id||'—',
+      amount: latest?fmtCur(latest.total):'—',
+      due_date: latest?fmt(latest.due):'—',
+      days_overdue: latest?Math.max(0,Math.abs(daysDiff(latest.due)))+'':'0',
+      period: latest?.period||'—',
+      total_outstanding: fmtCur(getCustomerOverdue(cust.id)),
+      vehicle: truck?`${truck.rego} ${truck.make} ${truck.model}`:'—',
+      end_date: hire?fmt(hire.end):'—',
+    };
+  };
+
+  const tpl = templates.find(t=>t.id===selectedTemplate)||templates[0];
+
+  const handleSelectAll = () => {
+    if (selectedCustomers.length===displayCustomers.length) setSelectedCustomers([]);
+    else setSelectedCustomers(displayCustomers.map(c=>c.id));
+  };
+
+  const handleSend = async () => {
+    if (selectedCustomers.length===0) { alert('Select at least one customer.'); return; }
+    setSending(true); setSendResult(null);
+    const results = [];
+    const msg = useCustom ? customMsg : tpl;
+
+    for (const custId of selectedCustomers) {
+      const cust = CUSTOMERS.find(c=>c.id===custId);
+      if (!cust) continue;
+      const vars = buildVars(cust);
+      const smsText = fillTemplate(msg.sms||'', vars);
+      const emailSubj = fillTemplate(msg.subject||'', vars);
+      const emailBody = fillTemplate(msg.email||'', vars);
+      let status = 'sent';
+
+      if (channel==='sms'||channel==='both') {
+        if (cust.phone) { sendSMS(cust.phone, smsText); }
+        else { status = 'no_phone'; }
+      }
+      if (channel==='email'||channel==='both') {
+        if (cust.email) { sendEmail(cust.email, emailSubj, emailBody); }
+        else if (status!=='no_phone') status = 'no_email';
+      }
+
+      const logEntry = {
+        customerId: custId, customerName: cust.company, channel,
+        templateId: useCustom?'custom':selectedTemplate,
+        templateName: useCustom?'Custom Message':tpl.name,
+        subject: emailSubj, preview: smsText.slice(0,80)+'…',
+        status, phone: cust.phone, email: cust.email,
+      };
+      results.push(logEntry);
+      logMessage(logEntry);
+    }
+
+    const newLog = loadCommLog();
+    setCommLog(newLog);
+    setSendResult({sent:results.filter(r=>r.status==='sent').length, failed:results.filter(r=>r.status!=='sent').length, total:results.length});
+    setSending(false);
+    setSelectedCustomers([]);
+  };
+
+  const StatusBadge = ({status}) => {
+    const map = {sent:{l:'Sent',c:'badge-green'},opened:{l:'Opened',c:'badge-blue'},failed:{l:'Failed',c:'badge-red'},no_phone:{l:'No Phone',c:'badge-gray'},no_email:{l:'No Email',c:'badge-gray'}};
+    const s = map[status]||{l:status,c:'badge-gray'};
+    return <span className={`badge ${s.c}`}>{s.l}</span>;
+  };
+
+  return (
+    <div>
+      <div className="tabs mb-4">
+        {['compose','log','templates','schedule'].map(t=>(
+          <button key={t} className={`tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>
+            {({compose:'Compose & Send',log:'Message History',templates:'Templates',schedule:'Auto Reminders'})[t]}
+            {t==='log'&&commLog.length>0&&<span style={{marginLeft:5,background:'var(--red)',color:'#fff',fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:8}}>{commLog.length}</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* ── COMPOSE TAB ── */}
+      {tab==='compose'&&(
+        <div className="grid" style={{gridTemplateColumns:'1fr 1.4fr',gap:16,alignItems:'start'}}>
+          {/* Left: Customer selector */}
+          <div>
+            <div className="card" style={{padding:0,overflow:'hidden'}}>
+              <div style={{padding:'14px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10}}>
+                <span style={{fontWeight:700,fontSize:13}}>Select Recipients</span>
+                <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+                  <select style={{fontSize:12,padding:'3px 8px'}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
+                    <option value="overdue">Overdue Only ({overdueCustomers.length})</option>
+                    <option value="active">All Active ({activeCustomers.length})</option>
+                    <option value="all">All Customers</option>
+                  </select>
+                  <button className="btn btn-ghost btn-sm" onClick={handleSelectAll} style={{fontSize:11}}>
+                    {selectedCustomers.length===displayCustomers.length?'Deselect All':'Select All'}
+                  </button>
+                </div>
+              </div>
+              <div style={{maxHeight:420,overflowY:'auto'}}>
+                {displayCustomers.map(c=>{
+                  const overdue = getCustomerOverdue(c.id);
+                  const invs = getCustomerInvoices(c.id);
+                  const isSelected = selectedCustomers.includes(c.id);
+                  return (
+                    <div key={c.id} onClick={()=>setSelectedCustomers(p=>p.includes(c.id)?p.filter(x=>x!==c.id):[...p,c.id])}
+                      style={{padding:'10px 14px',borderBottom:'1px solid var(--border)',cursor:'pointer',background:isSelected?'rgba(217,43,43,0.06)':'transparent',display:'flex',alignItems:'center',gap:10,transition:'background 0.1s'}}>
+                      <div style={{width:18,height:18,borderRadius:4,border:`2px solid ${isSelected?'var(--red)':'var(--border2)'}`,background:isSelected?'var(--red)':'transparent',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                        {isSelected&&<Icon name="check" size={11} color="#fff"/>}
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontWeight:700,fontSize:13,marginBottom:1}}>{c.company}</div>
+                        <div style={{fontSize:11,color:'var(--text3)'}}>{c.contact} · {c.phone}</div>
+                      </div>
+                      <div style={{textAlign:'right',flexShrink:0}}>
+                        {overdue>0&&<div style={{fontSize:12,fontWeight:700,color:'var(--red-light)'}}>{fmtCur(overdue)}</div>}
+                        {invs.length>0&&<div style={{fontSize:10,color:'var(--text3)'}}>{invs.length} invoice{invs.length>1?'s':''}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+                {displayCustomers.length===0&&<div style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>No customers match this filter</div>}
+              </div>
+              {selectedCustomers.length>0&&(
+                <div style={{padding:'10px 14px',background:'rgba(217,43,43,0.06)',borderTop:'1px solid var(--border)',fontSize:12,display:'flex',alignItems:'center',gap:8}}>
+                  <Icon name="check" size={14} color="var(--red)"/>
+                  <strong>{selectedCustomers.length}</strong> customer{selectedCustomers.length>1?'s':''} selected
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right: Message composer */}
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            {/* Channel */}
+            <div className="card card-sm">
+              <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>Send Via</div>
+              <div style={{display:'flex',gap:8}}>
+                {[['both','SMS + Email'],['sms','SMS Only'],['email','Email Only']].map(([v,l])=>(
+                  <button key={v} className={`btn btn-sm ${channel===v?'btn-primary':'btn-ghost'}`} onClick={()=>setChannel(v)}>
+                    <Icon name={v==='email'?'email':'sms'} size={13}/> {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Template or custom */}
+            <div className="card card-sm">
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+                <span style={{fontWeight:700,fontSize:13}}>Message</span>
+                <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12,cursor:'pointer',textTransform:'none',marginBottom:0,fontWeight:400}}>
+                  <input type="checkbox" checked={useCustom} onChange={e=>setUseCustom(e.target.checked)} style={{width:'auto'}}/>
+                  Write custom message
+                </label>
+              </div>
+              {!useCustom&&(
+                <select value={selectedTemplate} onChange={e=>setSelectedTemplate(e.target.value)} style={{marginBottom:10}}>
+                  {templates.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              )}
+              {/* Preview */}
+              {(channel==='sms'||channel==='both')&&(
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:11,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',marginBottom:4}}>SMS Preview {selectedCustomers.length>0&&<span style={{color:'var(--text2)',fontWeight:400,textTransform:'none'}}>— filled for {CUSTOMERS.find(c=>c.id===selectedCustomers[0])?.company}</span>}</div>
+                  {useCustom?(
+                    <textarea value={customMsg.sms} onChange={e=>setCustomMsg(p=>({...p,sms:e.target.value}))} placeholder="Write SMS message… Use {{contact}}, {{invoice_id}}, {{amount}}, {{due_date}}, {{days_overdue}}" rows={3} style={{fontSize:12}}/>
+                  ):(
+                    <div style={{padding:'10px 12px',background:'var(--bg3)',borderRadius:8,fontSize:12,lineHeight:1.6,color:'var(--text2)',fontFamily:'monospace',maxHeight:80,overflow:'auto'}}>
+                      {selectedCustomers.length>0
+                        ? fillTemplate(tpl?.sms||'', buildVars(CUSTOMERS.find(c=>c.id===selectedCustomers[0])||CUSTOMERS[0]))
+                        : (tpl?.sms||'')}
+                    </div>
+                  )}
+                  <div style={{fontSize:10,color:'var(--text3)',marginTop:3}}>
+                    {(useCustom?customMsg.sms:tpl?.sms||'').length} characters
+                  </div>
+                </div>
+              )}
+              {(channel==='email'||channel==='both')&&(
+                <div>
+                  <div style={{fontSize:11,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',marginBottom:4}}>Email Preview</div>
+                  {useCustom?(
+                    <>
+                      <input value={customMsg.subject} onChange={e=>setCustomMsg(p=>({...p,subject:e.target.value}))} placeholder="Subject…" style={{marginBottom:6,fontSize:12}}/>
+                      <textarea value={customMsg.email} onChange={e=>setCustomMsg(p=>({...p,email:e.target.value}))} placeholder="Email body… Use {{contact}}, {{invoice_id}}, {{amount}}, {{due_date}}" rows={5} style={{fontSize:12}}/>
+                    </>
+                  ):(
+                    <div style={{padding:'10px 12px',background:'var(--bg3)',borderRadius:8,fontSize:12,lineHeight:1.7,color:'var(--text2)',maxHeight:120,overflow:'auto',whiteSpace:'pre-wrap'}}>
+                      {selectedCustomers.length>0
+                        ? fillTemplate(tpl?.email||'', buildVars(CUSTOMERS.find(c=>c.id===selectedCustomers[0])||CUSTOMERS[0])).slice(0,300)+'…'
+                        : (tpl?.email||'').slice(0,200)+'…'}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Send button */}
+            {sendResult&&(
+              <div className={`alert alert-${sendResult.failed===0?'green':'red'}`}>
+                <Icon name={sendResult.failed===0?'check':'warning'} size={15}/>
+                <span>Sent to {sendResult.sent} customer{sendResult.sent!==1?'s':''}. {sendResult.failed>0?`${sendResult.failed} failed.`:''} Your SMS/email app opened for each message.</span>
+              </div>
+            )}
+            <button className="btn btn-primary" onClick={handleSend} disabled={sending||selectedCustomers.length===0} style={{fontSize:14,padding:'12px 20px'}}>
+              {sending?'Sending…':<><Icon name="send" size={15}/> Send to {selectedCustomers.length||0} Customer{selectedCustomers.length!==1?'s':''}</>}
+            </button>
+            <div style={{fontSize:11,color:'var(--text3)',textAlign:'center',lineHeight:1.5}}>
+              Messages open in your SMS and email app for final review before sending. Nothing is sent automatically without your confirmation.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── LOG TAB ── */}
+      {tab==='log'&&(
+        <div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+            <div style={{fontSize:13,color:'var(--text2)'}}>{commLog.length} messages sent</div>
+            {commLog.length>0&&<button className="btn btn-ghost btn-sm" style={{color:'var(--red-light)'}} onClick={()=>{if(window.confirm('Clear all message history?')){saveCommLog([]);setCommLog([]);}}}>Clear History</button>}
+          </div>
+          {commLog.length===0&&(
+            <div className="card" style={{textAlign:'center',padding:40}}>
+              <Icon name="chat" size={32} color="var(--text3)"/>
+              <div style={{fontSize:14,color:'var(--text2)',marginTop:12}}>No messages sent yet. Use Compose to send reminders.</div>
+            </div>
+          )}
+          {commLog.length>0&&(
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Date & Time</th><th>Customer</th><th>Template</th><th>Channel</th><th>Phone / Email</th><th>Status</th><th>Preview</th></tr></thead>
+                <tbody>
+                  {commLog.map(m=>(
+                    <tr key={m.id}>
+                      <td style={{fontSize:11,color:'var(--text3)',whiteSpace:'nowrap'}}>{new Date(m.sentAt).toLocaleString('en-NZ',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
+                      <td style={{fontWeight:700}}>{m.customerName}</td>
+                      <td style={{fontSize:12,color:'var(--text2)'}}>{m.templateName}</td>
+                      <td><span className={`badge badge-${m.channel==='both'?'blue':m.channel==='sms'?'green':'orange'}`}>{m.channel==='both'?'SMS+Email':m.channel.toUpperCase()}</span></td>
+                      <td style={{fontSize:11,color:'var(--text3)'}}>{m.phone||m.email||'—'}</td>
+                      <td><StatusBadge status={m.status}/></td>
+                      <td style={{fontSize:11,color:'var(--text2)',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.preview}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TEMPLATES TAB ── */}
+      {tab==='templates'&&(
+        <div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+            <div style={{fontSize:13,color:'var(--text2)'}}>{templates.length} templates · Variables: {'{{contact}} {{company}} {{invoice_id}} {{amount}} {{due_date}} {{days_overdue}} {{vehicle}} {{end_date}}'}</div>
+            <button className="btn btn-primary btn-sm" onClick={()=>setEditingTemplate({id:'t'+Date.now(),name:'New Template',type:'both',category:'reminder',subject:'',sms:'',email:''})}>
+              <Icon name="plus" size={13}/> New Template
+            </button>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:12}}>
+            {templates.map(t=>(
+              <div key={t.id} className="card">
+                {editingTemplate?.id===t.id ? (
+                  <div>
+                    <div className="form-row mb-3">
+                      <div className="form-group"><label>Template Name</label><input value={editingTemplate.name} onChange={e=>setEditingTemplate(p=>({...p,name:e.target.value}))}/></div>
+                      <div className="form-group"><label>Email Subject</label><input value={editingTemplate.subject} onChange={e=>setEditingTemplate(p=>({...p,subject:e.target.value}))}/></div>
+                    </div>
+                    <div className="form-group mb-3"><label>SMS Message</label><textarea value={editingTemplate.sms} onChange={e=>setEditingTemplate(p=>({...p,sms:e.target.value}))} rows={3}/></div>
+                    <div className="form-group mb-3"><label>Email Body</label><textarea value={editingTemplate.email} onChange={e=>setEditingTemplate(p=>({...p,email:e.target.value}))} rows={6}/></div>
+                    <div style={{display:'flex',gap:8}}>
+                      <button className="btn btn-primary btn-sm" onClick={()=>{
+                        const updated = templates.find(x=>x.id===editingTemplate.id)
+                          ? templates.map(x=>x.id===editingTemplate.id?editingTemplate:x)
+                          : [...templates,editingTemplate];
+                        saveTemplates(updated); setTemplates(updated); setEditingTemplate(null);
+                      }}><Icon name="check" size={13}/> Save</button>
+                      <button className="btn btn-ghost btn-sm" onClick={()=>setEditingTemplate(null)}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+                      <span style={{fontWeight:700,fontSize:14}}>{t.name}</span>
+                      <span className={`badge badge-${t.category==='overdue'?'red':t.category==='invoice'?'blue':'green'}`}>{t.category}</span>
+                      <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+                        <button className="btn btn-ghost btn-sm" onClick={()=>setEditingTemplate({...t})}><Icon name="edit" size={13}/> Edit</button>
+                        {!['t001','t002','t003','t004'].includes(t.id)&&<button className="btn btn-ghost btn-sm" style={{color:'var(--red-light)'}} onClick={()=>{const u=templates.filter(x=>x.id!==t.id);saveTemplates(u);setTemplates(u);}}>Delete</button>}
+                      </div>
+                    </div>
+                    <div className="grid" style={{gridTemplateColumns:'1fr 1fr',gap:10}}>
+                      <div style={{padding:'10px 12px',background:'var(--bg3)',borderRadius:8}}>
+                        <div style={{fontSize:10,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',marginBottom:4}}>SMS</div>
+                        <div style={{fontSize:12,color:'var(--text2)',lineHeight:1.6}}>{t.sms?.slice(0,120)}…</div>
+                      </div>
+                      <div style={{padding:'10px 12px',background:'var(--bg3)',borderRadius:8}}>
+                        <div style={{fontSize:10,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',marginBottom:4}}>Email Subject</div>
+                        <div style={{fontSize:12,color:'var(--text2)',marginBottom:6}}>{t.subject}</div>
+                        <div style={{fontSize:11,color:'var(--text3)',lineHeight:1.6}}>{t.email?.slice(0,100)}…</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── SCHEDULE TAB ── */}
+      {tab==='schedule'&&(
+        <div>
+          <div className="card mb-4" style={{borderLeft:'3px solid var(--orange)'}}>
+            <div style={{fontWeight:700,fontSize:14,marginBottom:6}}>Automatic Reminder Rules</div>
+            <div style={{fontSize:12,color:'var(--text2)',marginBottom:16}}>Set up automatic reminders that trigger based on invoice status. Messages are prepared automatically and queued for your review.</div>
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {[
+                {id:'r1',label:'Reminder 1 day before due date',trigger:'1 day before due',template:'t003',channel:'both',active:true},
+                {id:'r2',label:'Reminder on due date',trigger:'On due date',template:'t001',channel:'sms',active:true},
+                {id:'r3',label:'Overdue — 3 days after due',trigger:'3 days overdue',template:'t001',channel:'both',active:true},
+                {id:'r4',label:'Urgent — 7 days overdue',trigger:'7 days overdue',template:'t002',channel:'both',active:true},
+                {id:'r5',label:'Hire expiry — 7 days before end',trigger:'7 days before hire end',template:'t004',channel:'both',active:false},
+              ].map(rule=>(
+                <div key={rule.id} className="card card-sm" style={{display:'flex',alignItems:'center',gap:14}}>
+                  <div style={{width:36,height:20,borderRadius:10,background:rule.active?'var(--green)':'var(--border2)',cursor:'pointer',position:'relative',flexShrink:0}}>
+                    <div style={{position:'absolute',top:2,left:rule.active?18:2,width:16,height:16,borderRadius:'50%',background:'#fff',transition:'left 0.2s'}}/>
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:600,fontSize:13}}>{rule.label}</div>
+                    <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>Trigger: {rule.trigger} · Template: {templates.find(t=>t.id===rule.template)?.name} · {rule.channel==='both'?'SMS + Email':rule.channel.toUpperCase()}</div>
+                  </div>
+                  <span className={`badge badge-${rule.active?'green':'gray'}`}>{rule.active?'Active':'Inactive'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="card" style={{borderLeft:'3px solid var(--blue)'}}>
+            <div style={{fontWeight:700,fontSize:14,marginBottom:6}}>Pending Reminders</div>
+            <div style={{fontSize:12,color:'var(--text2)',marginBottom:14}}>Customers who should receive reminders based on your active rules right now:</div>
+            {overdueCustomers.length===0&&<div style={{fontSize:13,color:'var(--text3)',textAlign:'center',padding:16}}>No overdue customers — all payments up to date ✓</div>}
+            {overdueCustomers.map(c=>{
+              const invs = getCustomerInvoices(c.id).filter(i=>i.status==='overdue');
+              return (
+                <div key={c.id} style={{display:'flex',alignItems:'center',gap:14,padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:700,fontSize:13}}>{c.company}</div>
+                    <div style={{fontSize:11,color:'var(--text3)'}}>{invs.length} overdue invoice{invs.length>1?'s':''} · {fmtCur(invs.reduce((a,i)=>a+i.total,0))} outstanding</div>
+                  </div>
+                  <button className="btn btn-primary btn-sm" onClick={()=>{setSelectedCustomers([c.id]);setSelectedTemplate('t002');setTab('compose');}}>
+                    <Icon name="send" size={13}/> Send Now
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ─── DOCUMENTS PAGE ──────────────────────────────── */
 const DocumentsPage = () => {
   const [search,setSearch]=useState('');
@@ -3291,6 +3764,7 @@ const App = () => {
     invoicing:<InvoicingPage/>,
     maintenance:<MaintenancePage/>,
     reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig}/>,
+    communications:<CommunicationsPage/>,
     documents:<DocumentsPage/>,
     navman:<NavmanPage/>,
     settings:<SettingsPage sheetsConfig={sheetsConfig} syncState={syncState} onSheetsSetup={()=>setSheetsSetupOpen(true)} onManualSync={()=>doSync()} xeroConfig={xeroConfig} xeroSyncState={xeroSyncState} onXeroConnect={startXeroAuth} onXeroSync={doXeroSync} onXeroDisconnect={()=>{clearXeroConfig();setXeroConfig(null);}} onXeroDiag={async()=>{ try { const t=xeroConfig?.accessToken; if(!t){alert('Not connected');return;} const r=await fetch('https://xero-proxy.ssrentalsnz.workers.dev/xero-api/connections',{headers:{Authorization:'Bearer '+t}}); const d=await r.json(); alert('Connection OK! Orgs: '+JSON.stringify(d.map(x=>x.tenantName))); } catch(e){alert('Error: '+e.message);}}}/>,
