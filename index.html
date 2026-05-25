@@ -1913,54 +1913,55 @@ const saveBankTxns = txns => localStorage.setItem(BANK_TXN_KEY, JSON.stringify(t
 // ASB CSV format: Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount
 // Also handle generic bank CSV formats
 const parseASBCsv = (text) => {
-  const lines = text.trim().split('\n').filter(l=>l.trim());
+  // ASB format: rows 1-7 are metadata, row 7 is blank, row 8 is header
+  // Header: Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount
+  const lines = text.split('\n');
   const txns = [];
-  // Find header row
-  let dataStart = 0;
-  for (let i=0; i<Math.min(5,lines.length); i++) {
-    if (lines[i].toLowerCase().includes('date') && lines[i].toLowerCase().includes('amount')) {
-      dataStart = i+1; break;
-    }
+  let headerIdx = -1;
+  for (let i=0; i<Math.min(10,lines.length); i++) {
+    if (lines[i].startsWith('Date,') || lines[i].includes('Date,Unique Id')) { headerIdx = i; break; }
   }
-  const headers = lines[dataStart-1]?.split(',').map(h=>h.replace(/"/g,'').toLowerCase().trim())||[];
-  const dateIdx = headers.findIndex(h=>h==='date'||h.includes('date'));
-  const amtIdx = headers.findIndex(h=>h==='amount'||h.includes('amount'));
-  const payeeIdx = headers.findIndex(h=>h==='payee'||h.includes('payee')||h.includes('description'));
-  const memoIdx = headers.findIndex(h=>h==='memo'||h.includes('memo')||h.includes('reference'));
-  const typeIdx = headers.findIndex(h=>h.includes('tran')||h.includes('type'));
-
-  for (let i=dataStart; i<lines.length; i++) {
-    const cols = lines[i].match(/(".*?"|[^,]+|(?<=,)(?=,)|(?<=,)$|^(?=,))/g)||lines[i].split(',');
-    const clean = cols.map(c=>(c||'').replace(/^"|"$/g,'').trim());
-    const dateStr = clean[dateIdx]||'';
-    const amtStr = clean[amtIdx]||'0';
-    const payee = clean[payeeIdx]||'';
-    const memo = clean[memoIdx]||'';
-    const amount = parseFloat(amtStr.replace(/[$,]/g,''))||0;
-    if (!dateStr || amount===0) continue;
-    // Parse NZ date dd/mm/yyyy or yyyy-mm-dd
-    let date = '';
-    const dmatch = dateStr.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
-    const ymatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (dmatch) { const y=dmatch[3].length===2?'20'+dmatch[3]:dmatch[3]; date=`${y}-${dmatch[2].padStart(2,'0')}-${dmatch[1].padStart(2,'0')}`; }
-    else if (ymatch) date=dateStr;
-    if (!date) continue;
-    txns.push({ id: date+'_'+i, date, payee, memo, amount, type: amount>0?'credit':'debit', category: categoriseTxn(payee, memo, amount), raw: lines[i] });
+  if (headerIdx === -1) return [];
+  // Col indexes from ASB header: Date=0, UniqueId=1, TranType=2, ChequeNo=3, Payee=4, Memo=5, Amount=6
+  for (let i=headerIdx+1; i<lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const cols = line.split(',');
+    if (cols.length < 7) continue;
+    const dateStr = (cols[0]||'').replace(/"/g,'').trim();   // yyyy/mm/dd
+    const uniqueId = (cols[1]||'').replace(/"/g,'').trim();
+    const payee = (cols[4]||'').replace(/"/g,'').trim();
+    const memo = (cols[5]||'').replace(/"/g,'').trim();
+    const amtStr = (cols[6]||'').replace(/"/g,'').trim();
+    const amount = parseFloat(amtStr);
+    if (!dateStr || isNaN(amount) || amount === 0) continue;
+    // Convert yyyy/mm/dd to yyyy-mm-dd
+    const date = dateStr.replace(/\//g, '-');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    txns.push({
+      id: uniqueId || date+'_'+i,
+      date, payee, memo, amount,
+      type: amount>0?'credit':'debit',
+      category: categoriseTxn(payee, memo, amount),
+      source: 'csv'
+    });
   }
   return txns;
 };
 
 // Auto-categorisation rules
 const CATEGORIES = {
-  income: { label:'Hire Income', color:'var(--green)', keywords:['hire','rental','invoice','inv-','payment received','chardikala','empire','sukh','pangly','team freight','ss dhillon','reet','convoy','baaz','jatana','kahlon','singh invest','satpal','shah trans','vertex','dhillon line','dhadda','s&z','s&s','pb48'] },
+  income: { label:'Hire Income', color:'var(--green)', keywords:['hire','rental','truck rent','inv','gocardless','d/c from','chardikala','empire trucking','sukh','pangly','team freight','ss dhillon','reet invest','convoy','baaz','jatana','kahlon','singh invest','satpal','shah transport','vertex haulage','dhillon','dhadda','s & z','s&z','s&s','pb48','cambridge diese','gsr transport','samra'] },
   ruc: { label:'RUC', color:'var(--orange)', keywords:['nzta','ruc','road user','e-road','eroad'] },
   insurance: { label:'Insurance', color:'var(--blue)', keywords:['insurance','vero','amic','nzi','zurich','tower'] },
   fuel: { label:'Fuel', color:'var(--orange)', keywords:['bp','z energy','gull','mobil','fuel','diesel'] },
   maintenance: { label:'Repairs & Maintenance', color:'var(--red)', keywords:['scania','cambridge diesel','tyres','tyre','warrant','wof','cof','vtnz','workshop','mechanic','parts','auto'] },
   flexi: { label:'Flexi Loan', color:'#8E44AD', keywords:['flexi','flexirent','flexi-rent'] },
   heartland: { label:'Heartland Loan', color:'#8E44AD', keywords:['heartland','heartland bank'] },
-  navman: { label:'Navman/GPS', color:'var(--blue)', keywords:['navman','teletrac','gps','tracking'] },
+  navman: { label:'Navman/GPS', color:'var(--blue)', keywords:['navman wireless','teletracnavman','teletrac','navman'] },
   registration: { label:'Registration', color:'var(--text2)', keywords:['nzta rego','registration','rego'] },
+  advertising: { label:'Advertising', color:'#E67E22', keywords:['facebk','facebook','tiktok','google ads','openai','chatgpt'] },
+  gst_tax: { label:'GST / Tax', color:'#C0392B', keywords:['inland revenue','ird','gst'] },
   other_expense: { label:'Other Expense', color:'var(--text3)', keywords:[] },
 };
 
