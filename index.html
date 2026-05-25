@@ -477,15 +477,12 @@ const pullHiresFromSheet1 = (rows, extLog) => {
   }
   if (headerIdx === -1) return 0;
   const headers = rows[headerIdx].map(h => (h||'').toLowerCase().trim());
-  // Detect column indexes dynamically
-  let compIdx = headers.findIndex(h => h.includes('company'));
-  let periodIdx = headers.findIndex(h => h.includes('hire period'));
-  let rateIdx = headers.findIndex(h => h.includes('weekly charge') || h === 'weekly charges');
-  // Fallback: if company not found in headers, check first non-empty data cell
-  if (compIdx === -1) compIdx = 1; // Column B is typically company name
-  if (periodIdx === -1) periodIdx = 4; // Column E is typically hire period
-  if (rateIdx === -1) rateIdx = 6;   // Column G is typically weekly charges
-  console.log('Sheet1 cols - company:', compIdx, 'period:', periodIdx, 'rate:', rateIdx);
+  // Detect column indexes — with fallbacks matching actual sheet structure
+  // Sheet structure: A(blank), B(Company), C(Contact), D(Phone), E(Hire period), F(Description), G(Rego), H(Weekly charges)
+  let compIdx = headers.findIndex(h => h.includes('company')); if (compIdx === -1) compIdx = 1;
+  let periodIdx = headers.findIndex(h => h.includes('hire period')); if (periodIdx === -1) periodIdx = 4;
+  let regoIdx = headers.findIndex(h => h.includes('rego')); if (regoIdx === -1) regoIdx = 6;
+  let rateIdx = headers.findIndex(h => h.includes('weekly charge') || h === 'weekly charges'); if (rateIdx === -1) rateIdx = 7;
 
   let updated = 0;
   rows.slice(headerIdx + 1).forEach(row => {
@@ -493,7 +490,7 @@ const pullHiresFromSheet1 = (rows, extLog) => {
     const periodStr = (row[periodIdx] || '').trim();
     const regoStr = (row[regoIdx] || '').trim();
     const rateStr = (row[rateIdx] || '').toString().trim();
-    if (!company || !periodStr || periodStr .toLowerCase().includes('didn')) return;
+    if (!company || !periodStr || periodStr.toLowerCase().includes('didn') || periodStr.toLowerCase() === 'n/a') return;
 
     const period = parseHirePeriod(periodStr);
     if (!period) return;
@@ -557,30 +554,17 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
     // STEP 1: Pull changes FROM Sheets INTO app
     onProgress('Reading changes from Sheets…', 0);
     let pullUpdates = 0;
-    let debugLog = [];
     try {
       // Read Sheet1 (original customer hire period tab)
       const sheet1Rows = await readSheetTab(accessToken, spreadsheetId, 'Sheet1');
-      debugLog.push('Sheet1 rows: ' + (sheet1Rows ? sheet1Rows.length : 'null'));
-      if (sheet1Rows && sheet1Rows.length > 0) {
-        debugLog.push('Sheet1 headers: ' + JSON.stringify(sheet1Rows[0]));
-        debugLog.push('Sheet1 row2: ' + JSON.stringify(sheet1Rows[1]));
-        debugLog.push('Sheet1 row3: ' + JSON.stringify(sheet1Rows[2]));
-      }
-      const sheet1Log = [];
-      if (sheet1Rows) pullUpdates += pullHiresFromSheet1(sheet1Rows, sheet1Log);
-      debugLog.push('Sheet1 updates: ' + pullUpdates);
-      sheet1Log.slice(0,12).forEach(l => debugLog.push(l));
+      if (sheet1Rows) pullUpdates += pullHiresFromSheet1(sheet1Rows, []);
       // Read Hire Management tab
       const hireRows = await readSheetTab(accessToken, spreadsheetId, 'Hire Management');
       if (hireRows) pullUpdates += pullHiresFromSheet(hireRows);
       // Read Customers tab
       const custRows = await readSheetTab(accessToken, spreadsheetId, 'Customers');
       if (custRows) pullUpdates += pullCustomersFromSheet(custRows);
-    } catch(e) {
-      debugLog.push('ERROR: ' + e.message);
-    }
-    if (debugLog.length) { console.log('SHEETS SYNC DEBUG:', debugLog); alert('Sync Debug:\n' + debugLog.join('\n')); }
+    } catch(e) { console.error('Sheet pull error:', e.message); }
 
     // STEP 2: Push all current app data TO Sheets
     const allRows = buildSheetRows();
