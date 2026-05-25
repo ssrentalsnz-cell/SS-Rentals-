@@ -488,7 +488,7 @@ const pullHiresFromSheet1 = (rows) => {
     const periodStr = (row[periodIdx] || '').trim();
     const regoStr = (row[regoIdx] || '').trim();
     const rateStr = (row[rateIdx] || '').toString().trim();
-    if (!company || !periodStr || periodStr === 'Didn't hire') return;
+    if (!company || !periodStr || periodStr .toLowerCase().includes('didn')) return;
 
     const period = parseHirePeriod(periodStr);
     if (!period) return;
