@@ -2575,6 +2575,16 @@ const logMessage = (entry) => {
 
 const SMS_PROXY = 'https://xero-proxy.ssrentalsnz.workers.dev';
 
+// Format NZ phone number to E.164 international format
+const formatNZPhone = (phone) => {
+  if (!phone) return '';
+  let p = phone.replace(/[\s\-().]/g, ''); // remove spaces, dashes, brackets
+  if (p.startsWith('+64')) return p;        // already international
+  if (p.startsWith('64')) return '+' + p;   // missing plus
+  if (p.startsWith('0')) return '+64' + p.slice(1); // local format 0xx -> +64xx
+  return '+64' + p;                          // no prefix at all
+};
+
 // Send SMS via ClickSend through Cloudflare Worker
 const sendSMSReal = async (phone, message) => {
   try {
@@ -2593,14 +2603,18 @@ const sendSMSReal = async (phone, message) => {
 // Send bulk SMS via ClickSend
 const sendBulkSMSReal = async (messages) => {
   try {
+    // Format all phone numbers before sending
+    const formatted = messages.map(m => ({ ...m, to: formatNZPhone(m.to) }));
+    console.log('Sending SMS to:', formatted.map(m=>m.to));
     const res = await fetch(SMS_PROXY + '/sms/bulk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages })
+      body: JSON.stringify({ messages: formatted })
     });
     const data = await res.json();
+    console.log('ClickSend response:', JSON.stringify(data));
     return data?.data?.messages || [];
-  } catch(e) { return []; }
+  } catch(e) { console.error('SMS error:', e); return []; }
 };
 
 // Fetch SMS delivery history from ClickSend
@@ -2765,7 +2779,8 @@ const CommunicationsPage = () => {
         const bulkResults = await sendBulkSMSReal(smsMessages);
         allMessages.forEach((m,i) => {
           const r = bulkResults[i];
-          const status = r?.status==='SUCCESS'?'sent':m.cust.phone?'failed':'no_phone';
+          console.log('Result for', m.cust.company, ':', JSON.stringify(r));
+          const status = (r?.status==='SUCCESS'||r?.status==='Sent')?'sent':m.cust.phone?'failed':'no_phone';
           results.push({
             custId:m.custId, customerName:m.cust.company, channel:'sms',
             templateId:useCustom?'custom':selectedTemplate,
