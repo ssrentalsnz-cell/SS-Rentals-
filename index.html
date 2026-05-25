@@ -2418,8 +2418,8 @@ const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xer
             {!xeroConfig?.accessToken&&(
               <div style={{marginTop:14,padding:'12px 14px',background:'var(--bg3)',borderRadius:8,fontSize:12,lineHeight:1.8,borderLeft:'3px solid rgba(0,184,217,0.4)'}}>
                 <strong>How it works:</strong><br/>
-                1. Click <strong>Connect Xero</strong> — you'll be redirected to Xero to approve access<br/>
-                2. After approving, you'll be redirected back here automatically<br/>
+                1. Click <strong>Connect Xero</strong> — you&apos;ll be redirected to Xero to approve access<br/>
+                2. After approving, you&apos;ll be redirected back here automatically<br/>
                 3. Click <strong>Sync Now</strong> to pull invoice statuses from Xero<br/>
                 4. Invoice statuses (paid/overdue/sent) will update in real time
               </div>
@@ -2636,7 +2636,7 @@ const SheetsSetupModal = ({open, onClose, onSave, initialConfig}) => {
             <div>
               <div className="alert alert-green" style={{marginBottom:16}}>
                 <Icon name="info" size={15}/>
-                <div>Uses Google Identity Services (GIS) — Google's current secure auth method. A consent popup will appear. Your token stays in your browser only.</div>
+                <div>Uses Google Identity Services (GIS) — Google&apos;s current secure auth method. A consent popup will appear. Your token stays in your browser only.</div>
               </div>
               <div style={{padding:'12px 14px',background:'var(--bg3)',borderRadius:8,marginBottom:16,fontSize:12,lineHeight:1.8}}>
                 <strong>Client ID:</strong> <code style={{fontSize:11,wordBreak:'break-all'}}>{clientId}</code><br/>
