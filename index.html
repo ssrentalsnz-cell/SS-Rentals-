@@ -1391,12 +1391,13 @@ const CustomersPage = () => {
 };
 
 /* ─── HIRES PAGE ──────────────────────────────────── */
-const HiresPage = () => {
+const HiresPage = ({refreshKey=0}) => {
   const [showNew,setShowNew]=useState(false);
   const [sel,setSel]=useState(null);
   const [editing,setEditing]=useState(false);
   const [saved,setSaved]=useState(false);
   const [hireData,setHireData]=useState(()=>HIRES.map(h=>({...h})));
+  useEffect(()=>{ setHireData(HIRES.map(h=>({...h}))); },[refreshKey]);
   const active=hireData.filter(h=>h.status==='active');
   const completed=hireData.filter(h=>h.status==='completed');
 
@@ -2715,6 +2716,7 @@ const App = () => {
   const [theme,setTheme]=useState('dark');
   const [page,setPage]=useState('dashboard');
   const [sheetsSetupOpen, setSheetsSetupOpen] = useState(false);
+  const [dataRefreshKey, setDataRefreshKey] = useState(0);
   const [sheetsConfig, setSheetsConfig] = useState(()=>loadSheetsConfig());
   const [syncState, setSyncState] = useState({configured:false,syncing:false,lastSync:null,error:null,syncMsg:'',syncPct:0});
   const autoSyncTimer = useRef(null);
@@ -2807,7 +2809,7 @@ const App = () => {
     dashboard:<Dashboard theme={theme} setPage={setPage}/>,
     fleet:<FleetPage theme={theme}/>,
     customers:<CustomersPage/>,
-    hires:<HiresPage/>,
+    hires:<HiresPage refreshKey={dataRefreshKey}/>,
     invoicing:<InvoicingPage/>,
     maintenance:<MaintenancePage/>,
     reports:<ReportsPage theme={theme}/>,
