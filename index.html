@@ -495,54 +495,50 @@ const pullHiresFromSheet1 = (rows, extLog) => {
     const period = parseHirePeriod(periodStr);
     if (!period) return;
 
-    // Find matching customer
-    const cust = CUSTOMERS.find(c =>
-      c.company.toLowerCase() === company.toLowerCase() ||
-      c.company.toLowerCase().includes(company.toLowerCase()) ||
-      company.toLowerCase().includes(c.company.toLowerCase().split(' ')[0])
-    );
+    // Find matching customer — normalize & and spaces for comparison
+    const normalize = s => s.toLowerCase().replace(/\s+/g,' ').replace(/&/g,'and').trim();
+    const compNorm = normalize(company);
+    const cust = CUSTOMERS.find(c => {
+      const cNorm = normalize(c.company);
+      return cNorm === compNorm ||
+        cNorm.includes(compNorm) ||
+        compNorm.includes(cNorm) ||
+        cNorm.split(' ')[0] === compNorm.split(' ')[0];
+    });
     if (!cust) return;
 
-    // Find best matching hire for this customer — match by start date proximity
+    // Find best matching hire — most recent for this customer
     const hire = HIRES.filter(h => h.customer === cust.id)
-      .sort((a,b) => Math.abs(new Date(a.start)-new Date(period.start)) - Math.abs(new Date(b.start)-new Date(period.start)))[0];
+      .sort((a,b) => new Date(b.start) - new Date(a.start))[0];
     if (!hire) return;
 
+    // Always update end date and start date from sheet
     let changed = false;
     if (hire.end !== period.end) { hire.end = period.end; changed = true; }
     if (hire.start !== period.start) { hire.start = period.start; changed = true; }
 
     // Parse weekly rate
     if (rateStr) {
-      const rateNum = parseFloat(rateStr.replace(/[$,\s]/g, ''));
+      const rateNum = parseFloat(rateStr.replace(/[^0-9.]/g, ''));
       if (!isNaN(rateNum) && rateNum > 0 && rateNum !== hire.weekly_truck) {
         hire.weekly_truck = rateNum; changed = true;
       }
     }
 
-    // Update hire status and truck status based on end date
-    if (changed) {
-      const truck = TRUCKS.find(t => t.id === hire.truck);
-      const endDate = new Date(period.end);
-      const today = new Date();
-      if (endDate >= today) {
-        // Extended — reactivate if was completed
-        hire.status = 'active';
-        if (truck) {
-          truck.status = 'on_hire';
-          truck.hirer = cust.id;
-          truck.hire_end = period.end;
-        }
-      } else {
-        // Past end date — mark completed
-        hire.status = 'completed';
-        if (truck && truck.hirer === cust.id) {
-          truck.status = 'available';
-          truck.hirer = null;
-        }
-      }
-      updated++;
+    // Always update status based on end date (even if no other changes)
+    const truck = TRUCKS.find(t => t.id === hire.truck);
+    const endDate = new Date(period.end + 'T23:59:59');
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    if (endDate >= todayStart) {
+      hire.status = 'active';
+      if (truck) { truck.status = 'on_hire'; truck.hirer = cust.id; }
+      changed = true;
+    } else {
+      hire.status = 'completed';
+      if (truck && truck.hirer === cust.id) { truck.status = 'available'; truck.hirer = null; }
+      changed = true;
     }
+    if (changed) updated++;
   });
   return updated;
 };
