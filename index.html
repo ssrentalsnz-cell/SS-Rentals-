@@ -305,6 +305,19 @@ const statusBadge = s => {
   return `badge badge-${m[s]||'gray'}`;
 };
 
+/* ─── HIRE OVERRIDES STORE ───────────────────────── */
+const HIRE_OVERRIDES_KEY = 'ss_rentals_hire_overrides';
+const loadHireOverrides = () => { try { return JSON.parse(localStorage.getItem(HIRE_OVERRIDES_KEY)||'{}'); } catch { return {}; } };
+const saveHireOverride = (id, data) => {
+  const all = loadHireOverrides();
+  all[id] = {...(all[id]||{}), ...data};
+  localStorage.setItem(HIRE_OVERRIDES_KEY, JSON.stringify(all));
+};
+const getEffectiveHires = () => {
+  const overrides = loadHireOverrides();
+  return HIRES.map(h => overrides[h.id] ? {...h, ...overrides[h.id]} : {...h});
+};
+
 /* ─── GOOGLE SHEETS SYNC ENGINE ──────────────────── */
 const SHEETS_CONFIG_KEY = 'ss_rentals_sheets_config';
 
@@ -525,20 +538,19 @@ const pullHiresFromSheet1 = (rows, extLog) => {
       }
     }
 
-    // Always update status based on end date (even if no other changes)
+    // Save overrides to localStorage so they persist across renders
     const truck = TRUCKS.find(t => t.id === hire.truck);
     const endDate = new Date(period.end + 'T23:59:59');
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    if (endDate >= todayStart) {
-      hire.status = 'active';
-      if (truck) { truck.status = 'on_hire'; truck.hirer = cust.id; }
-      changed = true;
-    } else {
-      hire.status = 'completed';
-      if (truck && truck.hirer === cust.id) { truck.status = 'available'; truck.hirer = null; }
-      changed = true;
+    const newStatus = endDate >= todayStart ? 'active' : 'completed';
+    const override = { end: period.end, start: period.start, status: newStatus };
+    if (rateStr) { const r = parseFloat(rateStr.replace(/[^0-9.]/g,'')); if (!isNaN(r) && r > 0) override.weekly_truck = r; }
+    saveHireOverride(hire.id, override);
+    if (truck) {
+      if (newStatus === 'active') { truck.status = 'on_hire'; truck.hirer = cust.id; }
+      else if (truck.hirer === cust.id) { truck.status = 'available'; truck.hirer = null; }
     }
-    if (changed) updated++;
+    updated++;
   });
   return updated;
 };
@@ -1396,8 +1408,8 @@ const HiresPage = ({refreshKey=0}) => {
   const [sel,setSel]=useState(null);
   const [editing,setEditing]=useState(false);
   const [saved,setSaved]=useState(false);
-  const [hireData,setHireData]=useState(()=>HIRES.map(h=>({...h})));
-  useEffect(()=>{ setHireData(HIRES.map(h=>({...h}))); },[refreshKey]);
+  const [hireData,setHireData]=useState(()=>getEffectiveHires());
+  useEffect(()=>{ setHireData(getEffectiveHires()); },[refreshKey]);
   const active=hireData.filter(h=>h.status==='active');
   const completed=hireData.filter(h=>h.status==='completed');
 
