@@ -1902,22 +1902,220 @@ const VehicleRevenueChart = ({theme}) => {
 };
 
 /* ─── REPORTS PAGE ────────────────────────────────── */
-const ReportsPage = ({theme}) => {
+
+/* ─── BANK TRANSACTION ENGINE ────────────────────── */
+const BANK_TXN_KEY = 'ss_rentals_bank_txns';
+const BANK_RULES_KEY = 'ss_rentals_bank_rules';
+
+const loadBankTxns = () => { try { return JSON.parse(localStorage.getItem(BANK_TXN_KEY)||'[]'); } catch { return []; } };
+const saveBankTxns = txns => localStorage.setItem(BANK_TXN_KEY, JSON.stringify(txns));
+
+// ASB CSV format: Date,Unique Id,Tran Type,Cheque Number,Payee,Memo,Amount
+// Also handle generic bank CSV formats
+const parseASBCsv = (text) => {
+  const lines = text.trim().split('\n').filter(l=>l.trim());
+  const txns = [];
+  // Find header row
+  let dataStart = 0;
+  for (let i=0; i<Math.min(5,lines.length); i++) {
+    if (lines[i].toLowerCase().includes('date') && lines[i].toLowerCase().includes('amount')) {
+      dataStart = i+1; break;
+    }
+  }
+  const headers = lines[dataStart-1]?.split(',').map(h=>h.replace(/"/g,'').toLowerCase().trim())||[];
+  const dateIdx = headers.findIndex(h=>h==='date'||h.includes('date'));
+  const amtIdx = headers.findIndex(h=>h==='amount'||h.includes('amount'));
+  const payeeIdx = headers.findIndex(h=>h==='payee'||h.includes('payee')||h.includes('description'));
+  const memoIdx = headers.findIndex(h=>h==='memo'||h.includes('memo')||h.includes('reference'));
+  const typeIdx = headers.findIndex(h=>h.includes('tran')||h.includes('type'));
+
+  for (let i=dataStart; i<lines.length; i++) {
+    const cols = lines[i].match(/(".*?"|[^,]+|(?<=,)(?=,)|(?<=,)$|^(?=,))/g)||lines[i].split(',');
+    const clean = cols.map(c=>(c||'').replace(/^"|"$/g,'').trim());
+    const dateStr = clean[dateIdx]||'';
+    const amtStr = clean[amtIdx]||'0';
+    const payee = clean[payeeIdx]||'';
+    const memo = clean[memoIdx]||'';
+    const amount = parseFloat(amtStr.replace(/[$,]/g,''))||0;
+    if (!dateStr || amount===0) continue;
+    // Parse NZ date dd/mm/yyyy or yyyy-mm-dd
+    let date = '';
+    const dmatch = dateStr.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+    const ymatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dmatch) { const y=dmatch[3].length===2?'20'+dmatch[3]:dmatch[3]; date=`${y}-${dmatch[2].padStart(2,'0')}-${dmatch[1].padStart(2,'0')}`; }
+    else if (ymatch) date=dateStr;
+    if (!date) continue;
+    txns.push({ id: date+'_'+i, date, payee, memo, amount, type: amount>0?'credit':'debit', category: categoriseTxn(payee, memo, amount), raw: lines[i] });
+  }
+  return txns;
+};
+
+// Auto-categorisation rules
+const CATEGORIES = {
+  income: { label:'Hire Income', color:'var(--green)', keywords:['hire','rental','invoice','inv-','payment received','chardikala','empire','sukh','pangly','team freight','ss dhillon','reet','convoy','baaz','jatana','kahlon','singh invest','satpal','shah trans','vertex','dhillon line','dhadda','s&z','s&s','pb48'] },
+  ruc: { label:'RUC', color:'var(--orange)', keywords:['nzta','ruc','road user','e-road','eroad'] },
+  insurance: { label:'Insurance', color:'var(--blue)', keywords:['insurance','vero','amic','nzi','zurich','tower'] },
+  fuel: { label:'Fuel', color:'var(--orange)', keywords:['bp','z energy','gull','mobil','fuel','diesel'] },
+  maintenance: { label:'Repairs & Maintenance', color:'var(--red)', keywords:['scania','cambridge diesel','tyres','tyre','warrant','wof','cof','vtnz','workshop','mechanic','parts','auto'] },
+  flexi: { label:'Flexi Loan', color:'#8E44AD', keywords:['flexi','flexirent','flexi-rent'] },
+  heartland: { label:'Heartland Loan', color:'#8E44AD', keywords:['heartland','heartland bank'] },
+  navman: { label:'Navman/GPS', color:'var(--blue)', keywords:['navman','teletrac','gps','tracking'] },
+  registration: { label:'Registration', color:'var(--text2)', keywords:['nzta rego','registration','rego'] },
+  other_expense: { label:'Other Expense', color:'var(--text3)', keywords:[] },
+};
+
+const categoriseTxn = (payee, memo, amount) => {
+  const text = (payee+' '+memo).toLowerCase();
+  if (amount > 0) {
+    // Check income keywords
+    for (const kw of CATEGORIES.income.keywords) { if (text.includes(kw)) return 'income'; }
+    return 'income_other';
+  }
+  // Expense categorisation
+  for (const [key, cat] of Object.entries(CATEGORIES)) {
+    if (key==='income'||key==='other_expense') continue;
+    for (const kw of cat.keywords) { if (text.includes(kw)) return key; }
+  }
+  return 'other_expense';
+};
+
+const buildPnlFromTxns = (txns) => {
+  const monthly = {};
+  txns.forEach(t => {
+    const mo = t.date.slice(0,7);
+    if (!monthly[mo]) monthly[mo] = { month:mo, revenue:0, insurance:0, navman_ruc:0, ruc:0, other:0, repairs:0, flexi:0, heartland:0, fuel:0, expenses:0, net:0, txnCount:0 };
+    const m = monthly[mo];
+    m.txnCount++;
+    const amt = Math.abs(t.amount);
+    if (t.amount > 0) { m.revenue += t.amount; }
+    else {
+      switch(t.category) {
+        case 'insurance': m.insurance += amt; break;
+        case 'ruc': m.ruc += amt; break;
+        case 'navman': m.navman_ruc += amt; break;
+        case 'maintenance': m.repairs += amt; break;
+        case 'flexi': m.flexi += amt; break;
+        case 'heartland': m.heartland += amt; break;
+        case 'fuel': m.fuel += amt; break;
+        default: m.other += amt;
+      }
+    }
+  });
+  Object.values(monthly).forEach(m => {
+    m.expenses = m.insurance+m.navman_ruc+m.ruc+m.other+m.repairs+m.flexi+m.heartland+m.fuel;
+    m.net = m.revenue - m.expenses;
+  });
+  return Object.values(monthly).sort((a,b)=>a.month.localeCompare(b.month));
+};
+
+// Pull bank transactions from Xero Bank Accounts API
+const fetchXeroBankTxns = async (xeroConfig, onProgress) => {
+  let { accessToken, tenantId } = xeroConfig;
+  if (!tenantId) {
+    onProgress('Getting Xero org…');
+    const r = await fetch('https://xero-proxy.ssrentalsnz.workers.dev/xero-api/connections', { headers:{ Authorization:'Bearer '+accessToken } });
+    const d = await r.json();
+    tenantId = d[0]?.tenantId;
+  }
+  onProgress('Fetching bank transactions…');
+  // Get last 90 days
+  const fromDate = new Date(); fromDate.setDate(fromDate.getDate()-90);
+  const from = fromDate.toISOString().slice(0,10);
+  const res = await fetch(`https://xero-proxy.ssrentalsnz.workers.dev/xero-api/api.xro/2.0/BankTransactions?fromDate=${from}&page=1`, {
+    headers:{ Authorization:'Bearer '+accessToken, 'Xero-tenant-id':tenantId }
+  });
+  if (!res.ok) throw new Error('Bank transaction fetch failed: '+res.status);
+  const data = await res.json();
+  const txns = (data.BankTransactions||[]).map(t=>({
+    id: t.BankTransactionID,
+    date: t.Date?.slice(0,10)||'',
+    payee: t.Contact?.Name||'',
+    memo: t.Reference||t.Narration||'',
+    amount: t.Type==='SPEND'?-t.Total:t.Total,
+    type: t.Type==='SPEND'?'debit':'credit',
+    category: categoriseTxn(t.Contact?.Name||'', t.Reference||'', t.Type==='SPEND'?-t.Total:t.Total),
+    source: 'xero'
+  }));
+  return txns;
+};
+
+const ReportsPage = ({theme, xeroConfig}) => {
   const [tab,setTab]=useState('pl');
-  // Use real P&L data — YTD 2026 (Jan–May)
-  const ytdMonths = PNL_DETAIL.filter(m=>m.month.startsWith('2026'));
+  const [bankTxns,setBankTxns]=useState(()=>loadBankTxns());
+  const [uploading,setUploading]=useState(false);
+  const [uploadMsg,setUploadMsg]=useState('');
+  const [xeroFetching,setXeroFetching]=useState(false);
+  const [catFilter,setCatFilter]=useState('all');
+  const [searchTxn,setSearchTxn]=useState('');
+  const fileRef = useRef();
+
+  // Build P&L — use bank txns if available, else use hardcoded PNL_DETAIL
+  const pnlData = bankTxns.length > 0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL;
+  const ytdMonths = pnlData.filter(m=>m.month.startsWith('2026'));
   const totalRev=ytdMonths.reduce((a,m)=>a+m.revenue,0);
   const totalExpenses=ytdMonths.reduce((a,m)=>a+m.expenses,0);
   const totalMaint=ytdMonths.reduce((a,m)=>a+m.repairs,0);
-  const totalRUC=ytdMonths.reduce((a,m)=>a+m.ruc+m.navman_ruc,0);
-  const totalLoans=ytdMonths.reduce((a,m)=>a+m.flexi+m.heartland,0);
+  const totalRUC=ytdMonths.reduce((a,m)=>a+(m.ruc||0)+(m.navman_ruc||0),0);
+  const totalLoans=ytdMonths.reduce((a,m)=>a+(m.flexi||0)+(m.heartland||0),0);
   const grossProfit=ytdMonths.reduce((a,m)=>a+m.net,0);
+
+  const handleCsvUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadMsg('Reading CSV…');
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target.result;
+        const parsed = parseASBCsv(text);
+        if (parsed.length === 0) { setUploadMsg('No transactions found — check CSV format.'); setUploading(false); return; }
+        // Merge with existing (avoid duplicates by id)
+        const existing = loadBankTxns();
+        const existingIds = new Set(existing.map(t=>t.id));
+        const newTxns = parsed.filter(t=>!existingIds.has(t.id));
+        const merged = [...existing, ...newTxns].sort((a,b)=>b.date.localeCompare(a.date));
+        saveBankTxns(merged);
+        setBankTxns(merged);
+        setUploadMsg(`✓ Imported ${newTxns.length} new transactions (${parsed.length} total in file)`);
+      } catch(err) { setUploadMsg('Error parsing CSV: '+err.message); }
+      setUploading(false);
+    };
+    reader.readAsText(file);
+    e.target.value='';
+  };
+
+  const handleXeroFetch = async () => {
+    if (!xeroConfig?.accessToken) { alert('Connect Xero first in Settings → Integrations'); return; }
+    setXeroFetching(true);
+    try {
+      const txns = await fetchXeroBankTxns(xeroConfig, msg=>setUploadMsg(msg));
+      const existing = loadBankTxns().filter(t=>t.source!=='xero');
+      const merged = [...txns, ...existing].sort((a,b)=>b.date.localeCompare(a.date));
+      saveBankTxns(merged);
+      setBankTxns(merged);
+      setUploadMsg(`✓ Pulled ${txns.length} transactions from Xero`);
+    } catch(e) { setUploadMsg('Xero fetch failed: '+e.message); }
+    setXeroFetching(false);
+  };
+
+  const filteredTxns = bankTxns.filter(t=>{
+    if (catFilter!=='all' && t.category!==catFilter) return false;
+    if (searchTxn && !(t.payee+t.memo).toLowerCase().includes(searchTxn.toLowerCase())) return false;
+    return true;
+  });
+
+  const catSummary = Object.entries(CATEGORIES).map(([key,cat])=>({
+    key, label:cat.label, color:cat.color,
+    total:Math.abs(bankTxns.filter(t=>t.category===key).reduce((a,t)=>a+t.amount,0)),
+    count:bankTxns.filter(t=>t.category===key).length
+  })).filter(c=>c.count>0).sort((a,b)=>b.total-a.total);
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div className="tabs" style={{marginBottom:0}}>
-          {['pl','vehicles','customers','debtors'].map(t=><button key={t} className={`tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>{({pl:'P&L',vehicles:'By Vehicle',customers:'By Customer',debtors:'Debtors'})[t]}</button>)}
+          {['pl','bank','vehicles','customers','debtors'].map(t=><button key={t} className={`tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>{({pl:'P&L',bank:'Bank Transactions',vehicles:'By Vehicle',customers:'By Customer',debtors:'Debtors'})[t]}</button>)}
         </div>
         <div className="flex gap-2">
           <button className="btn btn-ghost btn-sm"><Icon name="download" size={13}/> Export PDF</button>
@@ -1925,17 +2123,127 @@ const ReportsPage = ({theme}) => {
         </div>
       </div>
 
+      {tab==='bank'&&(
+        <div>
+          {/* Import bar */}
+          <div className="card card-sm mb-4" style={{borderLeft:'3px solid var(--blue)'}}>
+            <div style={{display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:13,marginBottom:2}}>ASB Bank Transactions</div>
+                <div style={{fontSize:12,color:'var(--text2)'}}>
+                  {bankTxns.length>0
+                    ? `${bankTxns.length} transactions loaded · ${bankTxns.filter(t=>t.source==='xero').length} from Xero · ${bankTxns.filter(t=>!t.source||t.source==='csv').length} from CSV`
+                    : 'No transactions loaded — import CSV or sync from Xero'}
+                </div>
+                {uploadMsg&&<div style={{fontSize:12,color:uploadMsg.startsWith('✓')?'var(--green)':'var(--red-light)',marginTop:4}}>{uploadMsg}</div>}
+              </div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                <button className="btn btn-primary btn-sm" onClick={()=>fileRef.current?.click()} disabled={uploading}>
+                  <Icon name="download" size={13}/> {uploading?'Importing…':'Upload ASB CSV'}
+                </button>
+                <input ref={fileRef} type="file" accept=".csv" style={{display:'none'}} onChange={handleCsvUpload}/>
+                <button className="btn btn-ghost btn-sm" onClick={handleXeroFetch} disabled={xeroFetching} style={{borderColor:'#00B8D9',color:'#00B8D9'}}>
+                  <Icon name="xero" size={13} color="#00B8D9"/> {xeroFetching?'Fetching…':'Sync from Xero'}
+                </button>
+                {bankTxns.length>0&&<button className="btn btn-ghost btn-sm" style={{color:'var(--red-light)'}} onClick={()=>{if(confirm('Clear all bank transactions?')){saveBankTxns([]);setBankTxns([]);setUploadMsg('Cleared.');}}}>Clear All</button>}
+              </div>
+            </div>
+          </div>
+
+          {bankTxns.length===0&&(
+            <div className="card" style={{textAlign:'center',padding:48}}>
+              <div style={{fontSize:32,marginBottom:12}}>🏦</div>
+              <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Connect Your ASB Bank Data</div>
+              <div style={{fontSize:13,color:'var(--text2)',marginBottom:24,maxWidth:480,margin:'0 auto 24px'}}>
+                Import your ASB bank statement CSV to automatically track income and expenses and generate accurate P&L reports.
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,maxWidth:600,margin:'0 auto'}}>
+                <div style={{padding:'16px',background:'var(--bg3)',borderRadius:10,textAlign:'left'}}>
+                  <div style={{fontWeight:700,marginBottom:8,fontSize:13}}>📥 Upload ASB CSV</div>
+                  <div style={{fontSize:12,color:'var(--text2)',lineHeight:1.7}}>
+                    1. Log in to <strong>asb.co.nz</strong><br/>
+                    2. Go to your business account<br/>
+                    3. Click <strong>Export / Download</strong><br/>
+                    4. Choose <strong>CSV format</strong><br/>
+                    5. Upload the file above
+                  </div>
+                </div>
+                <div style={{padding:'16px',background:'var(--bg3)',borderRadius:10,textAlign:'left'}}>
+                  <div style={{fontWeight:700,marginBottom:8,fontSize:13}}>🔄 Sync from Xero</div>
+                  <div style={{fontSize:12,color:'var(--text2)',lineHeight:1.7}}>
+                    If your ASB account is connected to Xero as a bank feed, click <strong>Sync from Xero</strong> above to pull transactions automatically — no CSV needed.
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {bankTxns.length>0&&(
+            <div>
+              {/* Category summary */}
+              <div className="grid mb-4" style={{gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:10}}>
+                {catSummary.map(c=>(
+                  <div key={c.key} className="card card-sm" style={{cursor:'pointer',borderLeft:`3px solid ${c.color}`,opacity:catFilter!=='all'&&catFilter!==c.key?0.5:1}} onClick={()=>setCatFilter(catFilter===c.key?'all':c.key)}>
+                    <div style={{fontSize:10,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',marginBottom:4}}>{c.label}</div>
+                    <div style={{fontSize:18,fontWeight:800,color:c.color}}>{fmtCur(c.total)}</div>
+                    <div style={{fontSize:11,color:'var(--text3)'}}>{c.count} transactions</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Search + filter */}
+              <div className="flex gap-2 mb-3">
+                <input style={{flex:1}} placeholder="Search transactions…" value={searchTxn} onChange={e=>setSearchTxn(e.target.value)}/>
+                <select style={{width:180}} value={catFilter} onChange={e=>setCatFilter(e.target.value)}>
+                  <option value="all">All Categories</option>
+                  {Object.entries(CATEGORIES).map(([k,c])=><option key={k} value={k}>{c.label}</option>)}
+                </select>
+              </div>
+
+              {/* Transactions table */}
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Date</th><th>Payee</th><th>Memo</th><th>Category</th><th style={{textAlign:'right'}}>Amount</th></tr></thead>
+                  <tbody>
+                    {filteredTxns.slice(0,200).map(t=>(
+                      <tr key={t.id}>
+                        <td style={{fontSize:12,whiteSpace:'nowrap'}}>{fmt(t.date)}</td>
+                        <td style={{fontWeight:600,fontSize:13}}>{t.payee||'—'}</td>
+                        <td style={{fontSize:12,color:'var(--text2)'}}>{t.memo||'—'}</td>
+                        <td>
+                          <span style={{fontSize:11,fontWeight:700,color:CATEGORIES[t.category]?.color||'var(--text3)',background:'var(--bg3)',padding:'2px 8px',borderRadius:4}}>
+                            {CATEGORIES[t.category]?.label||t.category}
+                          </span>
+                        </td>
+                        <td style={{textAlign:'right',fontWeight:700,color:t.amount>0?'var(--green)':'var(--red-light)',whiteSpace:'nowrap'}}>
+                          {t.amount>0?'+':''}{fmtCur(Math.abs(t.amount))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {filteredTxns.length>200&&<div style={{textAlign:'center',padding:12,fontSize:12,color:'var(--text3)'}}>Showing 200 of {filteredTxns.length} transactions</div>}
+            </div>
+          )}
+        </div>
+      )}
+
       {tab==='pl'&&(
         <div>
+          {bankTxns.length>0&&(
+            <div className="alert alert-green mb-4">
+              <Icon name="check" size={15}/>
+              <div>P&amp;L generated from <strong>{bankTxns.length} actual bank transactions</strong> · Last import: {bankTxns[0]?.date?fmt(bankTxns[0].date):'—'}</div>
+            </div>
+          )}
           <div className="grid grid-4 mb-4">
             {[
               {l:'Revenue YTD (2026)',v:fmtCur(totalRev),c:'var(--green)'},
               {l:'Total Expenses YTD',v:fmtCur(totalExpenses),c:'var(--orange)'},
               {l:'Net Profit YTD',v:fmtCur(grossProfit),c:grossProfit>=0?'var(--blue)':'var(--red-light)'},
               {l:'Net Margin YTD',v:(totalRev>0?((grossProfit/totalRev)*100).toFixed(1):0)+'%',c:'var(--text)'},
-            ].map(k=>(
-              <div key={k.l} className="kpi-card" style={{'--accent':k.c}}><div className="kpi-label">{k.l}</div><div className="kpi-value" style={{fontSize:22,color:k.c}}>{k.v}</div></div>
-            ))}
+            ].map(k=>(<div key={k.l} className="kpi-card" style={{'--accent':k.c}}><div className="kpi-label">{k.l}</div><div className="kpi-value" style={{fontSize:22,color:k.c}}>{k.v}</div></div>))}
           </div>
           <div className="grid grid-4 mb-4">
             {[
@@ -1943,44 +2251,29 @@ const ReportsPage = ({theme}) => {
               {l:'Repairs & Maint YTD',v:fmtCur(totalMaint)},
               {l:'Loan Repayments YTD',v:fmtCur(totalLoans)},
               {l:'Monthly Instalments',v:fmtCur(14454.54)},
-            ].map(k=>(
-              <div key={k.l} className="card card-sm"><div className="kpi-label">{k.l}</div><div style={{fontSize:18,fontWeight:800,marginTop:4}}>{k.v}</div></div>
-            ))}
+            ].map(k=>(<div key={k.l} className="card card-sm"><div className="kpi-label">{k.l}</div><div style={{fontSize:18,fontWeight:800,marginTop:4}}>{k.v}</div></div>))}
           </div>
           <div className="card mb-4">
-            <div className="card-header"><span className="card-title">Full P&L — Jul 2025 to May 2026 (Actual from Xero)</span></div>
-            <div className="table-wrap" style={{border:'none',borderRadius:0}}>
+            <div className="card-header"><span className="card-title">Full P&L — {bankTxns.length>0?'From Bank Transactions':'Jul 2025 to May 2026 (Actual from Xero)'}</span></div>
+            <div className="table-wrap" style={{border:'none',borderRadius:0,margin:'0 -20px'}}>
               <table>
                 <thead><tr><th>Month</th><th>Revenue</th><th>RUC</th><th>Navman RUC</th><th>Insurance</th><th>Repairs</th><th>Flexi Loan</th><th>Heartland Loan</th><th>Other</th><th>Total Exp</th><th>Net Profit</th></tr></thead>
                 <tbody>
-                  {PNL_DETAIL.map(m=>(
-                    <tr key={m.month}>
-                      <td style={{fontWeight:600}}>{m.month}</td>
-                      <td style={{fontWeight:700,color:'var(--green)'}}>{fmtCur(m.revenue)}</td>
-                      <td style={{color:'var(--orange)'}}>{m.ruc>0?fmtCur(m.ruc):'—'}</td>
-                      <td style={{color:'var(--orange)'}}>{m.navman_ruc>0?fmtCur(m.navman_ruc):'—'}</td>
-                      <td>{m.insurance>0?fmtCur(m.insurance):'—'}</td>
-                      <td>{m.repairs>0?fmtCur(m.repairs):'—'}</td>
-                      <td>{m.flexi>0?fmtCur(m.flexi):'—'}</td>
-                      <td>{m.heartland>0?fmtCur(m.heartland):'—'}</td>
-                      <td style={{fontSize:11}}>{m.other>0?fmtCur(m.other):'—'}</td>
-                      <td style={{color:'var(--orange)',fontWeight:700}}>{fmtCur(m.expenses)}</td>
-                      <td style={{fontWeight:800,color:m.net>=0?'var(--green)':'var(--red-light)'}}>{fmtCur(m.net)}</td>
-                    </tr>
-                  ))}
+                  {pnlData.map(m=>(<tr key={m.month}>
+                    <td style={{fontWeight:600}}>{m.month}</td>
+                    <td style={{fontWeight:700,color:'var(--green)'}}>{fmtCur(m.revenue)}</td>
+                    <td style={{color:'var(--orange)'}}>{(m.ruc||0)>0?fmtCur(m.ruc):'—'}</td>
+                    <td style={{color:'var(--orange)'}}>{(m.navman_ruc||0)>0?fmtCur(m.navman_ruc):'—'}</td>
+                    <td>{(m.insurance||0)>0?fmtCur(m.insurance):'—'}</td>
+                    <td>{(m.repairs||0)>0?fmtCur(m.repairs):'—'}</td>
+                    <td>{(m.flexi||0)>0?fmtCur(m.flexi):'—'}</td>
+                    <td>{(m.heartland||0)>0?fmtCur(m.heartland):'—'}</td>
+                    <td style={{fontSize:11}}>{(m.other||0)>0?fmtCur(m.other):'—'}</td>
+                    <td style={{color:'var(--orange)',fontWeight:700}}>{fmtCur(m.expenses)}</td>
+                    <td style={{fontWeight:800,color:m.net>=0?'var(--green)':'var(--red-light)'}}>{fmtCur(m.net)}</td>
+                  </tr>))}
                 </tbody>
               </table>
-            </div>
-          </div>
-          <div className="card">
-            <div className="card-header"><span className="card-title">Cash Flow — May 2026</span></div>
-            <div className="grid" style={{gridTemplateColumns:'1fr 1fr',gap:12}}>
-              {[['Revenue in Xero (May)',fmtCur(64345.42)],['Total Expenses (May)',fmtCur(49712.83)],['Net Profit (May)',fmtCur(14632.59)],['Overdue Invoices',fmtCur(6363.87)]].map(([l,v])=>(
-                <div key={l} style={{padding:'12px 14px',background:'var(--bg3)',borderRadius:8}}>
-                  <div style={{fontSize:11,color:'var(--text3)',marginBottom:4,textTransform:'uppercase',fontWeight:600}}>{l}</div>
-                  <div style={{fontSize:18,fontWeight:800}}>{v}</div>
-                </div>
-              ))}
             </div>
           </div>
         </div>
@@ -1996,29 +2289,12 @@ const ReportsPage = ({theme}) => {
             <table>
               <thead><tr><th>Vehicle</th><th>Make / Model</th><th>Status</th><th>Revenue YTD</th><th>Maint Cost YTD</th><th>Gross Profit</th><th>Margin</th><th>Downtime</th><th>Utilisation</th></tr></thead>
               <tbody>
-                {TRUCKS.map(t=>{
-                  const gp=t.rev_ytd-t.maint_ytd;
-                  const margin=Math.round((gp/t.rev_ytd)*100);
-                  const util=t.status==='on_hire'?Math.round(((150-t.downtime)/150)*100):0;
-                  return (
-                    <tr key={t.id}>
-                      <td style={{fontWeight:700}}>{t.rego}</td>
-                      <td>{t.make} {t.model}</td>
-                      <td><span className={statusBadge(t.status)}>{statusLabel(t.status)}</span></td>
-                      <td style={{fontWeight:700,color:'var(--green)'}}>{fmtCur(t.rev_ytd)}</td>
-                      <td style={{color:'var(--orange)'}}>{fmtCur(t.maint_ytd)}</td>
-                      <td style={{fontWeight:700}}>{fmtCur(gp)}</td>
-                      <td style={{color:margin>70?'var(--green)':margin>50?'var(--orange)':'var(--red-light)'}}>{margin}%</td>
-                      <td>{t.downtime} days</td>
-                      <td>
-                        <div style={{display:'flex',alignItems:'center',gap:8}}>
-                          <div className="progress" style={{width:60}}><div className="progress-bar" style={{width:util+'%',background:'var(--blue)'}}/></div>
-                          <span style={{fontSize:12}}>{util}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {TRUCKS.map(t=>{const gp=t.rev_ytd-t.maint_ytd;const margin=Math.round((gp/t.rev_ytd)*100);const util=t.status==='on_hire'?Math.round(((150-t.downtime)/150)*100):0;return(
+                  <tr key={t.id}><td style={{fontWeight:700}}>{t.rego}</td><td>{t.make} {t.model}</td><td><span className={statusBadge(t.status)}>{statusLabel(t.status)}</span></td>
+                  <td style={{fontWeight:700,color:'var(--green)'}}>{fmtCur(t.rev_ytd)}</td><td style={{color:'var(--orange)'}}>{fmtCur(t.maint_ytd)}</td>
+                  <td style={{fontWeight:700}}>{fmtCur(gp)}</td><td style={{color:margin>70?'var(--green)':margin>50?'var(--orange)':'var(--red-light)'}}>{margin}%</td>
+                  <td>{t.downtime} days</td><td><div style={{display:'flex',alignItems:'center',gap:8}}><div className="progress" style={{width:60}}><div className="progress-bar" style={{width:util+'%',background:'var(--blue)'}}/></div><span style={{fontSize:12}}>{util}%</span></div></td></tr>
+                );})}
               </tbody>
             </table>
           </div>
@@ -2029,41 +2305,18 @@ const ReportsPage = ({theme}) => {
         <div className="table-wrap">
           <table>
             <thead><tr><th>Customer</th><th>Active Hire</th><th>Weekly Rate</th><th>YTD Revenue</th><th>Outstanding</th><th>Credit Rating</th><th>Invoices</th></tr></thead>
-            <tbody>
-              {CUSTOMERS.map(c=>(
-                <tr key={c.id}>
-                  <td style={{fontWeight:700}}>{c.company}</td>
-                  <td style={{fontSize:12}}>{c.truck?truckRego(c.truck):'—'}</td>
-                  <td>{c.weekly_truck?fmtCur(c.weekly_truck+c.weekly_trailer)+'/wk':'—'}</td>
-                  <td style={{fontWeight:700,color:'var(--green)'}}>{fmtCur(c.ytd_revenue)}</td>
-                  <td style={{fontWeight:700,color:c.outstanding>0?'var(--red-light)':'var(--text2)'}}>{c.outstanding>0?fmtCur(c.outstanding):'—'}</td>
-                  <td><span className={`badge badge-${c.credit_rating==='A+'?'green':c.credit_rating.startsWith('A')?'blue':'orange'}`}>{c.credit_rating}</span></td>
-                  <td>{INVOICES.filter(i=>i.customer===c.id).length}</td>
-                </tr>
-              ))}
-            </tbody>
+            <tbody>{CUSTOMERS.map(c=>(<tr key={c.id}><td style={{fontWeight:700}}>{c.company}</td><td style={{fontSize:12}}>{c.truck?truckRego(c.truck):'—'}</td><td>{c.weekly_truck?fmtCur(c.weekly_truck+c.weekly_trailer)+'/wk':'—'}</td><td style={{fontWeight:700,color:'var(--green)'}}>{fmtCur(c.ytd_revenue)}</td><td style={{fontWeight:700,color:c.outstanding>0?'var(--red-light)':'var(--text2)'}}>{c.outstanding>0?fmtCur(c.outstanding):'—'}</td><td><span className={`badge badge-${c.credit_rating==='A+'?'green':c.credit_rating.startsWith('A')?'blue':'orange'}`}>{c.credit_rating}</span></td><td>{INVOICES.filter(i=>i.customer===c.id).length}</td></tr>))}</tbody>
           </table>
         </div>
       )}
 
       {tab==='debtors'&&(
         <div>
-          <div className="alert alert-red mb-4"><Icon name="warning" size={15}/><div><strong>$7,525.64 overdue</strong> across 2 invoices from Southern Cross Transport. Automated reminders sent 21 May. Recommend direct call today.</div></div>
+          <div className="alert alert-red mb-4"><Icon name="warning" size={15}/><div><strong>{fmtCur(INVOICES.filter(i=>i.status==='overdue').reduce((a,i)=>a+i.total,0))} overdue</strong> — {INVOICES.filter(i=>i.status==='overdue').length} invoice(s) outstanding.</div></div>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Customer</th><th>Invoice</th><th>Due Date</th><th>Amount</th><th>Days Overdue</th><th>Action</th></tr></thead>
-              <tbody>
-                {INVOICES.filter(i=>i.status==='overdue').map(inv=>(
-                  <tr key={inv.id}>
-                    <td style={{fontWeight:700}}>{custName(inv.customer)}</td>
-                    <td style={{fontWeight:600,fontSize:12}}>{inv.id}</td>
-                    <td style={{color:'var(--red-light)',fontWeight:600}}>{fmt(inv.due)}</td>
-                    <td style={{fontWeight:800}}>{fmtCur(inv.total)}</td>
-                    <td><span style={{color:'var(--red-light)',fontWeight:700}}>{Math.abs(daysDiff(inv.due))} days</span></td>
-                    <td><button className="btn btn-primary btn-sm">Send Reminder</button></td>
-                  </tr>
-                ))}
-              </tbody>
+              <tbody>{INVOICES.filter(i=>i.status==='overdue').map(inv=>(<tr key={inv.id}><td style={{fontWeight:700}}>{custName(inv.customer)}</td><td style={{fontWeight:600,fontSize:12}}>{inv.id}</td><td style={{color:'var(--red-light)',fontWeight:600}}>{fmt(inv.due)}</td><td style={{fontWeight:800}}>{fmtCur(inv.total)}</td><td><span style={{color:'var(--red-light)',fontWeight:700}}>{Math.abs(daysDiff(inv.due))} days</span></td><td><button className="btn btn-primary btn-sm">Send Reminder</button></td></tr>))}</tbody>
             </table>
           </div>
         </div>
@@ -2071,6 +2324,7 @@ const ReportsPage = ({theme}) => {
     </div>
   );
 };
+
 
 /* ─── DOCUMENTS PAGE ──────────────────────────────── */
 const DocumentsPage = () => {
@@ -2855,7 +3109,7 @@ const App = () => {
     hires:<HiresPage refreshKey={dataRefreshKey}/>,
     invoicing:<InvoicingPage/>,
     maintenance:<MaintenancePage/>,
-    reports:<ReportsPage theme={theme}/>,
+    reports:<ReportsPage theme={theme} xeroConfig={xeroConfig}/>,
     documents:<DocumentsPage/>,
     navman:<NavmanPage/>,
     settings:<SettingsPage sheetsConfig={sheetsConfig} syncState={syncState} onSheetsSetup={()=>setSheetsSetupOpen(true)} onManualSync={()=>doSync()} xeroConfig={xeroConfig} xeroSyncState={xeroSyncState} onXeroConnect={startXeroAuth} onXeroSync={doXeroSync} onXeroDisconnect={()=>{clearXeroConfig();setXeroConfig(null);}} onXeroDiag={async()=>{ try { const t=xeroConfig?.accessToken; if(!t){alert('Not connected');return;} const r=await fetch('https://xero-proxy.ssrentalsnz.workers.dev/xero-api/connections',{headers:{Authorization:'Bearer '+t}}); const d=await r.json(); alert('Connection OK! Orgs: '+JSON.stringify(d.map(x=>x.tenantName))); } catch(e){alert('Error: '+e.message);}}}/>,
