@@ -495,7 +495,7 @@ const pullHiresFromSheet1 = (rows, extLog) => {
   let compIdx = headers.findIndex(h => h.includes('company')); if (compIdx === -1) compIdx = 1;
   let periodIdx = headers.findIndex(h => h.includes('hire period')); if (periodIdx === -1) periodIdx = 4;
   let regoIdx = headers.findIndex(h => h.includes('rego')); if (regoIdx === -1) regoIdx = 6;
-  let rateIdx = headers.findIndex(h => h.includes('weekly charge') || h === 'weekly charges'); if (rateIdx === -1) rateIdx = 7;
+  let rateIdx = headers.findIndex(h => h.includes('weekly charge') || h.includes('weekly charges')); if (rateIdx === -1) rateIdx = 7;
 
   let updated = 0;
   rows.slice(headerIdx + 1).forEach(row => {
@@ -544,7 +544,12 @@ const pullHiresFromSheet1 = (rows, extLog) => {
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const newStatus = endDate >= todayStart ? 'active' : 'completed';
     const override = { end: period.end, start: period.start, status: newStatus };
-    if (rateStr) { const r = parseFloat(rateStr.replace(/[^0-9.]/g,'')); if (!isNaN(r) && r > 0) override.weekly_truck = r; }
+    if (rateStr) {
+      // Handle formats: "$2590.58 per week", "2590.58", "$2,590.58/wk"
+      const cleaned = rateStr.replace(/[$,]/g,'').replace(/per week|per wk|\/wk|\/week/gi,'').trim();
+      const r = parseFloat(cleaned);
+      if (!isNaN(r) && r > 0) override.weekly_truck = r;
+    }
     saveHireOverride(hire.id, override);
     if (truck) {
       if (newStatus === 'active') { truck.status = 'on_hire'; truck.hirer = cust.id; }
