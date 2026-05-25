@@ -504,6 +504,13 @@ const pullHiresFromSheet1 = (rows, extLog) => {
     const regoStr = (row[regoIdx] || '').trim();
     const rateStr = (row[rateIdx] || '').toString().trim();
     if (!company || !periodStr || periodStr.toLowerCase().includes('didn') || periodStr.toLowerCase() === 'n/a') return;
+    // Skip entries where period is very old (more than 60 days ago) to avoid re-matching old hires
+    const testPeriod = parseHirePeriod(periodStr);
+    if (testPeriod) {
+      const endCheck = new Date(testPeriod.end + 'T23:59:59');
+      const sixtyDaysAgo = new Date(); sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+      if (endCheck < sixtyDaysAgo) return; // Skip very old hires
+    }
 
     const period = parseHirePeriod(periodStr);
     if (!period) return;
@@ -1253,8 +1260,8 @@ const FleetPage = ({theme}) => {
                   <td>{v.odometer.toLocaleString()} km</td>
                   <td><span style={{color:cof==='red'?'var(--red-light)':cof==='orange'?'var(--orange)':'var(--green)',fontWeight:600,fontSize:12}}>{fmt(v.cof_expiry)}</span></td>
                   <td><span style={{color:reg==='red'?'var(--red-light)':reg==='orange'?'var(--orange)':'var(--green)',fontWeight:600,fontSize:12}}>{fmt(v.rego_expiry)}</span></td>
-                  <td>{v.hirer?custName(v.hirer):'—'}</td>
-                  <td>{v.weekly_rate?fmtCur(v.weekly_rate)+'/wk':'—'}</td>
+                  <td>{(()=>{const h=getEffectiveHires().find(h=>h.truck===v.id&&h.status==='active');return h?custName(h.customer):v.hirer?custName(v.hirer):'—';})()}</td>
+                  <td>{(()=>{const h=getEffectiveHires().find(h=>h.truck===v.id&&h.status==='active');return h?fmtCur(h.weekly_truck)+'/wk':v.weekly_rate?fmtCur(v.weekly_rate)+'/wk':'—';})()}</td>
                   <td><button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setSel(v)}}><Icon name="eye" size={13}/></button></td>
                 </tr>
               );
