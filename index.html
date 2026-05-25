@@ -381,9 +381,187 @@ const ensureSheets = async (accessToken, spreadsheetId, neededSheets) => {
   });
 };
 
+// Read a sheet tab back from Google Sheets
+const readSheetTab = async (accessToken, spreadsheetId, sheetName) => {
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.values || [];
+};
+
+// Pull hire changes from Google Sheets back into app data
+const pullHiresFromSheet = (rows) => {
+  if (!rows || rows.length < 2) return 0;
+  const headers = rows[0];
+  const idIdx = headers.indexOf('Hire ID');
+  const endIdx = headers.indexOf('End');
+  const statusIdx = headers.indexOf('Status');
+  const weeklyIdx = headers.indexOf('Weekly Rate');
+  const notesIdx = headers.indexOf('Notes');
+  if (idIdx === -1) return 0;
+  let updated = 0;
+  rows.slice(1).forEach(row => {
+    const id = row[idIdx];
+    const hire = HIRES.find(h => h.id === id);
+    if (!hire) return;
+    if (endIdx !== -1 && row[endIdx] && row[endIdx] !== hire.end) { hire.end = row[endIdx]; updated++; }
+    if (statusIdx !== -1 && row[statusIdx] && row[statusIdx] !== hire.status) { hire.status = row[statusIdx]; updated++; }
+    if (weeklyIdx !== -1 && row[weeklyIdx]) {
+      const rate = parseFloat(row[weeklyIdx]);
+      if (!isNaN(rate) && rate !== hire.weekly_truck + hire.weekly_trailer) { hire.weekly_truck = rate; updated++; }
+    }
+    if (notesIdx !== -1 && row[notesIdx] !== undefined) hire.notes = row[notesIdx];
+  });
+  return updated;
+};
+
+// Pull customer changes from Google Sheets
+const pullCustomersFromSheet = (rows) => {
+  if (!rows || rows.length < 2) return 0;
+  const headers = rows[0];
+  const idIdx = headers.indexOf('ID');
+  const outIdx = headers.indexOf('Outstanding');
+  const notesIdx = headers.indexOf('Notes');
+  const statusIdx = headers.indexOf('Status');
+  if (idIdx === -1) return 0;
+  let updated = 0;
+  rows.slice(1).forEach(row => {
+    const id = row[idIdx];
+    const cust = CUSTOMERS.find(c => c.id === id);
+    if (!cust) return;
+    if (outIdx !== -1 && row[outIdx] !== undefined) { const v = parseFloat(row[outIdx]); if (!isNaN(v)) cust.outstanding = v; }
+    if (notesIdx !== -1 && row[notesIdx] !== undefined) cust.notes = row[notesIdx];
+    if (statusIdx !== -1 && row[statusIdx]) cust.status = row[statusIdx];
+    updated++;
+  });
+  return updated;
+};
+
+// Parse NZ date formats like "27/04/26", "27/4/2026"
+const parseNZDate = (str) => {
+  if (!str) return null;
+  str = str.trim();
+  // Try dd/mm/yy or dd/mm/yyyy
+  const m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (!m) return null;
+  let [,d,mo,y] = m;
+  if (y.length===2) y = '20'+y;
+  return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
+};
+
+// Parse hire period string like "27/04/26 till 27/10/26" or "25/5/26 to 31/5/26"
+const parseHirePeriod = (str) => {
+  if (!str) return null;
+  str = str.trim();
+  // Split on "till", "to", "-", "–"
+  const parts = str.split(/\s+(?:till|to|–|-)\s+/i);
+  if (parts.length === 2) {
+    const start = parseNZDate(parts[0].trim());
+    const end = parseNZDate(parts[1].trim());
+    if (start && end) return { start, end };
+  }
+  return null;
+};
+
+// Pull hire data from Sheet1 (the original customer sheet with Hire period column)
+const pullHiresFromSheet1 = (rows) => {
+  if (!rows || rows.length < 2) return 0;
+  // Find header row (row with "Company name" or "Hire period")
+  let headerIdx = 0;
+  for (let i = 0; i < Math.min(5, rows.length); i++) {
+    if (rows[i].some(c => typeof c === 'string' && c.toLowerCase().includes('hire period'))) {
+      headerIdx = i; break;
+    }
+  }
+  const headers = rows[headerIdx].map(h => (h||'').toLowerCase().trim());
+  const compIdx = headers.findIndex(h => h.includes('company'));
+  const periodIdx = headers.findIndex(h => h.includes('hire period'));
+  const regoIdx = headers.findIndex(h => h.includes('rego'));
+  const rateIdx = headers.findIndex(h => h.includes('weekly') || h.includes('charge'));
+  if (periodIdx === -1) return 0;
+
+  let updated = 0;
+  rows.slice(headerIdx + 1).forEach(row => {
+    const company = (row[compIdx] || '').trim();
+    const periodStr = (row[periodIdx] || '').trim();
+    const regoStr = (row[regoIdx] || '').trim();
+    const rateStr = (row[rateIdx] || '').toString().trim();
+    if (!company || !periodStr || periodStr === 'Didn't hire') return;
+
+    const period = parseHirePeriod(periodStr);
+    if (!period) return;
+
+    // Find matching customer
+    const cust = CUSTOMERS.find(c =>
+      c.company.toLowerCase() === company.toLowerCase() ||
+      c.company.toLowerCase().includes(company.toLowerCase()) ||
+      company.toLowerCase().includes(c.company.toLowerCase().split(' ')[0])
+    );
+    if (!cust) return;
+
+    // Find matching hire for this customer
+    const hire = HIRES.find(h => h.customer === cust.id &&
+      (h.status === 'active' || Math.abs(new Date(h.start) - new Date(period.start)) < 7*86400000)
+    );
+    if (!hire) return;
+
+    let changed = false;
+    if (hire.end !== period.end) { hire.end = period.end; changed = true; }
+    if (hire.start !== period.start) { hire.start = period.start; changed = true; }
+
+    // Parse weekly rate
+    if (rateStr) {
+      const rateNum = parseFloat(rateStr.replace(/[$,\s]/g, ''));
+      if (!isNaN(rateNum) && rateNum > 0 && rateNum !== hire.weekly_truck) {
+        hire.weekly_truck = rateNum; changed = true;
+      }
+    }
+
+    // Update truck status based on hire end date
+    if (changed) {
+      const truck = TRUCKS.find(t => t.id === hire.truck);
+      if (truck) {
+        const endDate = new Date(period.end);
+        const today = new Date();
+        if (endDate > today && hire.status === 'active') {
+          truck.status = 'on_hire';
+          truck.hire_end = period.end;
+        } else if (endDate <= today) {
+          hire.status = 'completed';
+          if (truck && truck.hirer === cust.id) {
+            truck.status = 'available';
+            truck.hirer = null;
+          }
+        }
+      }
+      updated++;
+    }
+  });
+  return updated;
+};
+
 const runFullSync = async (config, onProgress, onDone, onError) => {
   try {
     const { accessToken, spreadsheetId } = config;
+
+    // STEP 1: Pull changes FROM Sheets INTO app
+    onProgress('Reading changes from Sheets…', 0);
+    let pullUpdates = 0;
+    try {
+      // Read Sheet1 (original customer hire period tab)
+      const sheet1Rows = await readSheetTab(accessToken, spreadsheetId, 'Sheet1');
+      if (sheet1Rows) pullUpdates += pullHiresFromSheet1(sheet1Rows);
+      // Read Hire Management tab
+      const hireRows = await readSheetTab(accessToken, spreadsheetId, 'Hire Management');
+      if (hireRows) pullUpdates += pullHiresFromSheet(hireRows);
+      // Read Customers tab
+      const custRows = await readSheetTab(accessToken, spreadsheetId, 'Customers');
+      if (custRows) pullUpdates += pullCustomersFromSheet(custRows);
+    } catch(e) { /* non-fatal — continue with push */ }
+
+    // STEP 2: Push all current app data TO Sheets
     const allRows = buildSheetRows();
     const tabMap = {
       'Fleet & Trailers': allRows.fleet,
@@ -393,15 +571,15 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
       'Maintenance': allRows.maintenance,
       'P&L Detail': allRows.pnl,
     };
-    onProgress('Checking sheets…', 0);
+    onProgress('Checking sheets…', 15);
     await ensureSheets(accessToken, spreadsheetId, Object.keys(tabMap));
     const tabs = Object.entries(tabMap);
     for (let i = 0; i < tabs.length; i++) {
       const [name, rows] = tabs[i];
-      onProgress(`Syncing ${name}…`, Math.round(((i) / tabs.length) * 100));
+      onProgress(`Syncing ${name}…`, Math.round(15 + ((i) / tabs.length) * 85));
       await syncSheetTab(accessToken, spreadsheetId, name, rows);
     }
-    onDone(new Date());
+    onDone(new Date(), pullUpdates);
   } catch (e) { onError(e.message || 'Unknown sync error'); }
 };
 
@@ -1215,73 +1393,155 @@ const CustomersPage = () => {
 const HiresPage = () => {
   const [showNew,setShowNew]=useState(false);
   const [sel,setSel]=useState(null);
-  const active=HIRES.filter(h=>h.status==='active');
-  const completed=HIRES.filter(h=>h.status==='completed');
+  const [editing,setEditing]=useState(false);
+  const [saved,setSaved]=useState(false);
+  const [hireData,setHireData]=useState(()=>HIRES.map(h=>({...h})));
+  const active=hireData.filter(h=>h.status==='active');
+  const completed=hireData.filter(h=>h.status==='completed');
+
+  const saveHire = (updated) => {
+    const idx = HIRES.findIndex(h=>h.id===updated.id);
+    if(idx!==-1){ Object.assign(HIRES[idx],updated); }
+    setHireData(HIRES.map(h=>({...h})));
+    setSaved(true); setTimeout(()=>setSaved(false),3000);
+  };
 
   const HireModal = ({h,onClose}) => {
+    const [editMode,setEditMode]=useState(false);
+    const [vals,setVals]=useState({...h});
     const c=CUSTOMERS.find(x=>x.id===h.customer);
     const t=TRUCKS.find(x=>x.id===h.truck);
     const tr=TRAILERS.find(x=>x.id===h.trailer);
-    const weeks=Math.ceil((new Date(h.end)-new Date(h.start))/604800000);
-    const totalEst=(h.weekly_truck+h.weekly_trailer)*weeks;
+    const weeks=Math.ceil((new Date(vals.end)-new Date(vals.start))/604800000)||0;
+    const totalEst=(vals.weekly_truck+vals.weekly_trailer)*weeks;
+
+    const handleSave = () => {
+      saveHire(vals);
+      setEditMode(false);
+      onClose();
+    };
+
     return (
       <Modal open onClose={onClose} title={`Hire Agreement — ${h.id}`} size="modal-lg"
-        footer={<><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-primary"><Icon name="invoice" size={14}/> Generate Invoice</button></>}>
-        <div className="grid" style={{gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:20}}>
-          {[['Customer',c?.company],['Truck',t?`${t.rego} — ${t.make} ${t.model}`:'—'],['Trailer',tr?`${tr.rego} — ${tr.make} ${tr.model}`:'—'],['Start Date',fmt(h.start)],['End Date',fmt(h.end)],['Duration',`${weeks} weeks`],['Weekly Truck Hire',fmtCur(h.weekly_truck)],['Weekly Trailer Hire',fmtCur(h.weekly_trailer)],['Mileage Rate',`$${h.mileage_rate}/km`],['RUC Rate',`$${h.ruc_rate}/km`],['Bond',fmtCur(5000)],['Est. Total (hire only)',fmtCur(totalEst)]].map(([l,v])=>(
-            <div key={l} style={{padding:'10px 14px',background:'var(--bg3)',borderRadius:8}}>
-              <div style={{fontSize:11,color:'var(--text3)',fontWeight:600,textTransform:'uppercase',marginBottom:3}}>{l}</div>
-              <div style={{fontSize:13,fontWeight:600}}>{v}</div>
+        footer={
+          editMode
+            ? <><button className="btn btn-ghost" onClick={()=>setEditMode(false)}>Cancel</button><button className="btn btn-primary" onClick={handleSave}><Icon name="check" size={14}/> Save Changes</button></>
+            : <><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-ghost" onClick={()=>setEditMode(true)}><Icon name="edit" size={14}/> Edit</button><button className="btn btn-primary"><Icon name="invoice" size={14}/> Generate Invoice</button></>
+        }>
+        {editMode ? (
+          <div>
+            <div style={{background:'rgba(41,128,185,0.08)',border:'1px solid rgba(41,128,185,0.2)',borderRadius:8,padding:'10px 14px',marginBottom:16,fontSize:12,color:'var(--blue)'}}>
+              Editing hire {h.id} — changes save to app and sync to Google Sheets on next sync
             </div>
-          ))}
-        </div>
-        <div className="divider"/>
-        <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>Checklist</div>
-        <div className="grid" style={{gridTemplateColumns:'1fr 1fr',gap:8}}>
-          {[['Agreement Signed',h.signed],['Insurance Verified',h.insurance_verified],['Pre-Handover Checklist',h.checklist_done],['Bond Received',h.bond_paid]].map(([l,v])=>(
-            <div key={l} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',background:'var(--bg3)',borderRadius:8}}>
-              <Icon name={v?'check':'close'} size={16} color={v?'var(--green)':'var(--red-light)'}/>
-              <span style={{fontSize:13}}>{l}</span>
+            <div className="form-row mb-3">
+              <div className="form-group"><label>Hire End Date</label><input type="date" value={vals.end} onChange={e=>setVals(v=>({...v,end:e.target.value}))}/></div>
+              <div className="form-group"><label>Status</label>
+                <select value={vals.status} onChange={e=>setVals(v=>({...v,status:e.target.value}))}>
+                  <option value="active">Active</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
             </div>
-          ))}
-        </div>
-        <div className="divider"/>
-        <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>Invoice Schedule</div>
-        <div style={{fontSize:12,color:'var(--text2)'}}>Invoiced to: <strong style={{color:'var(--text)'}}>{fmt(h.invoiced_to)}</strong> &nbsp;·&nbsp; Next invoice: <strong style={{color:'var(--text)'}}>{h.next_invoice?fmt(h.next_invoice):'—'}</strong></div>
+            <div className="form-row mb-3">
+              <div className="form-group"><label>Weekly Truck Rate ($)</label><input type="number" value={vals.weekly_truck} onChange={e=>setVals(v=>({...v,weekly_truck:parseFloat(e.target.value)||0}))}/></div>
+              <div className="form-group"><label>Weekly Trailer Rate ($)</label><input type="number" value={vals.weekly_trailer} onChange={e=>setVals(v=>({...v,weekly_trailer:parseFloat(e.target.value)||0}))}/></div>
+            </div>
+            <div className="form-row mb-3">
+              <div className="form-group"><label>Mileage Rate ($/km)</label><input type="number" step="0.01" value={vals.mileage_rate} onChange={e=>setVals(v=>({...v,mileage_rate:parseFloat(e.target.value)||0}))}/></div>
+              <div className="form-group"><label>RUC Rate ($/km)</label><input type="number" step="0.01" value={vals.ruc_rate} onChange={e=>setVals(v=>({...v,ruc_rate:parseFloat(e.target.value)||0}))}/></div>
+            </div>
+            <div className="form-group mb-3"><label>Invoiced To Date</label><input type="date" value={vals.invoiced_to||''} onChange={e=>setVals(v=>({...v,invoiced_to:e.target.value}))}/></div>
+            <div className="form-group"><label>Notes</label><textarea value={vals.notes||''} onChange={e=>setVals(v=>({...v,notes:e.target.value}))}/></div>
+          </div>
+        ) : (
+          <div>
+            <div className="grid" style={{gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:20}}>
+              {[['Customer',c?.company],['Truck',t?`${t.rego} — ${t.make} ${t.model}`:'—'],['Trailer',tr?`${tr.rego} — ${tr.make} ${tr.model}`:'—'],['Start Date',fmt(h.start)],['End Date',fmt(h.end)],['Duration',`${weeks} weeks`],['Weekly Truck Hire',fmtCur(h.weekly_truck)],['Weekly Trailer Hire',fmtCur(h.weekly_trailer)],['Mileage Rate',`$${h.mileage_rate}/km`],['RUC Rate',`$${h.ruc_rate}/km`],['Bond',fmtCur(h.bond||5000)],['Est. Total (hire only)',fmtCur(totalEst)]].map(([l,v])=>(
+                <div key={l} style={{padding:'10px 14px',background:'var(--bg3)',borderRadius:8}}>
+                  <div style={{fontSize:11,color:'var(--text3)',fontWeight:600,textTransform:'uppercase',marginBottom:3}}>{l}</div>
+                  <div style={{fontSize:13,fontWeight:600}}>{v}</div>
+                </div>
+              ))}
+            </div>
+            <div className="divider"/>
+            <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>Checklist</div>
+            <div className="grid" style={{gridTemplateColumns:'1fr 1fr',gap:8}}>
+              {[['Agreement Signed',h.signed],['Insurance Verified',h.insurance_verified],['Pre-Handover Checklist',h.checklist_done],['Bond Received',h.bond_paid]].map(([l,v])=>(
+                <div key={l} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',background:'var(--bg3)',borderRadius:8}}>
+                  <Icon name={v?'check':'close'} size={16} color={v?'var(--green)':'var(--red-light)'}/>
+                  <span style={{fontSize:13}}>{l}</span>
+                </div>
+              ))}
+            </div>
+            <div className="divider"/>
+            <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>Invoice Schedule</div>
+            <div style={{fontSize:12,color:'var(--text2)'}}>Invoiced to: <strong style={{color:'var(--text)'}}>{h.invoiced_to?fmt(h.invoiced_to):'—'}</strong> &nbsp;·&nbsp; Next invoice: <strong style={{color:'var(--text)'}}>{h.next_invoice?fmt(h.next_invoice):'—'}</strong></div>
+            {h.notes&&<div style={{marginTop:12,padding:'10px 14px',background:'var(--bg3)',borderRadius:8,fontSize:12,color:'var(--text2)'}}>{h.notes}</div>}
+          </div>
+        )}
       </Modal>
     );
   };
 
-  const NewHireModal = ({onClose}) => (
-    <Modal open onClose={onClose} title="New Hire Agreement" size="modal-lg"
-      footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary">Create Hire Agreement</button></>}>
-      <div className="form-row mb-4">
-        <div className="form-group"><label>Customer</label><select><option>Select customer…</option>{CUSTOMERS.map(c=><option key={c.id}>{c.company}</option>)}</select></div>
-        <div className="form-group"><label>Assign Truck</label><select><option>Select truck…</option>{TRUCKS.filter(t=>t.status==='available').map(t=><option key={t.id}>{t.rego} — {t.make} {t.model}</option>)}</select></div>
-      </div>
-      <div className="form-row mb-4">
-        <div className="form-group"><label>Assign Trailer</label><select><option>Select trailer…</option>{TRAILERS.filter(t=>t.status==='available').map(t=><option key={t.id}>{t.rego} — {t.make} {t.model}</option>)}</select></div>
-        <div className="form-group"><label>Hire Start Date</label><input type="date"/></div>
-      </div>
-      <div className="form-row mb-4">
-        <div className="form-group"><label>Hire End Date</label><input type="date"/></div>
-        <div className="form-group"><label>Weekly Truck Rate (NZD)</label><input type="number" defaultValue="2800"/></div>
-      </div>
-      <div className="form-row-3 mb-4">
-        <div className="form-group"><label>Weekly Trailer Rate (NZD)</label><input type="number" defaultValue="550"/></div>
-        <div className="form-group"><label>Mileage Rate ($/km)</label><input type="number" defaultValue="0.18" step="0.01"/></div>
-        <div className="form-group"><label>Bond Amount (NZD)</label><input type="number" defaultValue="5000"/></div>
-      </div>
-      <div className="form-group mb-4"><label>Notes / Special Conditions</label><textarea placeholder="Enter any special hire conditions…"/></div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-        {['Insurance verified','Pre-handover checklist completed','Bond payment received','Digital signature obtained'].map(l=>(
-          <label key={l} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,textTransform:'none',marginBottom:0,cursor:'pointer'}}>
-            <input type="checkbox" style={{width:'auto'}}/> {l}
-          </label>
-        ))}
-      </div>
-    </Modal>
-  );
+  const NewHireModal = ({onClose}) => {
+    const [vals,setVals]=useState({customer:'',truck:'',trailer:'',start:'',end:'',weekly_truck:2800,weekly_trailer:0,mileage_rate:0.18,ruc_rate:0.062,bond:5000,notes:'',signed:false,insurance_verified:false,checklist_done:false,bond_paid:false});
+    const handleCreate = () => {
+      const id = 'H' + String(HIRES.length+1).padStart(3,'0');
+      const newHire = {...vals, id, status:'active', invoiced_to:vals.start, next_invoice:vals.start};
+      HIRES.unshift(newHire);
+      setHireData(HIRES.map(h=>({...h})));
+      onClose();
+    };
+    return (
+      <Modal open onClose={onClose} title="New Hire Agreement" size="modal-lg"
+        footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={handleCreate}><Icon name="check" size={14}/> Create Hire Agreement</button></>}>
+        <div className="form-row mb-4">
+          <div className="form-group"><label>Customer</label>
+            <select value={vals.customer} onChange={e=>setVals(v=>({...v,customer:e.target.value}))}>
+              <option value="">Select customer…</option>
+              {CUSTOMERS.map(c=><option key={c.id} value={c.id}>{c.company}</option>)}
+            </select>
+          </div>
+          <div className="form-group"><label>Assign Truck</label>
+            <select value={vals.truck} onChange={e=>setVals(v=>({...v,truck:e.target.value}))}>
+              <option value="">Select truck…</option>
+              {TRUCKS.filter(t=>t.status==='available').map(t=><option key={t.id} value={t.id}>{t.rego} — {t.make} {t.model}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="form-row mb-4">
+          <div className="form-group"><label>Assign Trailer (optional)</label>
+            <select value={vals.trailer} onChange={e=>setVals(v=>({...v,trailer:e.target.value}))}>
+              <option value="">No trailer</option>
+              {TRAILERS.filter(t=>t.status==='available').map(t=><option key={t.id} value={t.id}>{t.rego} — {t.make} {t.model}</option>)}
+            </select>
+          </div>
+          <div className="form-group"><label>Hire Start Date</label><input type="date" value={vals.start} onChange={e=>setVals(v=>({...v,start:e.target.value}))}/></div>
+        </div>
+        <div className="form-row mb-4">
+          <div className="form-group"><label>Hire End Date</label><input type="date" value={vals.end} onChange={e=>setVals(v=>({...v,end:e.target.value}))}/></div>
+          <div className="form-group"><label>Weekly Truck Rate (NZD)</label><input type="number" value={vals.weekly_truck} onChange={e=>setVals(v=>({...v,weekly_truck:parseFloat(e.target.value)||0}))}/></div>
+        </div>
+        <div className="form-row-3 mb-4">
+          <div className="form-group"><label>Weekly Trailer Rate (NZD)</label><input type="number" value={vals.weekly_trailer} onChange={e=>setVals(v=>({...v,weekly_trailer:parseFloat(e.target.value)||0}))}/></div>
+          <div className="form-group"><label>Mileage Rate ($/km)</label><input type="number" step="0.01" value={vals.mileage_rate} onChange={e=>setVals(v=>({...v,mileage_rate:parseFloat(e.target.value)||0}))}/></div>
+          <div className="form-group"><label>RUC Rate ($/km)</label><input type="number" step="0.01" value={vals.ruc_rate} onChange={e=>setVals(v=>({...v,ruc_rate:parseFloat(e.target.value)||0}))}/></div>
+        </div>
+        <div className="form-row mb-4">
+          <div className="form-group"><label>Bond Amount (NZD)</label><input type="number" value={vals.bond} onChange={e=>setVals(v=>({...v,bond:parseFloat(e.target.value)||0}))}/></div>
+        </div>
+        <div className="form-group mb-4"><label>Notes / Special Conditions</label><textarea value={vals.notes} onChange={e=>setVals(v=>({...v,notes:e.target.value}))} placeholder="Enter any special hire conditions…"/></div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+          {[['Insurance verified','insurance_verified'],['Pre-handover checklist completed','checklist_done'],['Bond payment received','bond_paid'],['Digital signature obtained','signed']].map(([l,k])=>(
+            <label key={k} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,textTransform:'none',marginBottom:0,cursor:'pointer'}}>
+              <input type="checkbox" checked={vals[k]} onChange={e=>setVals(v=>({...v,[k]:e.target.checked}))} style={{width:'auto'}}/> {l}
+            </label>
+          ))}
+        </div>
+      </Modal>
+    );
+  };
 
   return (
     <div>
@@ -1289,6 +1549,7 @@ const HiresPage = () => {
         <div className="flex gap-2">
           <div style={{padding:'4px 12px',borderRadius:8,background:'rgba(39,174,96,.15)',color:'#4ade80',fontSize:13,fontWeight:700}}>{active.length} Active</div>
           <div style={{padding:'4px 12px',borderRadius:8,background:'var(--bg3)',color:'var(--text2)',fontSize:13,fontWeight:700}}>{completed.length} Completed</div>
+          {saved&&<div style={{padding:'4px 12px',borderRadius:8,background:'rgba(39,174,96,.15)',color:'#4ade80',fontSize:13,fontWeight:700}}>✓ Saved</div>}
         </div>
         <button className="btn btn-primary" onClick={()=>setShowNew(true)}><Icon name="plus" size={14}/> New Hire Agreement</button>
       </div>
@@ -1296,18 +1557,18 @@ const HiresPage = () => {
         <table>
           <thead><tr><th>Hire ID</th><th>Customer</th><th>Truck</th><th>Trailer</th><th>Start</th><th>End</th><th>Weekly Rate</th><th>Invoiced To</th><th>Status</th><th></th></tr></thead>
           <tbody>
-            {HIRES.map(h=>(
+            {hireData.map(h=>(
               <tr key={h.id} className="tr-link" onClick={()=>setSel(h)}>
                 <td style={{fontWeight:700,fontSize:12}}>{h.id}</td>
                 <td>{custName(h.customer)}</td>
                 <td>{truckRego(h.truck)}</td>
                 <td>{truckRego(h.trailer)}</td>
                 <td style={{fontSize:12}}>{fmt(h.start)}</td>
-                <td style={{fontSize:12}}>{fmt(h.end)}</td>
+                <td style={{fontSize:12,color:h.status==='active'?'var(--green)':'var(--text2)',fontWeight:h.status==='active'?700:400}}>{fmt(h.end)}</td>
                 <td style={{fontWeight:700}}>{fmtCur(h.weekly_truck+h.weekly_trailer)}/wk</td>
                 <td style={{fontSize:12,color:'var(--text2)'}}>{h.invoiced_to?fmt(h.invoiced_to):'—'}</td>
                 <td><span className={statusBadge(h.status)}>{statusLabel(h.status)}</span></td>
-                <td><button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setSel(h)}}><Icon name="eye" size={13}/></button></td>
+                <td><button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setSel(h)}}><Icon name="edit" size={13}/></button></td>
               </tr>
             ))}
           </tbody>
@@ -1321,7 +1582,7 @@ const HiresPage = () => {
               <div/>
               {['Week 1','Week 2','Week 3','Week 4','Week 5','Week 6','Week 7','Week 8'].map(w=><div key={w} style={{fontSize:11,fontWeight:600,color:'var(--text3)',textAlign:'center'}}>{w}</div>)}
             </div>
-            {HIRES.filter(h=>h.status==='active').map(h=>{
+            {hireData.filter(h=>h.status==='active').map(h=>{
               const t=TRUCKS.find(x=>x.id===h.truck);
               return (
                 <div key={h.id} style={{display:'grid',gridTemplateColumns:'180px repeat(8,1fr)',gap:4,marginBottom:6,alignItems:'center'}}>
