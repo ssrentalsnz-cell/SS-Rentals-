@@ -913,7 +913,7 @@ const Sidebar = ({page,setPage}) => {
 
 /* ─── HEADER ──────────────────────────────────────── */
 const TITLES = {dashboard:'Dashboard',fleet:'Fleet Management',customers:'Customers',hires:'Hire Management',invoicing:'Invoicing',reports:'Financial Reports',maintenance:'Maintenance',navman:'Navman GPS',documents:'Documents',settings:'Settings'};
-const Header = ({page,theme,toggleTheme,syncState,onManualSync,onOpenSetup,xeroSyncState,onXeroSync}) => {
+const Header = ({page,theme,toggleTheme,syncState,onManualSync,onOpenSetup,xeroSyncState,onXeroSync,onNewHire}) => {
   const overdueCount = INVOICES.filter(i=>i.status==='overdue').length;
   return (
     <div className="header">
@@ -935,7 +935,7 @@ const Header = ({page,theme,toggleTheme,syncState,onManualSync,onOpenSetup,xeroS
           <Icon name="bell" size={17}/>
           <div className="notif-dot"/>
         </div>
-        <button className="btn btn-primary btn-sm"><Icon name="plus" size={14}/> New Hire</button>
+        <button className="btn btn-primary btn-sm" onClick={onNewHire}><Icon name="plus" size={14}/> New Hire</button>
       </div>
     </div>
   );
@@ -1308,10 +1308,53 @@ const FleetPage = ({theme}) => {
 };
 
 /* ─── CUSTOMERS PAGE ──────────────────────────────── */
+/* ─── CUSTOMER PERSISTENCE ───────────────────────── */
+const CUST_OVERRIDES_KEY = 'ss_rentals_cust_overrides';
+const loadCustOverrides = () => { try { return JSON.parse(localStorage.getItem(CUST_OVERRIDES_KEY)||'{}'); } catch { return {}; } };
+const saveCustOverride = (id, data) => {
+  const all = loadCustOverrides();
+  all[id] = {...(all[id]||{}), ...data};
+  localStorage.setItem(CUST_OVERRIDES_KEY, JSON.stringify(all));
+};
+const CUST_NEW_KEY = 'ss_rentals_cust_new';
+const loadNewCustomers = () => { try { return JSON.parse(localStorage.getItem(CUST_NEW_KEY)||'[]'); } catch { return []; } };
+const saveNewCustomers = list => localStorage.setItem(CUST_NEW_KEY, JSON.stringify(list));
+const getAllCustomers = () => {
+  const overrides = loadCustOverrides();
+  const base = CUSTOMERS.map(c => overrides[c.id] ? {...c,...overrides[c.id]} : {...c});
+  const newCusts = loadNewCustomers();
+  return [...base, ...newCusts];
+};
+const createNewCustomer = (data) => {
+  const id = 'C' + String(Date.now()).slice(-6);
+  const cust = {
+    id, status:'active', credit_rating:'B+', outstanding:0, ytd_revenue:0,
+    weekly_truck:0, weekly_trailer:0, payment_terms:'Weekly',
+    joined: new Date().toISOString().slice(0,10),
+    notes:'', nzbn:'', truck:'', trailer:'',
+    ...data
+  };
+  const list = loadNewCustomers();
+  list.push(cust);
+  saveNewCustomers(list);
+  return cust;
+};
+
 const CustomersPage = () => {
   const [sel,setSel]=useState(null);
   const [search,setSearch]=useState('');
-  const filtered=CUSTOMERS.filter(c=>c.company.toLowerCase().includes(search.toLowerCase())||c.contact.toLowerCase().includes(search.toLowerCase()));
+  const [showAdd,setShowAdd]=useState(false);
+  const [editingCust,setEditingCust]=useState(null);
+  const [custRefresh,setCustRefresh]=useState(0);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const allCusts = getAllCustomers();
+  const filtered=allCusts.filter(c=>{
+    if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+    if (!search) return true;
+    return (c.company||'').toLowerCase().includes(search.toLowerCase())||
+      (c.contact||'').toLowerCase().includes(search.toLowerCase())||
+      (c.director||'').toLowerCase().includes(search.toLowerCase());
+  });
 
   const CustomerModal = ({c,onClose}) => {
     const [ctab,setCtab]=useState('overview');
@@ -1410,39 +1453,182 @@ const CustomersPage = () => {
     );
   };
 
+  // Add/Edit customer modal
+  const CustomerFormModal = ({existing, onClose}) => {
+    const [vals,setVals]=useState(existing ? {...existing} : {
+      company:'', director:'', contact:'', phone:'', email:'', address:'',
+      nzbn:'', credit_rating:'B+', payment_terms:'Weekly', notes:'', status:'active',
+      weekly_truck:0, weekly_trailer:0, outstanding:0, ytd_revenue:0
+    });
+    const sv = (k,v) => setVals(p=>({...p,[k]:v}));
+    const handleSave = () => {
+      if (!vals.company.trim()) { alert('Company name is required'); return; }
+      if (!vals.contact.trim() && !vals.director.trim()) { alert('Contact name or director is required'); return; }
+      if (!vals.phone.trim()) { alert('Phone number is required'); return; }
+      if (existing) {
+        // Update existing
+        const idx = CUSTOMERS.findIndex(c=>c.id===existing.id);
+        if (idx !== -1) { Object.assign(CUSTOMERS[idx], vals); saveCustOverride(existing.id, vals); }
+        else {
+          const newList = loadNewCustomers().map(c=>c.id===existing.id?{...c,...vals}:c);
+          saveNewCustomers(newList);
+        }
+      } else {
+        // Create new
+        if (!vals.contact && vals.director) vals.contact = vals.director;
+        createNewCustomer(vals);
+      }
+      setCustRefresh(r=>r+1);
+      onClose();
+    };
+    return (
+      <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+        <div className="modal" style={{maxWidth:620}}>
+          <div className="modal-header">
+            <span className="modal-title"><Icon name="customers" size={18}/> {existing?'Edit Customer':'Add New Customer'}</span>
+            <button className="icon-btn" onClick={onClose}><Icon name="close" size={18}/></button>
+          </div>
+          <div className="modal-body">
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:4}}>
+              <div className="form-group">
+                <label>Company Name <span style={{color:'var(--red)'}}>*</span></label>
+                <input value={vals.company} onChange={e=>sv('company',e.target.value)} placeholder="e.g. Chardikala Limited"/>
+              </div>
+              <div className="form-group">
+                <label>Director Name</label>
+                <input value={vals.director||''} onChange={e=>sv('director',e.target.value)} placeholder="e.g. Gurpinder Singh"/>
+              </div>
+              <div className="form-group">
+                <label>Contact Person <span style={{color:'var(--red)'}}>*</span></label>
+                <input value={vals.contact} onChange={e=>sv('contact',e.target.value)} placeholder="e.g. Gurpinder Singh"/>
+              </div>
+              <div className="form-group">
+                <label>Cellphone / Contact Number <span style={{color:'var(--red)'}}>*</span></label>
+                <input value={vals.phone} onChange={e=>sv('phone',e.target.value)} placeholder="e.g. 027 510 0233"/>
+              </div>
+              <div className="form-group">
+                <label>Email Address</label>
+                <input type="email" value={vals.email||''} onChange={e=>sv('email',e.target.value)} placeholder="e.g. info@company.co.nz"/>
+              </div>
+              <div className="form-group">
+                <label>Physical Address</label>
+                <input value={vals.address||''} onChange={e=>sv('address',e.target.value)} placeholder="e.g. 123 Main St, Auckland"/>
+              </div>
+              <div className="form-group">
+                <label>NZBN (optional)</label>
+                <input value={vals.nzbn||''} onChange={e=>sv('nzbn',e.target.value)} placeholder="9429..."/>
+              </div>
+              <div className="form-group">
+                <label>Credit Rating</label>
+                <select value={vals.credit_rating||'B+'} onChange={e=>sv('credit_rating',e.target.value)}>
+                  {['A+','A','B+','B','B-','C'].map(r=><option key={r}>{r}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Payment Terms</label>
+                <select value={vals.payment_terms||'Weekly'} onChange={e=>sv('payment_terms',e.target.value)}>
+                  {['Weekly','Fortnightly','Monthly','On Invoice'].map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Status</label>
+                <select value={vals.status||'active'} onChange={e=>sv('status',e.target.value)}>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="blacklisted">Blacklisted</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Weekly Truck Rate (NZD)</label>
+                <input type="number" value={vals.weekly_truck||0} onChange={e=>sv('weekly_truck',parseFloat(e.target.value)||0)}/>
+              </div>
+              <div className="form-group">
+                <label>Weekly Trailer Rate (NZD)</label>
+                <input type="number" value={vals.weekly_trailer||0} onChange={e=>sv('weekly_trailer',parseFloat(e.target.value)||0)}/>
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Notes</label>
+              <textarea value={vals.notes||''} onChange={e=>sv('notes',e.target.value)} rows={2} placeholder="Any relevant notes about this customer…"/>
+            </div>
+          </div>
+          <div style={{display:'flex',gap:10,justifyContent:'flex-end',padding:'16px 24px',borderTop:'1px solid var(--border)'}}>
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" onClick={handleSave}>
+              <Icon name="check" size={14}/> {existing?'Save Changes':'Add Customer'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <div className="flex gap-2">
-          <input style={{width:260}} placeholder="Search customers…" value={search} onChange={e=>setSearch(e.target.value)}/>
+        <div className="flex gap-2" style={{flexWrap:'wrap'}}>
+          <input style={{width:260}} placeholder="Search by company, contact or director…" value={search} onChange={e=>setSearch(e.target.value)}/>
+          {search&&<button className="btn btn-ghost btn-sm" onClick={()=>setSearch('')}>Clear</button>}
+          {['all','active','inactive','blacklisted'].map(s=>(
+            <button key={s} className={`btn btn-sm ${statusFilter===s?'btn-primary':'btn-ghost'}`}
+              onClick={()=>setStatusFilter(s)}
+              style={{textTransform:'capitalize'}}>
+              {s==='all'?`All (${allCusts.length})`:
+               s==='active'?`Active (${allCusts.filter(c=>c.status==='active').length})`:
+               s==='inactive'?`Inactive (${allCusts.filter(c=>c.status==='inactive').length})`:
+               `Blacklisted (${allCusts.filter(c=>c.status==='blacklisted').length})`}
+            </button>
+          ))}
         </div>
-        <button className="btn btn-primary"><Icon name="plus" size={14}/> New Customer</button>
+        <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>
+          <Icon name="plus" size={14}/> Add New Customer
+        </button>
       </div>
       <div className="grid grid-4 mb-4">
-        {[{l:'Total Customers',v:CUSTOMERS.length},{l:'Active Hires',v:CUSTOMERS.filter(c=>c.status==='active'&&c.truck).length},{l:'Total Outstanding',v:fmtCur(CUSTOMERS.reduce((a,c)=>a+c.outstanding,0))},{l:'YTD Revenue',v:fmtCur(CUSTOMERS.reduce((a,c)=>a+c.ytd_revenue,0))}].map(k=>(
+        {[
+          {l:'Total Customers',v:allCusts.length},
+          {l:'Active Hires',v:getEffectiveHires().filter(h=>h.status==='active').length},
+          {l:'Total Outstanding',v:fmtCur(allCusts.reduce((a,c)=>a+(c.outstanding||0),0))},
+          {l:'YTD Revenue',v:fmtCur(allCusts.reduce((a,c)=>a+(c.ytd_revenue||0),0))}
+        ].map(k=>(
           <div key={k.l} className="card card-sm"><div className="kpi-label">{k.l}</div><div style={{fontSize:22,fontWeight:800,marginTop:4}}>{k.v}</div></div>
         ))}
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Company</th><th>Contact</th><th>Phone</th><th>Current Hire</th><th>Weekly Rate</th><th>Outstanding</th><th>Status</th><th></th></tr></thead>
+          <thead>
+            <tr><th>Company</th><th>Director</th><th>Contact</th><th>Phone</th><th>Active Hire</th><th>Weekly Rate</th><th>Outstanding</th><th>Status</th><th></th></tr>
+          </thead>
           <tbody>
-            {filtered.map(c=>(
-              <tr key={c.id} className="tr-link" onClick={()=>setSel(c)}>
-                <td style={{fontWeight:700}}>{c.company}</td>
-                <td>{c.contact}</td>
-                <td style={{fontSize:12,color:'var(--text2)'}}>{c.phone}</td>
-                <td style={{fontSize:12}}>{c.truck?truckRego(c.truck)+(c.trailer?' + '+truckRego(c.trailer):''):'—'}</td>
-                <td>{c.weekly_truck?fmtCur(c.weekly_truck+c.weekly_trailer)+'/wk':'—'}</td>
-                <td style={{fontWeight:700,color:c.outstanding>0?'var(--red-light)':'var(--green)'}}>{c.outstanding>0?fmtCur(c.outstanding):'—'}</td>
-                <td><span className={statusBadge(c.status)}>{statusLabel(c.status)}</span></td>
-                <td><button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setSel(c)}}><Icon name="eye" size={13}/></button></td>
-              </tr>
-            ))}
+            {filtered.map(c=>{
+              const activeHire = getEffectiveHires().find(h=>h.customer===c.id&&h.status==='active');
+              const truck = activeHire ? TRUCKS.find(t=>t.id===activeHire.truck) : null;
+              return (
+                <tr key={c.id} className="tr-link" onClick={()=>setSel(c)}>
+                  <td style={{fontWeight:700}}>{c.company}</td>
+                  <td style={{fontSize:12,color:'var(--text2)'}}>{c.director||'—'}</td>
+                  <td>{c.contact}</td>
+                  <td style={{fontSize:12,color:'var(--text2)'}}>{c.phone}</td>
+                  <td style={{fontSize:12}}>{truck?truck.rego:'—'}</td>
+                  <td>{(c.weekly_truck||0)>0?fmtCur(c.weekly_truck+(c.weekly_trailer||0))+'/wk':'—'}</td>
+                  <td style={{fontWeight:700,color:(c.outstanding||0)>0?'var(--red-light)':'var(--text2)'}}>
+                    {(c.outstanding||0)>0?fmtCur(c.outstanding):'—'}
+                  </td>
+                  <td><span className={statusBadge(c.status)}>{statusLabel(c.status)}</span></td>
+                  <td style={{display:'flex',gap:4}}>
+                    <button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setSel(c)}} title="View"><Icon name="eye" size={13}/></button>
+                    <button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setEditingCust(c)}} title="Edit"><Icon name="edit" size={13}/></button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        {filtered.length===0&&<div style={{textAlign:'center',padding:32,color:'var(--text3)'}}>No customers found for &quot;{search}&quot;</div>}
       </div>
       {sel&&<CustomerModal c={sel} onClose={()=>setSel(null)}/>}
+      {showAdd&&<CustomerFormModal onClose={()=>setShowAdd(false)}/>}
+      {editingCust&&<CustomerFormModal existing={editingCust} onClose={()=>setEditingCust(null)}/>}
     </div>
   );
 };
@@ -2515,6 +2701,540 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
   );
 };
 
+/* ─── NEW HIRE WIZARD ────────────────────────────── */
+const NewHireWizard = ({onClose, onCreated}) => {
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState({
+    customer: '', customCustomer: '', isNewCustomer: false,
+    startDate: '', endDate: '', hireType: 'weekly',
+    truck: '', trailer: '', noTrailer: false,
+    weeklyTruck: 0, weeklyTrailer: 0, mileageRate: 0.18, rucRate: 0.062,
+    bond: 5000, bondPaid: false, signed: false, insuranceVerified: false, checklistDone: false,
+    notes: '',
+  });
+  const [confirmed, setConfirmed] = useState(false);
+  const [newHireId, setNewHireId] = useState('');
+
+  const set = (k, v) => setForm(f => ({...f, [k]: v}));
+
+  // Calculate hire duration and cost
+  const calcDuration = () => {
+    if (!form.startDate || !form.endDate) return {days:0, weeks:0, months:0, label:'—'};
+    const diff = Math.ceil((new Date(form.endDate) - new Date(form.startDate)) / 86400000);
+    const weeks = Math.ceil(diff / 7);
+    const months = Math.ceil(diff / 30);
+    return {days:diff, weeks, months, label: diff===1?'1 day':`${diff} days (${weeks} week${weeks!==1?'s':''})`};
+  };
+
+  const calcCost = () => {
+    const dur = calcDuration();
+    if (!dur.weeks) return 0;
+    const total = (form.weeklyTruck + form.weeklyTrailer) * dur.weeks;
+    return total;
+  };
+
+  // Get available trucks for selected dates
+  const getAvailableTrucks = () => {
+    if (!form.startDate || !form.endDate) return TRUCKS;
+    const effHires = getEffectiveHires().filter(h => h.status === 'active');
+    return TRUCKS.filter(t => {
+      if (t.status === 'maintenance') return false;
+      const conflict = effHires.find(h => {
+        if (h.truck !== t.id) return false;
+        const hStart = new Date(h.start), hEnd = new Date(h.end);
+        const rStart = new Date(form.startDate), rEnd = new Date(form.endDate);
+        return rStart <= hEnd && rEnd >= hStart;
+      });
+      return !conflict;
+    });
+  };
+
+  const getAvailableTrailers = () => {
+    if (!form.startDate || !form.endDate) return TRAILERS;
+    const effHires = getEffectiveHires().filter(h => h.status === 'active');
+    return TRAILERS.filter(t => {
+      if (t.status === 'maintenance') return false;
+      const conflict = effHires.find(h => {
+        if (h.trailer !== t.id) return false;
+        const hStart = new Date(h.start), hEnd = new Date(h.end);
+        const rStart = new Date(form.startDate), rEnd = new Date(form.endDate);
+        return rStart <= hEnd && rEnd >= hStart;
+      });
+      return !conflict;
+    });
+  };
+
+  const availTrucks = getAvailableTrucks();
+  const availTrailers = getAvailableTrailers();
+  const dur = calcDuration();
+  const totalCost = calcCost();
+
+  // Auto-fill rate when truck selected
+  const handleTruckSelect = (truckId) => {
+    set('truck', truckId);
+    const cust = CUSTOMERS.find(c => c.id === form.customer);
+    if (cust && cust.weekly_truck) set('weeklyTruck', cust.weekly_truck);
+    else {
+      const t = TRUCKS.find(t => t.id === truckId);
+      set('weeklyTruck', t?.weekly_rate || 2650);
+    }
+  };
+
+  const handleTrailerSelect = (trailerId) => {
+    set('trailer', trailerId);
+    const cust = CUSTOMERS.find(c => c.id === form.customer);
+    if (cust && cust.weekly_trailer) set('weeklyTrailer', cust.weekly_trailer);
+    else set('weeklyTrailer', 550);
+  };
+
+  const handleCustomerSelect = (custId) => {
+    set('customer', custId);
+    const cust = CUSTOMERS.find(c => c.id === custId);
+    if (cust) {
+      if (cust.weekly_truck) set('weeklyTruck', cust.weekly_truck);
+      if (cust.weekly_trailer) set('weeklyTrailer', cust.weekly_trailer);
+    }
+  };
+
+  const handleConfirm = () => {
+    // Create new customer if needed
+    let custId = form.customer;
+    if (form.customerMode === 'new' && form.newCompany) {
+      const newCust = createNewCustomer({
+        company: form.newCompany, director: form.newDirector||'',
+        contact: form.newContact||form.newDirector||'', phone: form.newPhone||'',
+        email: form.newEmail||'', address: form.newAddress||'',
+        weekly_truck: form.weeklyTruck, weekly_trailer: form.weeklyTrailer,
+      });
+      custId = newCust.id;
+      set('customer', custId);
+    }
+    const id = 'H' + String(HIRES.length + 1).padStart(3, '0');
+    const newHire = {
+      id, customer: custId||form.customer, truck: form.truck,
+      trailer: form.noTrailer ? '' : form.trailer,
+      start: form.startDate, end: form.endDate,
+      status: 'active', hireType: form.hireType,
+      weekly_truck: form.weeklyTruck, weekly_trailer: form.noTrailer ? 0 : form.weeklyTrailer,
+      mileage_rate: form.mileageRate, ruc_rate: form.rucRate,
+      bond: form.bond, bond_paid: form.bondPaid,
+      signed: form.signed, insurance_verified: form.insuranceVerified,
+      checklist_done: form.checklistDone,
+      invoiced_to: form.startDate, next_invoice: form.startDate,
+      notes: form.notes,
+    };
+    HIRES.unshift(newHire);
+    // Update truck status
+    const truck = TRUCKS.find(t => t.id === form.truck);
+    if (truck) { truck.status = 'on_hire'; truck.hirer = form.customer; }
+    const trailer = TRAILERS.find(t => t.id === form.trailer);
+    if (trailer && !form.noTrailer) { trailer.status = 'on_hire'; trailer.hirer = form.customer; }
+    // Save override
+    saveHireOverride(id, {status:'active', end: form.endDate, start: form.startDate, weekly_truck: form.weeklyTruck});
+    setNewHireId(id);
+    setConfirmed(true);
+  };
+
+  const canProceed = () => {
+    if (step === 1) return form.startDate && form.endDate && new Date(form.endDate) > new Date(form.startDate);
+    if (step === 2) return form.truck;
+    if (step === 3) return form.customer || (form.customerMode==='new' && form.newCompany && form.newPhone);
+    if (step === 4) return form.weeklyTruck > 0;
+    return true;
+  };
+
+  const steps = ['Dates & Type', 'Select Units', 'Customer', 'Rates & Terms', 'Confirm'];
+
+  if (confirmed) {
+    const cust = CUSTOMERS.find(c => c.id === form.customer);
+    const truck = TRUCKS.find(t => t.id === form.truck);
+    const trailer = TRAILERS.find(t => t.id === form.trailer);
+    return (
+      <div className="modal-overlay">
+        <div className="modal" style={{maxWidth:560, textAlign:'center'}}>
+          <div style={{padding:'32px 24px'}}>
+            <div style={{fontSize:56, marginBottom:16}}>✅</div>
+            <div style={{fontSize:22, fontWeight:800, marginBottom:8, color:'var(--green)'}}>Booking Confirmed!</div>
+            <div style={{fontSize:14, color:'var(--text2)', marginBottom:24}}>Hire agreement <strong style={{color:'var(--text)'}}>{newHireId}</strong> has been created successfully.</div>
+            <div style={{background:'var(--bg3)', borderRadius:12, padding:'16px 20px', marginBottom:24, textAlign:'left'}}>
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+                {[
+                  ['Customer', cust?.company],
+                  ['Truck', truck ? truck.rego+' '+truck.make+' '+truck.model : '—'],
+                  ['Trailer', trailer&&!form.noTrailer ? trailer.rego+' '+trailer.make : 'None'],
+                  ['Start Date', fmt(form.startDate)],
+                  ['End Date', fmt(form.endDate)],
+                  ['Duration', dur.label],
+                  ['Weekly Rate', fmtCur(form.weeklyTruck + (form.noTrailer?0:form.weeklyTrailer))+'/wk'],
+                  ['Est. Total', fmtCur(totalCost)],
+                ].map(([l,v])=>(
+                  <div key={l} style={{padding:'8px 10px', background:'var(--bg4)', borderRadius:8}}>
+                    <div style={{fontSize:10, color:'var(--text3)', textTransform:'uppercase', marginBottom:2}}>{l}</div>
+                    <div style={{fontSize:13, fontWeight:700}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{display:'flex', gap:10, justifyContent:'center'}}>
+              <button className="btn btn-ghost" onClick={onClose}>Close</button>
+              <button className="btn btn-primary" onClick={()=>{onCreated();}}>
+                <Icon name="check" size={14}/> View Hire Management
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:680}}>
+        <div className="modal-header">
+          <span className="modal-title" style={{display:'flex',alignItems:'center',gap:10}}>
+            <Icon name="plus" size={18} color="var(--red)"/> New Hire Agreement
+          </span>
+          <button className="icon-btn" onClick={onClose}><Icon name="close" size={18}/></button>
+        </div>
+
+        {/* Step indicator */}
+        <div style={{display:'flex', padding:'0 24px', borderBottom:'1px solid var(--border)', background:'var(--bg3)'}}>
+          {steps.map((s,i)=>(
+            <div key={s} onClick={()=>i+1<step&&setStep(i+1)}
+              style={{flex:1, padding:'12px 4px', textAlign:'center', fontSize:11, fontWeight:700,
+                color: step===i+1?'var(--red)':i+1<step?'var(--green)':'var(--text3)',
+                borderBottom: step===i+1?'2px solid var(--red)':i+1<step?'2px solid var(--green)':'2px solid transparent',
+                cursor: i+1<step?'pointer':'default', transition:'all 0.2s'}}>
+              <div style={{fontSize:16, marginBottom:2}}>{i+1<step?'✓':i+1}</div>
+              <div style={{textTransform:'uppercase', letterSpacing:.5}}>{s}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="modal-body">
+
+          {/* STEP 1: Dates & Hire Type */}
+          {step===1&&(
+            <div>
+              <div style={{marginBottom:20}}>
+                <div style={{fontWeight:700, fontSize:15, marginBottom:4}}>When is the hire?</div>
+                <div style={{fontSize:12, color:'var(--text2)'}}>Select hire start and end dates to see available units.</div>
+              </div>
+              <div className="form-row mb-4">
+                <div className="form-group">
+                  <label>Hire Start Date</label>
+                  <input type="date" value={form.startDate} min={new Date().toISOString().slice(0,10)}
+                    onChange={e=>{set('startDate',e.target.value); if(form.endDate&&e.target.value>=form.endDate) set('endDate','');}}/>
+                </div>
+                <div className="form-group">
+                  <label>Hire End Date</label>
+                  <input type="date" value={form.endDate} min={form.startDate||new Date().toISOString().slice(0,10)}
+                    onChange={e=>set('endDate',e.target.value)}/>
+                </div>
+              </div>
+              {dur.days>0&&(
+                <div style={{padding:'12px 16px', background:'rgba(39,174,96,0.08)', border:'1px solid rgba(39,174,96,0.2)', borderRadius:8, marginBottom:20, fontSize:13}}>
+                  <strong style={{color:'var(--green)'}}>Duration: {dur.label}</strong>
+                </div>
+              )}
+              <div className="form-group mb-4">
+                <label>Hire Type</label>
+                <div style={{display:'flex', gap:10}}>
+                  {[['daily','Daily Hire'],['weekly','Weekly Hire'],['monthly','Monthly Hire']].map(([v,l])=>(
+                    <button key={v} className={`btn btn-sm ${form.hireType===v?'btn-primary':'btn-ghost'}`}
+                      onClick={()=>set('hireType',v)}
+                      style={{flex:1, justifyContent:'center'}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{padding:'12px 14px', background:'var(--bg3)', borderRadius:8, fontSize:12, color:'var(--text2)'}}>
+                <strong>Available units will be shown after selecting dates.</strong><br/>
+                Units with conflicting bookings are automatically excluded.
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2: Select Units */}
+          {step===2&&(
+            <div>
+              <div style={{marginBottom:16}}>
+                <div style={{fontWeight:700, fontSize:15, marginBottom:4}}>Select Units</div>
+                <div style={{fontSize:12, color:'var(--text2)'}}>Showing units available for {fmt(form.startDate)} — {fmt(form.endDate)}</div>
+              </div>
+
+              {/* Trucks */}
+              <div style={{marginBottom:20}}>
+                <div style={{fontWeight:700, fontSize:13, marginBottom:10, display:'flex', alignItems:'center', gap:8}}>
+                  Trucks <span style={{fontSize:11, color:'var(--green)', fontWeight:400}}>{availTrucks.length} available</span>
+                </div>
+                {availTrucks.length===0&&<div style={{padding:16, background:'var(--bg3)', borderRadius:8, color:'var(--text3)', fontSize:13, textAlign:'center'}}>No trucks available for these dates</div>}
+                <div style={{display:'grid', gap:8}}>
+                  {availTrucks.map(t=>(
+                    <div key={t.id} onClick={()=>handleTruckSelect(t.id)}
+                      style={{padding:'12px 16px', border:`2px solid ${form.truck===t.id?'var(--red)':'var(--border)'}`,
+                        borderRadius:10, cursor:'pointer', background:form.truck===t.id?'rgba(217,43,43,0.06)':'var(--card)',
+                        display:'flex', alignItems:'center', gap:14, transition:'all 0.15s'}}>
+                      <div style={{width:20, height:20, borderRadius:'50%', border:`2px solid ${form.truck===t.id?'var(--red)':'var(--border2)'}`,
+                        background:form.truck===t.id?'var(--red)':'transparent', flexShrink:0}}/>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:800, fontSize:14}}>{t.rego} <span style={{fontWeight:400, color:'var(--text2)', fontSize:12}}>— {t.make} {t.model} {t.year}</span></div>
+                        <div style={{fontSize:11, color:'var(--text3)', marginTop:2}}>Odometer: {t.odometer.toLocaleString()} km · COF: {fmt(t.cof_expiry)} · {statusLabel(t.status)}</div>
+                      </div>
+                      {t.weekly_rate>0&&<div style={{fontSize:13, fontWeight:700, color:'var(--green)'}}>{fmtCur(t.weekly_rate)}/wk</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Trailers */}
+              <div>
+                <div style={{fontWeight:700, fontSize:13, marginBottom:10, display:'flex', alignItems:'center', gap:8, justifyContent:'space-between'}}>
+                  <span>Trailers <span style={{fontSize:11, color:'var(--green)', fontWeight:400}}>{availTrailers.length} available</span></span>
+                  <label style={{display:'flex', alignItems:'center', gap:6, fontSize:12, cursor:'pointer', textTransform:'none', marginBottom:0, fontWeight:400}}>
+                    <input type="checkbox" checked={form.noTrailer} onChange={e=>set('noTrailer',e.target.checked)} style={{width:'auto'}}/>
+                    No trailer needed
+                  </label>
+                </div>
+                {!form.noTrailer&&(
+                  <div style={{display:'grid', gap:8}}>
+                    {availTrailers.map(t=>(
+                      <div key={t.id} onClick={()=>handleTrailerSelect(t.id)}
+                        style={{padding:'12px 16px', border:`2px solid ${form.trailer===t.id?'var(--blue)':'var(--border)'}`,
+                          borderRadius:10, cursor:'pointer', background:form.trailer===t.id?'rgba(41,128,185,0.06)':'var(--card)',
+                          display:'flex', alignItems:'center', gap:14, transition:'all 0.15s'}}>
+                        <div style={{width:20, height:20, borderRadius:'50%', border:`2px solid ${form.trailer===t.id?'var(--blue)':'var(--border2)'}`,
+                          background:form.trailer===t.id?'var(--blue)':'transparent', flexShrink:0}}/>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:800, fontSize:14}}>{t.rego} <span style={{fontWeight:400, color:'var(--text2)', fontSize:12}}>— {t.make} {t.model}</span></div>
+                          <div style={{fontSize:11, color:'var(--text3)', marginTop:2}}>COF: {fmt(t.cof_expiry)} · {statusLabel(t.status)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3: Customer */}
+          {step===3&&(
+            <div>
+              <div style={{marginBottom:16}}>
+                <div style={{fontWeight:700, fontSize:15, marginBottom:4}}>Customer Details</div>
+                <div style={{fontSize:12, color:'var(--text2)'}}>Select an existing customer or add a new one.</div>
+              </div>
+
+              {/* Toggle: existing vs new */}
+              <div style={{display:'flex',gap:0,borderRadius:8,overflow:'hidden',border:'1px solid var(--border2)',marginBottom:16}}>
+                {[['existing','Select Existing Customer'],['new','Add New Customer']].map(([v,l])=>(
+                  <div key={v} style={{flex:1,padding:'10px',textAlign:'center',background:form.customerMode===v||(!form.customerMode&&v==='existing')?'var(--red)':'var(--bg3)',color:form.customerMode===v||(!form.customerMode&&v==='existing')?'#fff':'var(--text2)',fontSize:13,fontWeight:600,cursor:'pointer'}}
+                    onClick={()=>{set('customerMode',v); if(v==='new') set('customer','');}}>
+                    {l}
+                  </div>
+                ))}
+              </div>
+
+              {/* Existing customer */}
+              {(form.customerMode==='existing'||!form.customerMode)&&(
+                <div>
+                  <div className="form-group mb-3">
+                    <label>Search & Select Customer</label>
+                    <select value={form.customer} onChange={e=>handleCustomerSelect(e.target.value)}>
+                      <option value="">Select customer…</option>
+                      {getAllCustomers().filter(c=>c.status==='active').map(c=>(
+                        <option key={c.id} value={c.id}>{c.company}{c.director?' — '+c.director:''}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {form.customer&&(()=>{
+                    const c = getAllCustomers().find(x=>x.id===form.customer);
+                    return c ? (
+                      <div style={{padding:'12px 16px', background:'var(--bg3)', borderRadius:10, marginBottom:16}}>
+                        <div style={{fontWeight:700, marginBottom:8, fontSize:14}}>{c.company}</div>
+                        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, fontSize:12}}>
+                          {[['Director',c.director||'—'],['Contact',c.contact],['Phone',c.phone],['Email',c.email||'—'],['Address',c.address||'—'],['Credit Rating',c.credit_rating],['Payment Terms',c.payment_terms],['YTD Revenue',fmtCur(c.ytd_revenue||0)]].map(([l,v])=>(
+                            <div key={l} style={{padding:'6px 8px',background:'var(--bg4)',borderRadius:6}}>
+                              <div style={{fontSize:10,color:'var(--text3)',marginBottom:1}}>{l}</div>
+                              <div style={{fontWeight:600,fontSize:12}}>{v}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {(c.outstanding||0)>0&&<div style={{marginTop:8, padding:'6px 10px', background:'rgba(217,43,43,0.1)', borderRadius:6, fontSize:12, color:'var(--red-light)'}}>⚠ Outstanding balance: {fmtCur(c.outstanding)}</div>}
+                      </div>
+                    ) : null;
+                  })()}
+                </div>
+              )}
+
+              {/* New customer */}
+              {form.customerMode==='new'&&(
+                <div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+                    <div className="form-group" style={{marginBottom:0}}>
+                      <label>Company Name <span style={{color:'var(--red)'}}>*</span></label>
+                      <input value={form.newCompany||''} onChange={e=>set('newCompany',e.target.value)} placeholder="e.g. Chardikala Limited"/>
+                    </div>
+                    <div className="form-group" style={{marginBottom:0}}>
+                      <label>Director Name</label>
+                      <input value={form.newDirector||''} onChange={e=>set('newDirector',e.target.value)} placeholder="e.g. Gurpinder Singh"/>
+                    </div>
+                    <div className="form-group" style={{marginBottom:0}}>
+                      <label>Contact Person</label>
+                      <input value={form.newContact||''} onChange={e=>set('newContact',e.target.value)} placeholder="Contact name"/>
+                    </div>
+                    <div className="form-group" style={{marginBottom:0}}>
+                      <label>Cellphone <span style={{color:'var(--red)'}}>*</span></label>
+                      <input value={form.newPhone||''} onChange={e=>set('newPhone',e.target.value)} placeholder="e.g. 027 510 0233"/>
+                    </div>
+                    <div className="form-group" style={{marginBottom:0}}>
+                      <label>Email Address</label>
+                      <input type="email" value={form.newEmail||''} onChange={e=>set('newEmail',e.target.value)} placeholder="email@company.co.nz"/>
+                    </div>
+                    <div className="form-group" style={{marginBottom:0}}>
+                      <label>Physical Address</label>
+                      <input value={form.newAddress||''} onChange={e=>set('newAddress',e.target.value)} placeholder="e.g. 123 Main St, Auckland"/>
+                    </div>
+                  </div>
+                  <div style={{fontSize:11,color:'var(--text3)',background:'var(--bg3)',padding:'8px 12px',borderRadius:6}}>
+                    The new customer will be saved to your customer database when the hire is confirmed.
+                  </div>
+                </div>
+              )}
+
+              <div className="form-group mt-3">
+                <label>Notes / Special Conditions (optional)</label>
+                <textarea value={form.notes} onChange={e=>set('notes',e.target.value)} placeholder="Any special hire conditions, agreements, or notes…" rows={3}/>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 4: Rates & Terms */}
+          {step===4&&(
+            <div>
+              <div style={{marginBottom:16}}>
+                <div style={{fontWeight:700, fontSize:15, marginBottom:4}}>Rates & Terms</div>
+                <div style={{fontSize:12, color:'var(--text2)'}}>Set hire rates and confirm agreement terms.</div>
+              </div>
+              <div className="form-row mb-4">
+                <div className="form-group">
+                  <label>Weekly Truck Rate (NZD)</label>
+                  <input type="number" value={form.weeklyTruck} onChange={e=>set('weeklyTruck',parseFloat(e.target.value)||0)}/>
+                </div>
+                <div className="form-group">
+                  <label>Weekly Trailer Rate (NZD)</label>
+                  <input type="number" value={form.weeklyTrailer} onChange={e=>set('weeklyTrailer',parseFloat(e.target.value)||0)} disabled={form.noTrailer}/>
+                </div>
+              </div>
+              <div className="form-row mb-4">
+                <div className="form-group">
+                  <label>Mileage Rate ($/km)</label>
+                  <input type="number" step="0.01" value={form.mileageRate} onChange={e=>set('mileageRate',parseFloat(e.target.value)||0)}/>
+                </div>
+                <div className="form-group">
+                  <label>RUC Rate ($/km)</label>
+                  <input type="number" step="0.01" value={form.rucRate} onChange={e=>set('rucRate',parseFloat(e.target.value)||0)}/>
+                </div>
+              </div>
+              <div className="form-row mb-4">
+                <div className="form-group">
+                  <label>Bond Amount (NZD)</label>
+                  <input type="number" value={form.bond} onChange={e=>set('bond',parseFloat(e.target.value)||0)}/>
+                </div>
+              </div>
+              <div style={{padding:'12px 16px', background:'rgba(39,174,96,0.08)', border:'1px solid rgba(39,174,96,0.2)', borderRadius:8, marginBottom:16, fontSize:13}}>
+                <div style={{fontWeight:700, color:'var(--green)', marginBottom:6}}>Estimated Cost Summary</div>
+                <div style={{display:'flex', justifyContent:'space-between', marginBottom:3}}><span>Weekly rate:</span><strong>{fmtCur(form.weeklyTruck + (form.noTrailer?0:form.weeklyTrailer))}/wk</strong></div>
+                <div style={{display:'flex', justifyContent:'space-between', marginBottom:3}}><span>Duration:</span><strong>{dur.label}</strong></div>
+                <div style={{display:'flex', justifyContent:'space-between', borderTop:'1px solid rgba(39,174,96,0.2)', paddingTop:6, marginTop:6}}><span style={{fontWeight:700}}>Est. total hire:</span><strong style={{fontSize:16, color:'var(--green)'}}>{fmtCur(totalCost)}</strong></div>
+              </div>
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8}}>
+                {[['bondPaid','Bond payment received'],['signed','Digital signature obtained'],['insuranceVerified','Insurance verified'],['checklistDone','Pre-handover checklist done']].map(([k,l])=>(
+                  <label key={k} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,textTransform:'none',marginBottom:0,cursor:'pointer',padding:'8px 10px',background:'var(--bg3)',borderRadius:8}}>
+                    <input type="checkbox" checked={form[k]} onChange={e=>set(k,e.target.checked)} style={{width:'auto'}}/>
+                    {l}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* STEP 5: Confirm */}
+          {step===5&&(()=>{
+            const cust = CUSTOMERS.find(c=>c.id===form.customer);
+            const truck = TRUCKS.find(t=>t.id===form.truck);
+            const trailer = TRAILERS.find(t=>t.id===form.trailer);
+            return (
+              <div>
+                <div style={{marginBottom:16}}>
+                  <div style={{fontWeight:700, fontSize:15, marginBottom:4}}>Review & Confirm</div>
+                  <div style={{fontSize:12, color:'var(--text2)'}}>Review all details before creating the hire agreement.</div>
+                </div>
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:20}}>
+                  {[
+                    ['Customer', cust?.company||'—'],
+                    ['Hire Type', form.hireType.charAt(0).toUpperCase()+form.hireType.slice(1)],
+                    ['Start Date', fmt(form.startDate)],
+                    ['End Date', fmt(form.endDate)],
+                    ['Duration', dur.label],
+                    ['Truck', truck?`${truck.rego} ${truck.make} ${truck.model}`:'—'],
+                    ['Trailer', trailer&&!form.noTrailer?`${trailer.rego} ${trailer.make}`:'None'],
+                    ['Weekly Rate', fmtCur(form.weeklyTruck+(form.noTrailer?0:form.weeklyTrailer))+'/wk'],
+                    ['Mileage Rate', '$'+form.mileageRate+'/km'],
+                    ['RUC Rate', '$'+form.rucRate+'/km'],
+                    ['Bond', fmtCur(form.bond)],
+                    ['Est. Total', fmtCur(totalCost)],
+                  ].map(([l,v])=>(
+                    <div key={l} style={{padding:'10px 12px', background:'var(--bg3)', borderRadius:8}}>
+                      <div style={{fontSize:10, color:'var(--text3)', textTransform:'uppercase', marginBottom:3}}>{l}</div>
+                      <div style={{fontSize:13, fontWeight:700}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:'flex', gap:8, marginBottom:16, flexWrap:'wrap'}}>
+                  {[['bondPaid','Bond Paid'],['signed','Signed'],['insuranceVerified','Insurance OK'],['checklistDone','Checklist Done']].map(([k,l])=>(
+                    <span key={k} style={{padding:'4px 10px', borderRadius:6, fontSize:11, fontWeight:700,
+                      background:form[k]?'rgba(39,174,96,0.15)':'var(--bg3)',
+                      color:form[k]?'var(--green)':'var(--text3)',
+                      border:`1px solid ${form[k]?'rgba(39,174,96,0.3)':'var(--border)'}`}}>
+                      {form[k]?'✓ ':'○ '}{l}
+                    </span>
+                  ))}
+                </div>
+                {form.notes&&<div style={{padding:'10px 14px', background:'var(--bg3)', borderRadius:8, fontSize:12, color:'var(--text2)', marginBottom:16}}><strong>Notes:</strong> {form.notes}</div>}
+                <div style={{padding:'12px 14px', background:'rgba(217,43,43,0.06)', border:'1px solid rgba(217,43,43,0.2)', borderRadius:8, fontSize:12}}>
+                  <strong>⚠ Confirm:</strong> Clicking &quot;Create Hire Agreement&quot; will book the selected units for the chosen dates and add them to Hire Management.
+                </div>
+              </div>
+            );
+          })()}
+
+        </div>
+
+        {/* Footer navigation */}
+        <div style={{display:'flex', justifyContent:'space-between', padding:'16px 24px', borderTop:'1px solid var(--border)', background:'var(--bg3)'}}>
+          <button className="btn btn-ghost" onClick={()=>step>1?setStep(s=>s-1):onClose()}>
+            {step>1?'← Back':'Cancel'}
+          </button>
+          <div style={{display:'flex', alignItems:'center', gap:12}}>
+            <span style={{fontSize:12, color:'var(--text3)'}}>Step {step} of {steps.length}</span>
+            {step<5?(
+              <button className="btn btn-primary" onClick={()=>setStep(s=>s+1)} disabled={!canProceed()}>
+                Continue →
+              </button>
+            ):(
+              <button className="btn btn-primary" onClick={handleConfirm} style={{padding:'10px 24px'}}>
+                <Icon name="check" size={15}/> Create Hire Agreement
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /* ─── COMMUNICATIONS ENGINE ──────────────────────── */
 const COMM_LOG_KEY = 'ss_rentals_comm_log';
 const COMM_TEMPLATES_KEY = 'ss_rentals_comm_templates';
@@ -2780,7 +3500,9 @@ const CommunicationsPage = () => {
         allMessages.forEach((m,i) => {
           const r = bulkResults[i];
           console.log('Result for', m.cust.company, ':', JSON.stringify(r));
-          const status = (r?.status==='SUCCESS'||r?.status==='Sent')?'sent':m.cust.phone?'failed':'no_phone';
+          // Kudosity: success = no error OR error.code === 0
+          const kudoSuccess = r && (r.error === null || r.error === undefined || r.error?.code === 0 || r.status === 'SUCCESS');
+          const status = kudoSuccess ? 'sent' : m.cust.phone ? 'failed' : 'no_phone';
           results.push({
             custId:m.custId, customerName:m.cust.company, channel:'sms',
             templateId:useCustom?'custom':selectedTemplate,
@@ -2974,7 +3696,7 @@ const CommunicationsPage = () => {
               {sending?'Sending…':<><Icon name="send" size={15}/> Send to {selectedCustomers.length||0} Customer{selectedCustomers.length!==1?'s':''}</>}
             </button>
             <div style={{fontSize:11,color:'var(--text3)',textAlign:'center',lineHeight:1.5}}>
-              SMS sent directly via ClickSend from <strong>SS Rentals</strong> number. Email opens in your mail app. Check Delivery Status tab for real-time status.
+              SMS sent directly via Kudosity from <strong>SSRentals</strong> number. Email opens in your mail app. Check Delivery Status tab for real-time status.
             </div>
           </div>
         </div>
@@ -3821,6 +4543,7 @@ const App = () => {
   const [theme,setTheme]=useState('dark');
   const [page,setPage]=useState('dashboard');
   const [sheetsSetupOpen, setSheetsSetupOpen] = useState(false);
+  const [showNewHireWizard, setShowNewHireWizard] = useState(false);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
   const [sheetsConfig, setSheetsConfig] = useState(()=>loadSheetsConfig());
   const [syncState, setSyncState] = useState({configured:false,syncing:false,lastSync:null,error:null,syncMsg:'',syncPct:0});
@@ -3930,10 +4653,11 @@ const App = () => {
       <div className="main">
         <Header page={page} theme={theme} toggleTheme={()=>setTheme(t=>t==='dark'?'light':'dark')}
           syncState={syncState} onManualSync={()=>doSync()} onOpenSetup={()=>setSheetsSetupOpen(true)}
-          xeroSyncState={xeroSyncState} onXeroSync={doXeroSync}/>
+          xeroSyncState={xeroSyncState} onXeroSync={doXeroSync} onNewHire={()=>setShowNewHireWizard(true)}/>
         <div className="content">{pages[page]||<Dashboard theme={theme} setPage={setPage}/>}</div>
       </div>
       <SheetsSetupModal open={sheetsSetupOpen} onClose={()=>setSheetsSetupOpen(false)} onSave={handleSaveConfig} initialConfig={sheetsConfig}/>
+      {showNewHireWizard&&<NewHireWizard onClose={()=>setShowNewHireWizard(false)} onCreated={()=>{setShowNewHireWizard(false);setDataRefreshKey(k=>k+1);}}/>}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
