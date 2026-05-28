@@ -3111,44 +3111,126 @@ const NewHireWizard = ({onClose, onCreated}) => {
           )}
 
           {/* STEP 4: Rates & Terms */}
-          {step===4&&(
+          {step===4&&(()=>{
+            const selTruck = TRUCKS.find(t=>t.id===form.truck);
+            const selCust = getAllCustomers().find(c=>c.id===form.customer);
+            const prevHire = HIRES.filter(h=>h.customer===form.customer&&h.truck===form.truck).sort((a,b)=>new Date(b.start)-new Date(a.start))[0];
+            return (
             <div>
-              <div style={{marginBottom:16}}>
+              <div style={{marginBottom:12}}>
                 <div style={{fontWeight:700, fontSize:15, marginBottom:4}}>Rates & Terms</div>
-                <div style={{fontSize:12, color:'var(--text2)'}}>Set hire rates and confirm agreement terms.</div>
+                <div style={{fontSize:12, color:'var(--text2)'}}>All rates are editable for this booking — changes only apply to this hire agreement.</div>
               </div>
-              <div className="form-row mb-4">
-                <div className="form-group">
-                  <label>Weekly Truck Rate (NZD)</label>
-                  <input type="number" value={form.weeklyTruck} onChange={e=>set('weeklyTruck',parseFloat(e.target.value)||0)}/>
+
+              {/* Smart suggestions bar */}
+              {(selCust||selTruck||prevHire)&&(
+                <div style={{background:'var(--bg3)',borderRadius:10,padding:'12px 14px',marginBottom:16,fontSize:12}}>
+                  <div style={{fontWeight:700,marginBottom:8,color:'var(--text)',fontSize:13}}>💡 Suggested Rates</div>
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    {prevHire&&(
+                      <button className="btn btn-ghost btn-sm" style={{fontSize:11,borderColor:'var(--blue)',color:'var(--blue)'}}
+                        onClick={()=>{set('weeklyTruck',prevHire.weekly_truck);set('weeklyTrailer',prevHire.weekly_trailer||0);set('mileageRate',prevHire.mileage_rate);set('rucRate',prevHire.ruc_rate);}}>
+                        Use last hire rates ({fmtCur(prevHire.weekly_truck+prevHire.weekly_trailer)}/wk)
+                      </button>
+                    )}
+                    {selCust&&selCust.weekly_truck>0&&(
+                      <button className="btn btn-ghost btn-sm" style={{fontSize:11,borderColor:'var(--green)',color:'var(--green)'}}
+                        onClick={()=>{set('weeklyTruck',selCust.weekly_truck);set('weeklyTrailer',selCust.weekly_trailer||0);}}>
+                        Use customer profile ({fmtCur(selCust.weekly_truck)}/wk)
+                      </button>
+                    )}
+                    {selTruck&&selTruck.weekly_rate>0&&(
+                      <button className="btn btn-ghost btn-sm" style={{fontSize:11,borderColor:'var(--orange)',color:'var(--orange)'}}
+                        onClick={()=>set('weeklyTruck',selTruck.weekly_rate)}>
+                        Use truck standard rate ({fmtCur(selTruck.weekly_rate)}/wk)
+                      </button>
+                    )}
+                  </div>
+                  {prevHire&&<div style={{fontSize:11,color:'var(--text3)',marginTop:6}}>Last hire: {fmt(prevHire.start)} — {fmt(prevHire.end)} · {truckRego(prevHire.truck)}</div>}
                 </div>
-                <div className="form-group">
-                  <label>Weekly Trailer Rate (NZD)</label>
-                  <input type="number" value={form.weeklyTrailer} onChange={e=>set('weeklyTrailer',parseFloat(e.target.value)||0)} disabled={form.noTrailer}/>
+              )}
+
+              {/* Hire type pricing selector */}
+              <div style={{marginBottom:16}}>
+                <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:'var(--text3)',marginBottom:8,display:'block'}}>Pricing Structure</label>
+                <div style={{display:'flex',gap:8}}>
+                  {[['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['lease','Lease/Contract']].map(([v,l])=>(
+                    <button key={v} className={`btn btn-sm ${form.hireType===v?'btn-primary':'btn-ghost'}`}
+                      style={{flex:1,justifyContent:'center',fontSize:12}}
+                      onClick={()=>{set('hireType',v);
+                        if(v==='daily'&&selCust) { set('weeklyTruck',(selCust.weekly_truck||0)/7*1); }
+                        if(v==='monthly'&&selCust) { set('weeklyTruck',(selCust.weekly_truck||0)*4); }
+                      }}>
+                      {l}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <div className="form-row mb-4">
-                <div className="form-group">
-                  <label>Mileage Rate ($/km)</label>
-                  <input type="number" step="0.01" value={form.mileageRate} onChange={e=>set('mileageRate',parseFloat(e.target.value)||0)}/>
+
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label style={{display:'flex',justifyContent:'space-between'}}>
+                    <span>{form.hireType==='daily'?'Daily':'Weekly'} Truck Rate (NZD) <span style={{color:'var(--red)'}}>*</span></span>
+                    {selTruck&&<span style={{color:'var(--text3)',fontWeight:400,fontSize:10}}>{selTruck.rego}</span>}
+                  </label>
+                  <input type="number" step="0.01" value={form.weeklyTruck} onChange={e=>set('weeklyTruck',parseFloat(e.target.value)||0)}
+                    style={{borderColor:form.weeklyTruck>0?'var(--green)':'var(--red)'}}/>
+                  <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>
+                    {form.hireType==='daily'&&form.weeklyTruck>0&&`≈ ${fmtCur(form.weeklyTruck*7)}/week`}
+                    {form.hireType==='monthly'&&form.weeklyTruck>0&&`≈ ${fmtCur(form.weeklyTruck/4)}/week`}
+                    {form.hireType==='weekly'&&form.weeklyTruck>0&&`≈ ${fmtCur(form.weeklyTruck/7)}/day`}
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label>RUC Rate ($/km)</label>
-                  <input type="number" step="0.01" value={form.rucRate} onChange={e=>set('rucRate',parseFloat(e.target.value)||0)}/>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>{form.hireType==='daily'?'Daily':'Weekly'} Trailer Rate (NZD)</label>
+                  <input type="number" step="0.01" value={form.weeklyTrailer} onChange={e=>set('weeklyTrailer',parseFloat(e.target.value)||0)} disabled={form.noTrailer}
+                    style={{opacity:form.noTrailer?0.5:1}}/>
+                  {form.noTrailer&&<div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>No trailer selected</div>}
                 </div>
-              </div>
-              <div className="form-row mb-4">
-                <div className="form-group">
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label style={{display:'flex',justifyContent:'space-between'}}>
+                    <span>Mileage Rate ($/km)</span>
+                    <span style={{color:'var(--text3)',fontWeight:400,fontSize:10}}>charged to hirer</span>
+                  </label>
+                  <input type="number" step="0.001" value={form.mileageRate} onChange={e=>set('mileageRate',parseFloat(e.target.value)||0)}/>
+                  <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>e.g. 0.18 = 18 cents/km</div>
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label style={{display:'flex',justifyContent:'space-between'}}>
+                    <span>RUC Rate ($/km)</span>
+                    <span style={{color:'var(--text3)',fontWeight:400,fontSize:10}}>road user charges</span>
+                  </label>
+                  <input type="number" step="0.001" value={form.rucRate} onChange={e=>set('rucRate',parseFloat(e.target.value)||0)}/>
+                  <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>e.g. 0.062 = standard RUC</div>
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
                   <label>Bond Amount (NZD)</label>
                   <input type="number" value={form.bond} onChange={e=>set('bond',parseFloat(e.target.value)||0)}/>
                 </div>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>Maintenance Charge ($/km)</label>
+                  <input type="number" step="0.001" value={form.maintRate||0} onChange={e=>set('maintRate',parseFloat(e.target.value)||0)}/>
+                  <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>Optional — leave 0 if not applicable</div>
+                </div>
               </div>
-              <div style={{padding:'12px 16px', background:'rgba(39,174,96,0.08)', border:'1px solid rgba(39,174,96,0.2)', borderRadius:8, marginBottom:16, fontSize:13}}>
-                <div style={{fontWeight:700, color:'var(--green)', marginBottom:6}}>Estimated Cost Summary</div>
-                <div style={{display:'flex', justifyContent:'space-between', marginBottom:3}}><span>Weekly rate:</span><strong>{fmtCur(form.weeklyTruck + (form.noTrailer?0:form.weeklyTrailer))}/wk</strong></div>
-                <div style={{display:'flex', justifyContent:'space-between', marginBottom:3}}><span>Duration:</span><strong>{dur.label}</strong></div>
-                <div style={{display:'flex', justifyContent:'space-between', borderTop:'1px solid rgba(39,174,96,0.2)', paddingTop:6, marginTop:6}}><span style={{fontWeight:700}}>Est. total hire:</span><strong style={{fontSize:16, color:'var(--green)'}}>{fmtCur(totalCost)}</strong></div>
+
+              {/* Live cost summary */}
+              <div style={{padding:'12px 16px', background:'rgba(39,174,96,0.08)', border:'1px solid rgba(39,174,96,0.2)', borderRadius:8, marginBottom:16}}>
+                <div style={{fontWeight:700, color:'var(--green)', marginBottom:8, fontSize:13}}>Estimated Cost Summary</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:12,marginBottom:8}}>
+                  <div><span style={{color:'var(--text3)'}}>Truck hire:</span> <strong>{fmtCur(form.weeklyTruck)}/{form.hireType==='daily'?'day':'wk'}</strong></div>
+                  {!form.noTrailer&&<div><span style={{color:'var(--text3)'}}>Trailer hire:</span> <strong>{fmtCur(form.weeklyTrailer)}/{form.hireType==='daily'?'day':'wk'}</strong></div>}
+                  <div><span style={{color:'var(--text3)'}}>Mileage rate:</span> <strong>${form.mileageRate}/km</strong></div>
+                  <div><span style={{color:'var(--text3)'}}>RUC rate:</span> <strong>${form.rucRate}/km</strong></div>
+                  <div><span style={{color:'var(--text3)'}}>Duration:</span> <strong>{dur.label}</strong></div>
+                  <div><span style={{color:'var(--text3)'}}>Bond:</span> <strong>{fmtCur(form.bond)}</strong></div>
+                </div>
+                <div style={{display:'flex', justifyContent:'space-between', borderTop:'1px solid rgba(39,174,96,0.2)', paddingTop:8}}>
+                  <span style={{fontWeight:700}}>Est. hire total (excl. mileage/RUC):</span>
+                  <strong style={{fontSize:16, color:'var(--green)'}}>{fmtCur(totalCost)}</strong>
+                </div>
               </div>
+
               <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8}}>
                 {[['bondPaid','Bond payment received'],['signed','Digital signature obtained'],['insuranceVerified','Insurance verified'],['checklistDone','Pre-handover checklist done']].map(([k,l])=>(
                   <label key={k} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,textTransform:'none',marginBottom:0,cursor:'pointer',padding:'8px 10px',background:'var(--bg3)',borderRadius:8}}>
@@ -3158,7 +3240,8 @@ const NewHireWizard = ({onClose, onCreated}) => {
                 ))}
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* STEP 5: Confirm */}
           {step===5&&(()=>{
