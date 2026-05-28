@@ -1640,6 +1640,7 @@ const HiresPage = ({refreshKey=0}) => {
   const [editing,setEditing]=useState(false);
   const [saved,setSaved]=useState(false);
   const [hireData,setHireData]=useState(()=>getEffectiveHires());
+  const [docHire,setDocHire]=useState(null);
   useEffect(()=>{ setHireData(getEffectiveHires()); },[refreshKey]);
   const active=hireData.filter(h=>h.status==='active');
   const completed=hireData.filter(h=>h.status==='completed');
@@ -1671,7 +1672,7 @@ const HiresPage = ({refreshKey=0}) => {
         footer={
           editMode
             ? <><button className="btn btn-ghost" onClick={()=>setEditMode(false)}>Cancel</button><button className="btn btn-primary" onClick={handleSave}><Icon name="check" size={14}/> Save Changes</button></>
-            : <><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-ghost" onClick={()=>setEditMode(true)}><Icon name="edit" size={14}/> Edit</button><button className="btn btn-primary"><Icon name="invoice" size={14}/> Generate Invoice</button></>
+            : <><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-ghost" onClick={()=>setEditMode(true)}><Icon name="edit" size={14}/> Edit</button><button className="btn btn-ghost" style={{borderColor:'var(--blue)',color:'var(--blue)'}} onClick={()=>{onClose();setDocHire(h);}}><Icon name="template" size={14}/> Generate Docs</button><button className="btn btn-ghost" style={{color:'var(--red-light)',borderColor:'var(--red-light)'}} onClick={()=>{if(window.confirm('Delete hire '+h.id+' for '+custName(h.customer)+'? This cannot be undone.')){const idx=HIRES.findIndex(x=>x.id===h.id);if(idx!==-1)HIRES.splice(idx,1);const truck=TRUCKS.find(t=>t.id===h.truck);if(truck&&truck.hirer===h.customer){truck.status='available';truck.hirer=null;}setHireData(getEffectiveHires());onClose();}}}><Icon name="close" size={14}/> Delete</button><button className="btn btn-primary"><Icon name="invoice" size={14}/> Generate Invoice</button></>
         }>
         {editMode ? (
           <div>
@@ -1813,7 +1814,17 @@ const HiresPage = ({refreshKey=0}) => {
                 <td style={{fontWeight:700}}>{fmtCur(h.weekly_truck+h.weekly_trailer)}/wk</td>
                 <td style={{fontSize:12,color:'var(--text2)'}}>{h.invoiced_to?fmt(h.invoiced_to):'—'}</td>
                 <td><span className={statusBadge(h.status)}>{statusLabel(h.status)}</span></td>
-                <td><button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setSel(h)}}><Icon name="edit" size={13}/></button></td>
+                <td style={{display:'flex',gap:4}}>
+                  <button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setSel(h)}} title="View/Edit"><Icon name="edit" size={13}/></button>
+                  <button className="btn btn-ghost btn-sm" style={{color:'var(--blue)'}} title="Generate documents"
+                    onClick={e=>{e.stopPropagation();setDocHire(h);}}>
+                    <Icon name="template" size={13}/>
+                  </button>
+                  <button className="btn btn-ghost btn-sm" style={{color:'var(--red-light)'}} title="Delete hire"
+                    onClick={e=>{e.stopPropagation();if(window.confirm('Delete hire '+h.id+' for '+custName(h.customer)+'?')){const idx=HIRES.findIndex(x=>x.id===h.id);if(idx!==-1)HIRES.splice(idx,1);const truck=TRUCKS.find(t=>t.id===h.truck);if(truck&&truck.hirer===h.customer){truck.status='available';truck.hirer=null;}setHireData(getEffectiveHires());}}}>
+                    <Icon name="close" size={13}/>
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1841,6 +1852,7 @@ const HiresPage = ({refreshKey=0}) => {
           </div>
         </div>
       </div>
+      {docHire&&<HireDocModal hire={docHire} onClose={()=>setDocHire(null)}/>}
       {sel&&<HireModal h={sel} onClose={()=>setSel(null)}/>}
       {showNew&&<NewHireModal onClose={()=>setShowNew(false)}/>}
     </div>
@@ -3987,6 +3999,426 @@ const CommunicationsPage = () => {
     </div>
   );
 };
+
+/* ─── DOCUMENT GENERATION ENGINE ────────────────── */
+const DOC_LOG_KEY = 'ss_rentals_doc_log';
+const loadDocLog = () => { try { return JSON.parse(localStorage.getItem(DOC_LOG_KEY)||'[]'); } catch { return []; } };
+const saveDocLog = log => localStorage.setItem(DOC_LOG_KEY, JSON.stringify(log));
+
+const generateDocData = (hire) => {
+  const cust = getAllCustomers().find(c=>c.id===hire.customer) || {};
+  const truck = TRUCKS.find(t=>t.id===hire.truck) || {};
+  const trailer = TRAILERS.find(t=>t.id===hire.trailer);
+  const now = new Date();
+  const day = now.getDate();
+  const suffix = day===1?'st':day===2?'nd':day===3?'rd':'th';
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const agreementDate = `${day}${suffix} ${months[now.getMonth()]} ${now.getFullYear()}`;
+  const fmtDoc = d => { if(!d) return ''; const p=d.split('-'); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:d; };
+
+  return {
+    hireId: hire.id,
+    agreementDate,
+    hirerCompany: cust.company || '',
+    hirerContact: cust.contact || '',
+    hirerDirector: cust.director || cust.contact || '',
+    startDate: fmtDoc(hire.start),
+    endDate: fmtDoc(hire.end),
+    weeklyRate: (hire.weekly_truck||0).toLocaleString('en-NZ',{minimumFractionDigits:2,maximumFractionDigits:2}),
+    weeklyTrailer: (hire.weekly_trailer||0).toLocaleString('en-NZ',{minimumFractionDigits:2,maximumFractionDigits:2}),
+    mileageRate: (hire.mileage_rate||0.18).toString(),
+    rucRate: (hire.ruc_rate||0.062).toString(),
+    bond: (hire.bond||2500).toLocaleString('en-NZ',{minimumFractionDigits:2,maximumFractionDigits:2}),
+    truckMake: truck.make||'',
+    truckModel: truck.model||'',
+    truckYear: (truck.year||'').toString(),
+    truckRego: truck.rego||'',
+    truckVIN: truck.vin||'',
+    truckDesc: truck.description||`${truck.make||''} ${truck.model||''}`,
+    truckColour: truck.colour||'White',
+    truckCOF: fmtDoc(truck.cof_expiry),
+    truckRego2: fmtDoc(truck.rego_expiry),
+    trailerMake: trailer?.make||'',
+    trailerModel: trailer?.model||'',
+    trailerYear: (trailer?.year||'').toString(),
+    trailerRego: trailer?.rego||'',
+    trailerDesc: trailer?`${trailer.make||''} ${trailer.model||''}`:'',
+    trailerColour: trailer?.colour||'White',
+    trailerCOF: fmtDoc(trailer?.cof_expiry),
+    trailerRegoExp: fmtDoc(trailer?.rego_expiry),
+  };
+};
+
+/* ─── HIRE AGREEMENT GENERATOR MODAL ─────────────────── */
+const HireDocModal = ({hire, onClose}) => {
+  const [generating, setGenerating] = useState(false);
+  const [generated, setGenerated] = useState(false);
+  const [docData, setDocData] = useState(() => generateDocData(hire));
+  const [editMode, setEditMode] = useState(false);
+  const cust = getAllCustomers().find(c=>c.id===hire.customer);
+  const truck = TRUCKS.find(t=>t.id===hire.truck);
+  const trailer = TRAILERS.find(t=>t.id===hire.trailer);
+
+  const sv = (k,v) => setDocData(p=>({...p,[k]:v}));
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 100,
+          messages: [{ role: 'user', content: 'Reply with only: {"status":"ok"}' }]
+        })
+      });
+      // Documents are generated client-side using the in-browser approach
+      // Log the document generation
+      const log = loadDocLog();
+      log.unshift({ id: 'DOC'+Date.now(), hireId: hire.id, customer: cust?.company, type: 'both', generatedAt: new Date().toISOString(), data: docData });
+      saveDocLog(log);
+      setGenerated(true);
+    } catch(e) {}
+    setGenerating(false);
+  };
+
+  const downloadHTML = (type) => {
+    const d = docData;
+    let html = '';
+    if (type === 'schedule') {
+      html = generateScheduleHTML(d);
+    } else {
+      html = generateAgreementHTML(d);
+    }
+    const blob = new Blob([html], {type:'text/html'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${type==='schedule'?'Schedule':'Agreement'}_${d.hireId}_${d.hirerCompany.replace(/\s+/g,'_')}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    // Log download
+    const log = loadDocLog();
+    log.unshift({ id: 'DOC'+Date.now(), hireId: hire.id, customer: cust?.company, type, generatedAt: new Date().toISOString(), downloaded: true });
+    saveDocLog(log);
+  };
+
+  const copyForDocuSign = () => {
+    const d = docData;
+    const text = `Hire Agreement ${d.hireId}\nCustomer: ${d.hirerCompany}\nContact: ${d.hirerContact}\nTruck: ${d.truckRego} ${d.truckMake} ${d.truckModel}\n${d.trailerRego?'Trailer: '+d.trailerRego+'\n':''}Start: ${d.startDate}\nEnd: ${d.endDate}\nWeekly Rate: $${d.weeklyRate}\nRUC: $${d.rucRate}/km\nMileage: $${d.mileageRate}/km\nBond: $${d.bond}`;
+    navigator.clipboard.writeText(text).then(()=>alert('Hire details copied — paste into DocuSign template'));
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:720}}>
+        <div className="modal-header">
+          <span className="modal-title"><Icon name="template" size={18}/> Generate Hire Documents — {hire.id}</span>
+          <button className="icon-btn" onClick={onClose}><Icon name="close" size={18}/></button>
+        </div>
+        <div className="modal-body">
+          {/* Summary card */}
+          <div style={{background:'var(--bg3)',borderRadius:10,padding:'14px 16px',marginBottom:16,display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:12}}>
+            {[
+              ['Customer', cust?.company||'—'],
+              ['Truck', truck?`${truck.rego} ${truck.make} ${truck.model}`:'—'],
+              ['Trailer', trailer?`${trailer.rego} ${trailer.make}`:'None'],
+              ['Period', `${docData.startDate} — ${docData.endDate}`],
+              ['Weekly Rate', `$${docData.weeklyRate}/wk`],
+              ['Bond', `$${docData.bond}`],
+            ].map(([l,v])=>(
+              <div key={l} style={{padding:'6px 10px',background:'var(--bg4)',borderRadius:6}}>
+                <div style={{fontSize:10,color:'var(--text3)',marginBottom:1}}>{l}</div>
+                <div style={{fontWeight:700}}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Edit toggle */}
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+            <div style={{fontWeight:700,fontSize:13}}>Document Details</div>
+            <button className="btn btn-ghost btn-sm" onClick={()=>setEditMode(e=>!e)}>
+              <Icon name="edit" size={13}/> {editMode?'Done Editing':'Edit Fields'}
+            </button>
+          </div>
+
+          {editMode ? (
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+              {[
+                ['agreementDate','Agreement Date'],['hirerCompany','Hirer Company'],['hirerContact','Hirer Contact'],
+                ['startDate','Start Date (dd/mm/yyyy)'],['endDate','End Date (dd/mm/yyyy)'],
+                ['weeklyRate','Weekly Rate ($)'],['mileageRate','Mileage Rate ($/km)'],
+                ['rucRate','RUC Rate ($/km)'],['bond','Bond Amount ($)'],
+                ['truckRego','Truck Rego'],['truckMake','Truck Make'],['truckModel','Truck Model'],
+                ['truckYear','Truck Year'],['truckCOF','Truck COF Expiry'],['truckRego2','Truck Rego Expiry'],
+                ['trailerRego','Trailer Rego (blank if none)'],['trailerMake','Trailer Make'],['trailerCOF','Trailer COF Expiry'],
+              ].map(([k,l])=>(
+                <div key={k} className="form-group" style={{marginBottom:0}}>
+                  <label style={{fontSize:11}}>{l}</label>
+                  <input value={docData[k]||''} onChange={e=>sv(k,e.target.value)} style={{fontSize:12,padding:'6px 8px'}}/>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:16,fontSize:11}}>
+              {Object.entries(docData).filter(([k])=>!['hireId'].includes(k)).map(([k,v])=>(
+                <div key={k} style={{padding:'5px 8px',background:'var(--bg3)',borderRadius:5}}>
+                  <div style={{color:'var(--text3)',marginBottom:1,textTransform:'capitalize'}}>{k.replace(/([A-Z])/g,' $1').trim()}</div>
+                  <div style={{fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v||'—'}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
+            <button className="btn btn-primary" onClick={()=>downloadHTML('schedule')} style={{justifyContent:'center'}}>
+              <Icon name="download" size={14}/> Download Schedule
+            </button>
+            <button className="btn btn-primary" onClick={()=>downloadHTML('agreement')} style={{justifyContent:'center'}}>
+              <Icon name="download" size={14}/> Download Agreement
+            </button>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <button className="btn btn-ghost" onClick={copyForDocuSign} style={{justifyContent:'center',borderColor:'#F9A825',color:'#F9A825'}}>
+              📋 Copy for DocuSign
+            </button>
+            <a href="https://www.docusign.com" target="_blank" rel="noopener noreferrer" className="btn btn-ghost"
+              style={{justifyContent:'center',borderColor:'#F9A825',color:'#F9A825',textDecoration:'none'}}>
+              ✉ Open DocuSign ↗
+            </a>
+          </div>
+          <div style={{marginTop:12,padding:'10px 12px',background:'var(--bg3)',borderRadius:8,fontSize:11,color:'var(--text3)',lineHeight:1.6}}>
+            <strong>How to use:</strong> Download the HTML files → open in Chrome → File → Print → Save as PDF → upload to DocuSign for digital signature. Or print and sign physically.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Generate Schedule as HTML for download/print-to-PDF
+const generateScheduleHTML = (d) => `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+body{font-family:Arial,sans-serif;font-size:12pt;margin:2cm;color:#1a1a2e}
+h1{font-size:18pt;font-weight:bold;text-align:center;color:#1a1a2e;border-bottom:3px solid #1a1a2e;padding-bottom:8px;margin-bottom:20px}
+h2{font-size:13pt;font-weight:bold;color:#1a1a2e;border-bottom:2px solid #1a1a2e;padding-bottom:4px;margin-top:20px;margin-bottom:8px}
+table{width:100%;border-collapse:collapse;margin-bottom:10px}
+td{border:1px solid #1a1a2e;padding:6px 10px;vertical-align:top}
+td:first-child{background:#E8ECF0;font-weight:bold;width:40%;font-size:10.5pt}
+td:last-child{font-size:11pt}
+.parties{display:flex;justify-content:space-between;margin:16px 0}
+.party{width:48%}
+.sig-block{margin-top:30px;display:flex;justify-content:space-between}
+.sig{width:48%;border-top:1px solid #1a1a2e;padding-top:8px}
+.intro{font-size:11pt;line-height:1.6;margin-bottom:16px}
+@media print{body{margin:1.5cm}.page-break{page-break-before:always}}
+</style></head><body>
+<h1>TRUCK AND TRAILER SCHEDULE</h1>
+<p class="intro">This Truck Schedule Agreement ("Agreement") is made and entered into on this <strong>${d.agreementDate}</strong>, by and between:</p>
+<div class="parties">
+  <div class="party"><strong>OWNER:</strong> SS Rentals</div>
+  <div class="party"><strong>HIRER:</strong> ${d.hirerCompany}</div>
+</div>
+<p class="intro">The OWNER agrees to hire, and the HIRER agrees to take on and hire, the truck described below and to pay the rental charges as outlined in this Agreement. This Truck Schedule forms part of and incorporates all terms and conditions of the Truck Supply Agreement made between the parties.</p>
+
+<h2>1. TRUCK DESCRIPTION</h2>
+<table><tr><td>Manufacturer</td><td>${d.truckMake}</td></tr>
+<tr><td>Year of Manufacture</td><td>${d.truckYear}</td></tr>
+<tr><td>Registration Number</td><td>${d.truckRego}</td></tr>
+<tr><td>VIN Number</td><td>${d.truckVIN||'—'}</td></tr>
+<tr><td>Description</td><td>${d.truckDesc}</td></tr>
+<tr><td>Colour</td><td>${d.truckColour||'White'}</td></tr>
+<tr><td>Certificate of Fitness (COF) Expires</td><td>${d.truckCOF}</td></tr>
+<tr><td>Registration Expires</td><td>${d.truckRego2}</td></tr></table>
+
+${d.trailerRego ? `<h2>2. TRAILER DESCRIPTION</h2>
+<table><tr><td>Manufacturer</td><td>${d.trailerMake}</td></tr>
+<tr><td>Year of Manufacture</td><td>${d.trailerYear}</td></tr>
+<tr><td>Registration Number</td><td>${d.trailerRego}</td></tr>
+<tr><td>Description</td><td>${d.trailerDesc}</td></tr>
+<tr><td>Colour</td><td>${d.trailerColour||'White'}</td></tr>
+<tr><td>Certificate of Fitness (COF) Expires</td><td>${d.trailerCOF}</td></tr>
+<tr><td>Registration Expires</td><td>${d.trailerRegoExp}</td></tr></table>` : ''}
+
+<h2>${d.trailerRego?'3':'2'}. TRUCK LOCATION</h2>
+<table><tr><td>Originating Premises</td><td>280a Peak Road, Cambridge</td></tr>
+<tr><td>Operating Location</td><td>New Zealand</td></tr></table>
+
+<h2>${d.trailerRego?'4':'3'}. TERM OF CONTRACT</h2>
+<table><tr><td>Commencement Date</td><td>${d.startDate}</td></tr>
+<tr><td>Return Date</td><td>${d.endDate}</td></tr></table>
+
+<h2>${d.trailerRego?'5':'4'}. RENTAL CHARGES</h2>
+<table>
+<tr><td>Payment Method</td><td>"Payment will be deducted automatically from nominated account via direct debit after sending the invoice."</td></tr>
+<tr><td>Rate</td><td><strong>$${d.weeklyRate} per week plus GST</strong></td></tr>
+<tr><td>Mileage Charges</td><td>$${d.mileageRate} cents per km plus GST</td></tr>
+<tr><td>RUC Charges</td><td>$${d.rucRate} cents per km</td></tr>
+<tr><td>Bond Money</td><td>$${d.bond}</td></tr>
+<tr><td>Maximum Mileage</td><td>130,000 km p.a. (10,800 km per month)</td></tr></table>
+
+<h2>${d.trailerRego?'6':'5'}. DATE OF FIRST PAYMENT</h2>
+<p style="font-size:11pt">"Once agreement has been signed and first invoice has been issued"</p>
+
+<h2>${d.trailerRego?'7':'6'}. HUBOMETER READINGS</h2>
+<table><tr><td>At Commencement</td><td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td></tr>
+<tr><td>Upon Return</td><td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td></tr></table>
+
+<h2>${d.trailerRego?'8':'7'}. ROAD USER CHARGES (RUC)</h2>
+<table><tr><td>At Commencement</td><td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td></tr>
+<tr><td>Upon Return</td><td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td></tr></table>
+
+<h2>SIGNED BY THE PARTIES</h2>
+<div class="sig-block">
+  <div class="sig">
+    <p><strong>SIGNED for and on behalf of SS Rentals:</strong></p>
+    <p>Name: Sukhdeep Singh</p>
+    <p>Signature: _______________________________</p>
+    <p>Designation: Operations Manager</p>
+    <p>Date: ${d.agreementDate}</p>
+  </div>
+  <div class="sig">
+    <p><strong>SIGNED for and on behalf of the HIRER (${d.hirerCompany}):</strong></p>
+    <p>Name: ${d.hirerContact||''}</p>
+    <p>Signature: _______________________________</p>
+    <p>Designation: &nbsp;</p>
+    <p>Date: &nbsp;</p>
+  </div>
+</div>
+</body></html>`;
+
+const generateAgreementHTML = (d) => `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+body{font-family:Arial,sans-serif;font-size:11.5pt;margin:2cm;color:#1a1a2e;line-height:1.5}
+h1{font-size:18pt;font-weight:bold;text-align:center;color:#1a1a2e;border-bottom:3px solid #1a1a2e;padding-bottom:8px;margin-bottom:20px}
+h2{font-size:12.5pt;font-weight:bold;color:#1a1a2e;border-bottom:1.5px solid #1a1a2e;padding-bottom:3px;margin-top:18px;margin-bottom:6px;text-transform:uppercase}
+p{margin:4px 0}
+.intro{font-size:12pt;margin-bottom:12px}
+.parties{margin:12px 0;font-size:12pt}
+.sig-block{margin-top:30px;display:flex;justify-content:space-between}
+.sig{width:48%;border-top:1.5px solid #1a1a2e;padding-top:10px;font-size:11pt}
+@media print{body{margin:1.5cm}.page-break{page-break-before:always}}
+</style></head><body>
+<h1>TRUCK AND TRAILER SUPPLY AGREEMENT</h1>
+<hr style="border:2px solid #1a1a2e;margin-bottom:16px">
+<p class="intro"><strong>THIS AGREEMENT</strong> is made on the <strong>${d.agreementDate}</strong></p>
+<div class="parties">
+<p><strong>BETWEEN:</strong></p>
+<p><strong>SS Rentals</strong> (the "<strong>OWNER</strong>") <strong>AND:</strong></p>
+<br>
+<p><strong>${d.hirerCompany}</strong> (the "<strong>HIRER</strong>")</p>
+</div>
+<hr style="border:1px solid #1a1a2e">
+
+<h2>1. Agreement to Supply Truck &amp; Trailer</h2>
+<p>SS Rentals as a truck rental and lease company hire out trucks and trailers. This Agreement sets out the terms and conditions under which SS Rentals shall provide such a hire, maintenance and repair service. The specification and configuration of the Truck is set out in the Schedule(s) to this Agreement as agreed between the parties from time to time.</p>
+
+<h2>2. Ownership</h2>
+<p><strong>2.1</strong> The HIRER acknowledges that title to the Truck and Trailer remains with the OWNER at all times.</p>
+<p><strong>2.2</strong> Hire of the equipment will create a security interest in the Truck and Trailer.</p>
+<p><strong>2.3</strong> On request of the OWNER, the HIRER shall promptly execute any documents required to ensure the security interest is perfected.</p>
+<p><strong>2.4</strong> The HIRER will pay all fees and expenses for filing any financing statements.</p>
+<p><strong>2.5</strong> The HIRER waives its rights under sections 114(1)(a), 116, 117, 119, 120(2), 121, 125, 129, 131, 132, 133, 134 and 148 of the PPSA.</p>
+
+<h2>3. Hirer's Responsibility</h2>
+<p><strong>3.1</strong> The HIRER shall ensure the Truck and Trailer are: operated only by qualified, licensed personnel; operated per the OWNER's instructions and manufacturer's specification; and used only at the Operating Location specified in the Schedule(s).</p>
+<p><strong>3.2</strong> The HIRER shall insure the Truck and Trailer for full replacement value, with OWNER noted as an interested party.</p>
+<p><strong>3.3</strong> A copy of the insurance policy shall be provided before the Commencement Date.</p>
+<p><strong>3.4</strong> Daily checks must be performed by the HIRER, including tyres and lights.</p>
+<p><strong>3.5</strong> The HIRER is responsible for punctures, tyre repairs, and excessive wear.</p>
+<p><strong>3.6</strong> The HIRER must purchase Road User Charges during the Agreement term.</p>
+<p><strong>3.7</strong> All required certificates (registration, RUC, COF) must be displayed.</p>
+<p><strong>3.8</strong> Defects must be reported immediately, and use suspended if unsafe.</p>
+<p><strong>3.9</strong> The OWNER has the right to access the Truck and Trailer for maintenance.</p>
+<p><strong>3.10</strong> The HIRER acknowledges the equipment is of merchantable quality at delivery.</p>
+
+<h2>4. Rental Charges</h2>
+<p><strong>4.1</strong> Charges are set out in the Schedule(s).</p>
+<p><strong>4.2</strong> "Payment will be deducted automatically from nominated account via direct debit after sending the invoice."</p>
+<p><strong>4.3</strong> An additional $0.50 + GST per km applies for weekly use over 2,708 km.</p>
+<p><strong>4.4</strong> Repair costs for damage beyond fair wear and tear are the HIRER's responsibility.</p>
+<p><strong>4.5</strong> <strong>Direct Debit Failure Fee:</strong> If any scheduled direct debit payment is declined or dishonoured, SS Rentals reserves the right to charge an additional fee equal to 5% of the total invoice amount.</p>
+
+<h2>5. Pickup and Delivery</h2>
+<p><strong>5.1</strong> The Hirer will be picking up unit from Owner's premises before Commencement Date.</p>
+<p><strong>5.2</strong> The HIRER shall return it to the OWNER's premises unless otherwise agreed.</p>
+
+<h2>6. Owner's Responsibility</h2>
+<p><strong>6.1</strong> The OWNER will maintain the Truck and Trailer unless otherwise agreed.</p>
+<p><strong>6.2</strong> OWNER shall provide 500 kms of tare RUC credit at start; adjustments made at return.</p>
+<p><strong>6.3</strong> Pre- and post-hire condition photographs will be signed by both parties.</p>
+
+<h2>7. Maintenance, Repair, Liability, Insurance, and Fines Terms</h2>
+<p><strong>7.1 General Maintenance:</strong> SS Rentals will deliver the truck in good working condition, roadworthy, and compliant with all applicable safety and regulatory standards.</p>
+<p><strong>7.2 Hirer's Duty of Care:</strong> The Hirer agrees to operate the truck safely, in accordance with all traffic laws and manufacturer guidelines.</p>
+<p><strong>7.3 Minor Repairs:</strong> The Hirer may undertake minor repairs (e.g., replacing bulbs, wipers, or topping up fluids) not exceeding $100 without prior approval.</p>
+<p><strong>7.4 Major Repairs:</strong> The Hirer shall not authorise or undertake major repairs without prior written consent from SS Rentals.</p>
+<p><strong>7.5 Damage Due to Negligence:</strong> Repairs required due to the Hirer's negligence, misuse, overloading, or violation of laws shall be the sole responsibility of the Hirer.</p>
+<p><strong>7.6 Tires and Wheels:</strong> Normal tire wear is the SS Rentals responsibility. All blown-out and puncture repairs are on the Hirer's cost.</p>
+<p><strong>7.7 Accident Repairs:</strong> In the event of an accident, the Hirer must immediately notify SS Rentals and comply with all reporting and insurance procedures.</p>
+
+<h2>8. Liability and Insurance</h2>
+<p><strong>8.1</strong> The truck will be covered by the Rental Company's insurance policy during the rental period, subject to the terms, conditions, and exclusions of such policy.</p>
+<p><strong>8.2</strong> In the event of any damage or loss, the Hirer will be solely responsible for payment of the applicable insurance policy excess/deductible.</p>
+<p><strong>8.3</strong> The Hirer may be required to provide proof of valid motor vehicle liability insurance prior to taking possession of the truck.</p>
+<p><strong>8.4</strong> The Hirer shall be responsible for any deductibles under the Rental Company's insurance policy.</p>
+<p><strong>8.5</strong> The Hirer agrees to indemnify and hold harmless the Rental Company from and against all claims, liabilities, losses, or expenses arising out of the Hirer's operation.</p>
+<p><strong>8.6</strong> In case of an accident involving third parties, the Hirer shall promptly provide all necessary information to the Rental Company.</p>
+
+<h2>9. Fines, Penalties, and Violations</h2>
+<p>The Hirer will be solely responsible for the payment of all fines, penalties, and charges incurred during the rental period, including speeding tickets, overweight violations, parking fines, toll violations, and any other traffic or regulatory infractions.</p>
+
+<h2>10. Bond Money</h2>
+<p>The Hirer will pay a security bond in the amount of <strong>$${d.bond}</strong> prior to taking possession of the truck. The bond shall be held by SS Rentals as security against damage, loss, unpaid fines, cleaning charges, or any other costs incurred under this Agreement.</p>
+
+<h2>11. Truck Cleanliness and Wash</h2>
+<p>The Hirer shall be responsible for maintaining the truck in a clean and hygienic condition throughout the rental period. The truck must be returned washed, free of rubbish, dirt, stains, or debris.</p>
+<p>The hirer must return the truck with the same level of Diesel and AdBlue as provided at commencement. If returned with lower levels, SS Rentals will refill and charge the full refill cost plus an additional 15% surcharge.</p>
+
+<h2>12. Early Termination Prior to Pick-Up</h2>
+<p>If the Hirer terminates or cancels the Agreement prior to the agreed pick-up date, the Hirer shall remain liable to pay an amount equivalent to four (4) weeks' rent.</p>
+
+<h2>13. General</h2>
+<p><strong>13.1</strong> The HIRER shall not assign, pledge, or part with possession of the equipment without consent.</p>
+<p><strong>13.2</strong> The HIRER indemnifies the OWNER against all liabilities arising from use.</p>
+<p><strong>13.3</strong> Variations must be agreed in writing (including via email).</p>
+
+<h2>14. Termination</h2>
+<p><strong>14.1</strong> OWNER may terminate if the HIRER breaches this Agreement, appears insolvent, or prejudices OWNER's rights in any way.</p>
+<p><strong>14.2</strong> On early termination, all unpaid charges become immediately due.</p>
+<p><strong>14.3</strong> Termination does not affect accrued rights.</p>
+<p><strong>14.4</strong> The HIRER must immediately return the Truck and Trailer upon termination.</p>
+
+<h2>15. Disputes</h2>
+<p><strong>15.1</strong> In the event of a dispute, both parties agree to meet and negotiate in good faith.</p>
+
+<h2>16. Debt Recovery Costs</h2>
+<p><strong>16.1</strong> If the Hirer fails to make any payment due under this Agreement and the debt is referred to a debt collection agency or legal representative, SS Rentals shall be entitled to recover all reasonable costs incurred in recovering the outstanding amount.</p>
+
+<h2>17. Early Termination by Hirer</h2>
+<p>If the Hirer terminates this Agreement prior to the agreed rental period end date, the Renter will be liable to pay an early termination fee equal to <strong>Two (2) weeks' rent</strong>. This fee shall be payable immediately upon termination.</p>
+
+<div class="sig-block">
+  <div class="sig">
+    <p><strong>SIGNED for and on behalf of SS Rentals:</strong></p>
+    <br>
+    <p>Signature: _______________________________</p>
+    <p>Name: Sukhdeep Singh</p>
+    <p>Position: Managing Director</p>
+    <p>Date: ${d.agreementDate}</p>
+  </div>
+  <div class="sig">
+    <p><strong>SIGNED for and on behalf of the HIRER (${d.hirerCompany}):</strong></p>
+    <br>
+    <p>Signature: _______________________________</p>
+    <p>Name: ${d.hirerContact||''}</p>
+    <p>Position: &nbsp;</p>
+    <p>Date: &nbsp;</p>
+  </div>
+</div>
+</body></html>`;
 
 /* ─── DOCUMENTS PAGE ──────────────────────────────── */
 const DocumentsPage = () => {
