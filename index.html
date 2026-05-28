@@ -3043,8 +3043,8 @@ const NewHireWizard = ({onClose, onCreated}) => {
                     <label>Search & Select Customer</label>
                     <select value={form.customer} onChange={e=>handleCustomerSelect(e.target.value)}>
                       <option value="">Select customer…</option>
-                      {getAllCustomers().filter(c=>c.status==='active').map(c=>(
-                        <option key={c.id} value={c.id}>{c.company}{c.director?' — '+c.director:''}</option>
+                      {getAllCustomers().sort((a,b)=>a.company.localeCompare(b.company)).map(c=>(
+                        <option key={c.id} value={c.id}>{c.company}{c.director?' — '+c.director:''}{c.status!=='active'?' ('+c.status+')':''}</option>
                       ))}
                     </select>
                   </div>
