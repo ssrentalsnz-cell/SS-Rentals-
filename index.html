@@ -3533,6 +3533,11 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
                   <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>e.g. 0.062 = standard RUC</div>
                 </div>
                 <div className="form-group" style={{marginBottom:0}}>
+                  <label>Maximum Mileage <span style={{fontWeight:400,fontSize:10,color:'var(--text3)'}}>appears on schedule</span></label>
+                  <input type="text" placeholder="e.g. 130,000 km p.a. (10,800 km per month)" value={form.maxMileage||''} onChange={e=>set('maxMileage',e.target.value)}/>
+                  <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>Leave blank to use default</div>
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
                   <label>Bond Amount (NZD)</label>
                   <input type="number" value={form.bond} onChange={e=>set('bond',parseFloat(e.target.value)||0)}/>
                 </div>
@@ -4346,6 +4351,7 @@ const generateDocData = (hire) => {
     mileageRate: (hire.mileage_rate||0.18).toString(),
     rucRate: (hire.ruc_rate||0.062).toString(),
     bond: (hire.bond||2500).toLocaleString('en-NZ',{minimumFractionDigits:2,maximumFractionDigits:2}),
+    maxMileage: hire.max_mileage || '',
     truckMake: truck.make||'',
     truckModel: truck.model||'',
     truckYear: (truck.year||'').toString(),
@@ -4583,7 +4589,7 @@ ${d.trailerRego ? `<h2>2. TRAILER DESCRIPTION</h2>
 <tr><td>Mileage Charges</td><td>$${d.mileageRate} cents per km plus GST</td></tr>
 <tr><td>RUC Charges</td><td>$${d.rucRate} cents per km</td></tr>
 <tr><td>Bond Money</td><td>$${d.bond}</td></tr>
-<tr><td>Maximum Mileage</td><td>130,000 km p.a. (10,800 km per month)</td></tr></table>
+<tr><td>Maximum Mileage</td><td>${d.maxMileage||'130,000 km p.a. (10,800 km per month)'}</td></tr></table>
 
 <h2>${d.trailerRego?'6':'5'}. DATE OF FIRST PAYMENT</h2>
 <p style="font-size:11pt">"Once agreement has been signed and first invoice has been issued"</p>
