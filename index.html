@@ -2789,13 +2789,14 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
 };
 
 /* ─── NEW HIRE WIZARD ────────────────────────────── */
-const NewHireWizard = ({onClose, onCreated}) => {
+const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     customer: '', customCustomer: '', isNewCustomer: false,
     startDate: '', endDate: '', hireType: 'weekly',
     truck: '', trailer: '', noTrailer: false,
     weeklyTruck: 0, weeklyTrailer: 0, mileageRate: 0.18, rucRate: 0.062,
+    maxMileage: '',
     bond: 5000, bondPaid: false, signed: false, insuranceVerified: false, checklistDone: false,
     notes: '',
   });
@@ -2908,6 +2909,7 @@ const NewHireWizard = ({onClose, onCreated}) => {
       signed: form.signed, insurance_verified: form.insuranceVerified,
       checklist_done: form.checklistDone,
       invoiced_to: form.startDate, next_invoice: form.startDate,
+      max_mileage: form.maxMileage || '',
       notes: form.notes,
     };
     HIRES.unshift(newHire);
@@ -2917,7 +2919,40 @@ const NewHireWizard = ({onClose, onCreated}) => {
     const trailer = TRAILERS.find(t => t.id === form.trailer);
     if (trailer && !form.noTrailer) { trailer.status = 'on_hire'; trailer.hirer = form.customer; }
     // Save override
-    saveHireOverride(id, {status:'active', end: form.endDate, start: form.startDate, weekly_truck: form.weeklyTruck});
+    // Save full hire to localStorage overrides so it persists across reloads
+    saveHireOverride(id, {
+      status:'active', end: form.endDate, start: form.startDate,
+      weekly_truck: form.weeklyTruck, weekly_trailer: form.noTrailer ? 0 : form.weeklyTrailer,
+      mileage_rate: form.mileageRate, ruc_rate: form.rucRate,
+      bond: form.bond, bond_paid: form.bondPaid,
+      signed: form.signed, insurance_verified: form.insuranceVerified,
+      checklist_done: form.checklistDone,
+      max_mileage: form.maxMileage || '',
+      notes: form.notes,
+      customer: custId || form.customer,
+      truck: form.truck,
+      trailer: form.noTrailer ? '' : form.trailer,
+    });
+    // Auto-sync new hire to Google Sheets if connected
+    if (sheetsConfig && sheetsConfig.accessToken && sheetsConfig.spreadsheetId) {
+      const allHires = getEffectiveHires();
+      const hireRows = [
+        ['Hire ID','Customer','Truck','Trailer','Start','End','Status','Weekly Rate','Mileage Rate','RUC Rate','Bond','Bond Paid','Signed','Insurance','Max Mileage','Notes'],
+        ...allHires.map(h=>[
+          h.id,
+          CUSTOMERS.find(c=>c.id===h.customer)?.company||h.customer||'',
+          TRUCKS.find(t=>t.id===h.truck)?.rego||h.truck||'',
+          h.trailer?TRAILERS.find(t=>t.id===h.trailer)?.rego||h.trailer:'',
+          h.start,h.end,h.status,
+          (h.weekly_truck||0)+(h.weekly_trailer||0),
+          h.mileage_rate||0,h.ruc_rate||0,h.bond||0,
+          h.bond_paid?'Yes':'No',h.signed?'Yes':'No',h.insurance_verified?'Yes':'No',
+          h.max_mileage||'',h.notes||''
+        ])
+      ];
+      syncSheetTab(sheetsConfig.accessToken, sheetsConfig.spreadsheetId, 'Hire Management', hireRows)
+        .catch(e => console.warn('Sheets hire sync failed:', e.message));
+    }
     setNewHireId(id);
     setConfirmed(true);
   };
@@ -5304,7 +5339,7 @@ const App = () => {
         <div className="content">{pages[page]||<Dashboard theme={theme} setPage={setPage}/>}</div>
       </div>
       <SheetsSetupModal open={sheetsSetupOpen} onClose={()=>setSheetsSetupOpen(false)} onSave={handleSaveConfig} initialConfig={sheetsConfig}/>
-      {showNewHireWizard&&<NewHireWizard onClose={()=>setShowNewHireWizard(false)} onCreated={()=>{setShowNewHireWizard(false);setDataRefreshKey(k=>k+1);}}/>}
+      {showNewHireWizard&&<NewHireWizard onClose={()=>setShowNewHireWizard(false)} sheetsConfig={sheetsConfig} onCreated={()=>{setShowNewHireWizard(false);setDataRefreshKey(k=>k+1);}}/>}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
