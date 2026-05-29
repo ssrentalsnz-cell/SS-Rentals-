@@ -4400,21 +4400,29 @@ const HireDocModal = ({hire, onClose}) => {
     setGenerating(false);
   };
 
-  const downloadHTML = (type) => {
+  const downloadPDF = (type) => {
     const d = docData;
-    let html = '';
-    if (type === 'schedule') {
-      html = generateScheduleHTML(d);
-    } else {
-      html = generateAgreementHTML(d);
-    }
-    const blob = new Blob([html], {type:'text/html'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${type==='schedule'?'Schedule':'Agreement'}_${d.hireId}_${d.hirerCompany.replace(/\s+/g,'_')}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const filename = `${type==='schedule'?'Schedule':'Agreement'}_${d.hireId}_${d.hirerCompany.replace(/\s+/g,'_')}.pdf`;
+    const html = type === 'schedule' ? generateScheduleHTML(d) : generateAgreementHTML(d);
+    // Inject auto-print script and suggested filename into the HTML
+    const printHTML = html.replace('</head>', `
+<script>
+  window.onload = function() {
+    document.title = '${filename.replace('.pdf','')}';
+    setTimeout(function(){ window.print(); }, 400);
+  };
+<\/script>
+<style>
+  @media print {
+    @page { size: A4; margin: 1.5cm; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>`);
+    const win = window.open('', '_blank');
+    if (!win) { alert('Please allow pop-ups for this site to download PDF documents.'); return; }
+    win.document.write(printHTML);
+    win.document.close();
     // Log download
     const log = loadDocLog();
     log.unshift({ id: 'DOC'+Date.now(), hireId: hire.id, customer: cust?.company, type, generatedAt: new Date().toISOString(), downloaded: true });
@@ -4490,10 +4498,10 @@ const HireDocModal = ({hire, onClose}) => {
 
           {/* Action buttons */}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
-            <button className="btn btn-primary" onClick={()=>downloadHTML('schedule')} style={{justifyContent:'center'}}>
+            <button className="btn btn-primary" onClick={()=>downloadPDF('schedule')} style={{justifyContent:'center'}}>
               <Icon name="download" size={14}/> Download Schedule
             </button>
-            <button className="btn btn-primary" onClick={()=>downloadHTML('agreement')} style={{justifyContent:'center'}}>
+            <button className="btn btn-primary" onClick={()=>downloadPDF('agreement')} style={{justifyContent:'center'}}>
               <Icon name="download" size={14}/> Download Agreement
             </button>
           </div>
