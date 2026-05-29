@@ -1093,41 +1093,156 @@ const Dashboard = ({theme,setPage}) => {
   const overdueAmt = overdue.reduce((a,b)=>a+b.total,0);
   const weeklyKm = TRUCKS.reduce((a,t)=>a+t.weekly_km,0);
   const rucCost = weeklyKm*0.062;
-
-  // Compliance alerts
   const cofAlerts = allV.filter(v=>daysDiff(v.cof_expiry)<=30).sort((a,b)=>daysDiff(a.cof_expiry)-daysDiff(b.cof_expiry));
   const regoAlerts = allV.filter(v=>daysDiff(v.rego_expiry)<=30).sort((a,b)=>daysDiff(a.rego_expiry)-daysDiff(b.rego_expiry));
+  const [kpiModal, setKpiModal] = React.useState(null);
+  const activeHires = getEffectiveHires().filter(h=>h.status==='active');
+  const pendingInvoices = getInvoices().filter(i=>i.status!=='paid');
+  const latestPnl = PNL_DETAIL[PNL_DETAIL.length-1];
+
+  const KpiModal = ({id, onClose}) => {
+    if (!id) return null;
+    let title='', body=null;
+    const cardStyle = {background:'var(--bg3)',borderRadius:10,padding:'14px 16px',textAlign:'center'};
+    const statGrid = (items) => (
+      <div style={{display:'grid',gridTemplateColumns:`repeat(${items.length},1fr)`,gap:12,marginBottom:20}}>
+        {items.map(s=><div key={s.label} style={cardStyle}>
+          <div style={{fontSize:22,fontWeight:800,color:s.color||'var(--text)'}}>{s.value}</div>
+          <div style={{fontSize:11,color:'var(--text2)',fontWeight:600,marginTop:4}}>{s.label}</div>
+        </div>)}
+      </div>
+    );
+    if (id==='active-hires') {
+      title='Active Hires';
+      body=(<div>
+        {statGrid([{label:'On Hire',value:onHire,color:'#6A1B9A'},{label:'Available',value:avail,color:'#27AE60'},{label:'In Workshop',value:maint,color:'#FF6F00'}])}
+        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>Currently On Hire</div>
+        <div className="table-wrap mb-4"><table><thead><tr><th>Hire ID</th><th>Truck</th><th>Customer</th><th>Start</th><th>End</th><th>Rate/wk</th></tr></thead>
+        <tbody>{activeHires.map(h=><tr key={h.id}><td style={{fontWeight:600}}>{h.id}</td><td>{truckRego(h.truck)}</td><td>{custName(h.customer)}</td><td>{fmt(h.start)}</td><td>{fmt(h.end)}</td><td style={{fontWeight:700}}>{fmtCur((h.weekly_truck||0)+(h.weekly_trailer||0))}</td></tr>)}</tbody></table></div>
+        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>Available Trucks</div>
+        <div className="table-wrap"><table><thead><tr><th>Rego</th><th>Make / Model</th><th>Year</th><th>Odometer</th></tr></thead>
+        <tbody>{TRUCKS.filter(t=>t.status==='available').map(t=><tr key={t.id}><td style={{fontWeight:600}}>{t.rego}</td><td>{t.make} {t.model}</td><td>{t.year}</td><td>{t.odometer.toLocaleString()} km</td></tr>)}</tbody></table></div>
+      </div>);
+    } else if (id==='fleet-util') {
+      title='Fleet Utilisation';
+      body=(<div>
+        {statGrid([{label:'Utilisation',value:`${util}%`,color:'#27AE60'},{label:'Trucks',value:TRUCKS.length,color:'#6A1B9A'},{label:'Trailers',value:TRAILERS.length,color:'#6A1B9A'},{label:'Total Assets',value:allV.length,color:'#6A1B9A'}])}
+        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>All Trucks</div>
+        <div className="table-wrap mb-4"><table><thead><tr><th>Rego</th><th>Make / Model</th><th>Status</th><th>Hirer</th><th>Weekly Rate</th><th>Odometer</th></tr></thead>
+        <tbody>{TRUCKS.map(t=><tr key={t.id}><td style={{fontWeight:600}}>{t.rego}</td><td>{t.make} {t.model} {t.year}</td><td><span className={statusBadge(t.status)}>{statusLabel(t.status)}</span></td><td>{t.hirer?custName(t.hirer):'—'}</td><td>{t.weekly_rate>0?fmtCur(t.weekly_rate):'—'}</td><td>{t.odometer.toLocaleString()} km</td></tr>)}</tbody></table></div>
+        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>All Trailers</div>
+        <div className="table-wrap"><table><thead><tr><th>Rego</th><th>Make / Model</th><th>Status</th><th>Hirer</th></tr></thead>
+        <tbody>{TRAILERS.map(t=><tr key={t.id}><td style={{fontWeight:600}}>{t.rego}</td><td>{t.make} {t.model}</td><td><span className={statusBadge(t.status)}>{statusLabel(t.status)}</span></td><td>{t.hirer?custName(t.hirer):'—'}</td></tr>)}</tbody></table></div>
+      </div>);
+    } else if (id==='weekly-rev') {
+      title='Weekly Revenue';
+      body=(<div>
+        {statGrid([{label:'This Week',value:fmtCur(weekRev),color:'#6A1B9A'},{label:'Trucks On Hire',value:onHire,color:'#27AE60'},{label:'Total Weekly KM',value:`${weeklyKm.toLocaleString()} km`,color:'#FF6F00'}])}
+        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>Weekly Revenue Trend</div>
+        <div className="table-wrap mb-4"><table><thead><tr><th>Week</th><th>Revenue</th><th>vs Prior Week</th></tr></thead>
+        <tbody>{WEEKLY_REVENUE.map((w,i)=>{const prev=WEEKLY_REVENUE[i-1];const diff=prev?w.amount-prev.amount:null;return<tr key={w.week}><td style={{fontWeight:600}}>{w.week}</td><td style={{fontWeight:700}}>{fmtCur(w.amount)}</td><td style={{color:diff===null?'var(--text2)':diff>=0?'#27AE60':'#FF6F00',fontWeight:600}}>{diff===null?'—':(diff>=0?'↑ ':'↓ ')+fmtCur(Math.abs(diff))}</td></tr>;})}</tbody></table></div>
+        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>Active Hire Rates</div>
+        <div className="table-wrap"><table><thead><tr><th>Customer</th><th>Truck</th><th>Weekly Rate</th><th>Mileage Rate</th><th>RUC Rate</th></tr></thead>
+        <tbody>{activeHires.map(h=><tr key={h.id}><td>{custName(h.customer)}</td><td>{truckRego(h.truck)}</td><td style={{fontWeight:700}}>{fmtCur(h.weekly_truck||0)}</td><td>{fmtCur(h.mileage_rate||0)}/km</td><td>{fmtCur(h.ruc_rate||0)}/km</td></tr>)}</tbody></table></div>
+      </div>);
+    } else if (id==='monthly-rev') {
+      title='Monthly Revenue';
+      body=(<div>
+        {statGrid([{label:'May 2026 Revenue',value:fmtCur(monthRev),color:'#6A1B9A'},{label:'Net Profit',value:fmtCur(monthNet),color:'#27AE60'},{label:'Total Expenses',value:fmtCur(latestPnl.expenses),color:'#FF6F00'}])}
+        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>Monthly Trend</div>
+        <div className="table-wrap mb-4"><table><thead><tr><th>Month</th><th>Revenue</th><th>Expenses</th><th>Net Profit</th><th>Margin</th></tr></thead>
+        <tbody>{MONTHLY_REVENUE.map(m=>{const margin=Math.round((m.net/m.amount)*100);return<tr key={m.month}><td style={{fontWeight:600}}>{m.month}</td><td style={{fontWeight:700}}>{fmtCur(m.amount)}</td><td>{fmtCur(m.expenses)}</td><td style={{fontWeight:700,color:m.net>=0?'#27AE60':'#FF6F00'}}>{m.net>=0?'+':''}{fmtCur(m.net)}</td><td style={{color:margin>=10?'#27AE60':margin>=0?'#F39C12':'#FF6F00',fontWeight:600}}>{margin}%</td></tr>;})}
+        </tbody></table></div>
+        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>May Expense Breakdown</div>
+        <div className="table-wrap"><table><thead><tr><th>Category</th><th>Amount</th><th>% of Revenue</th></tr></thead>
+        <tbody>{[{l:'Insurance',v:latestPnl.insurance},{l:'Navman/RUC',v:latestPnl.navman_ruc},{l:'RUC Charges',v:latestPnl.ruc},{l:'Other',v:latestPnl.other},{l:'Repairs',v:latestPnl.repairs},{l:'Flexi Finance',v:latestPnl.flexi},{l:'Heartland Finance',v:latestPnl.heartland},{l:'Advertising',v:latestPnl.advertising},{l:'GST/Tax',v:latestPnl.gst}].filter(r=>r.v>0).map(r=><tr key={r.l}><td>{r.l}</td><td style={{fontWeight:700}}>{fmtCur(r.v)}</td><td style={{color:'var(--text2)'}}>{Math.round((r.v/latestPnl.revenue)*100)}%</td></tr>)}</tbody></table></div>
+      </div>);
+    } else if (id==='outstanding') {
+      title='Outstanding Invoices';
+      body=(<div>
+        {statGrid([{label:'Total Outstanding',value:fmtCur(outstanding),color:'#FF6F00'},{label:'Invoices Pending',value:pendingInvoices.length,color:'#6A1B9A'},{label:'Overdue Amount',value:fmtCur(overdueAmt),color:'#d32f2f'}])}
+        <div className="table-wrap"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Period</th><th>Due Date</th><th>Total</th><th>Status</th></tr></thead>
+        <tbody>{pendingInvoices.map(inv=><tr key={inv.id}><td style={{fontWeight:600}}>{inv.id}</td><td>{custName(inv.customer)||inv.customer_name||'—'}</td><td style={{fontSize:11}}>{inv.period}</td><td style={{color:inv.status==='overdue'?'#FF6F00':'var(--text)'}}>{fmt(inv.due)}</td><td style={{fontWeight:700}}>{fmtCur(inv.total)}</td><td><span className={statusBadge(inv.status)}>{statusLabel(inv.status)}</span></td></tr>)}</tbody></table></div>
+      </div>);
+    } else if (id==='overdue') {
+      title='Overdue Payments';
+      body=(<div>
+        {overdue.length===0?<div style={{textAlign:'center',padding:'40px 0',color:'var(--text2)'}}>No overdue invoices!</div>:(<div>
+          {statGrid([{label:'Total Overdue',value:fmtCur(overdueAmt),color:'#d32f2f'},{label:'Overdue Count',value:overdue.length,color:'#FF6F00'}])}
+          <div className="table-wrap mb-4"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Contact</th><th>Phone</th><th>Due Date</th><th>Days Overdue</th><th>Amount</th></tr></thead>
+          <tbody>{overdue.map(inv=>{const cust=CUSTOMERS.find(c=>c.id===inv.customer);const days=Math.abs(daysDiff(inv.due));return<tr key={inv.id}><td style={{fontWeight:600}}>{inv.id}</td><td>{custName(inv.customer)||inv.customer_name}</td><td>{cust?.contact||'—'}</td><td style={{color:'#6A1B9A',fontWeight:600}}>{cust?.phone||'—'}</td><td style={{color:'#FF6F00'}}>{fmt(inv.due)}</td><td style={{color:'#d32f2f',fontWeight:700}}>{days} days</td><td style={{fontWeight:700}}>{fmtCur(inv.total)}</td></tr>;})}</tbody></table></div>
+          <div style={{background:'rgba(211,47,47,0.07)',border:'1px solid rgba(211,47,47,0.2)',borderRadius:10,padding:14}}>
+            <div style={{fontWeight:700,fontSize:13,marginBottom:6,color:'#d32f2f'}}>Action Required</div>
+            {overdue.map(inv=>{const cust=CUSTOMERS.find(c=>c.id===inv.customer);return<div key={inv.id} style={{fontSize:13,color:'var(--text2)',marginBottom:4}}>Call <strong style={{color:'var(--text)'}}>{cust?.contact||'—'}</strong> at <strong style={{color:'#6A1B9A'}}>{cust?.phone||'—'}</strong> re {inv.id} ({fmtCur(inv.total)})</div>;})}
+          </div>
+        </div>)}
+      </div>);
+    } else if (id==='mileage') {
+      title='Weekly Mileage';
+      body=(<div>
+        {statGrid([{label:'Total Weekly KM',value:`${weeklyKm.toLocaleString()} km`,color:'#6A1B9A'},{label:'RUC Cost',value:fmtCur(rucCost),color:'#FF6F00'},{label:'Trucks Reporting',value:TRUCKS.filter(t=>t.weekly_km>0).length,color:'#27AE60'}])}
+        <div className="table-wrap"><table><thead><tr><th>Truck</th><th>Customer</th><th>Weekly KM</th><th>RUC Rate</th><th>Weekly RUC $</th><th>Mileage Rate</th><th>Weekly Mileage $</th></tr></thead>
+        <tbody>{TRUCKS.map(t=>{const h=activeHires.find(h=>h.truck===t.id);return<tr key={t.id}><td style={{fontWeight:600}}>{t.rego}</td><td>{t.hirer?custName(t.hirer):'Available'}</td><td style={{fontWeight:700}}>{t.weekly_km>0?`${t.weekly_km.toLocaleString()} km`:'—'}</td><td>{h?fmtCur(h.ruc_rate)+'/km':'—'}</td><td style={{color:'#FF6F00',fontWeight:600}}>{h&&t.weekly_km>0?fmtCur(t.weekly_km*(h.ruc_rate||0)):'—'}</td><td>{h?fmtCur(h.mileage_rate)+'/km':'—'}</td><td style={{fontWeight:600}}>{h&&t.weekly_km>0?fmtCur(t.weekly_km*(h.mileage_rate||0)):'—'}</td></tr>;})}</tbody></table></div>
+      </div>);
+    } else if (id==='ruc') {
+      title='RUC Cost This Week';
+      body=(<div>
+        {statGrid([{label:'Total RUC Cost',value:fmtCur(rucCost),color:'#6A1B9A'},{label:'Total KM',value:`${weeklyKm.toLocaleString()} km`,color:'#27AE60'},{label:'Avg Rate',value:'$0.062/km',color:'var(--text2)'}])}
+        <div className="table-wrap mb-4"><table><thead><tr><th>Truck</th><th>Status</th><th>RUC Balance</th><th>Weekly KM</th><th>Weeks Remaining</th></tr></thead>
+        <tbody>{TRUCKS.map(t=>{const weeksLeft=t.weekly_km>0?Math.floor(t.ruc_balance/t.weekly_km):null;return<tr key={t.id}><td style={{fontWeight:600}}>{t.rego}</td><td><span className={statusBadge(t.status)}>{statusLabel(t.status)}</span></td><td style={{fontWeight:700,color:t.ruc_balance<500?'#d32f2f':t.ruc_balance<1500?'#FF6F00':'#27AE60'}}>{t.ruc_balance.toLocaleString()} km</td><td>{t.weekly_km>0?`${t.weekly_km.toLocaleString()} km`:'—'}</td><td style={{color:weeksLeft!==null&&weeksLeft<3?'#d32f2f':'var(--text)',fontWeight:weeksLeft!==null&&weeksLeft<3?700:400}}>{weeksLeft!==null?`~${weeksLeft} wks`:'—'}</td></tr>;})}</tbody></table></div>
+        <div style={{background:'rgba(106,27,154,0.07)',border:'1px solid rgba(106,27,154,0.15)',borderRadius:10,padding:14,fontSize:13,color:'var(--text2)'}}>RUC must be purchased before trucks run out. Top up trucks with under 3 weeks remaining promptly.</div>
+      </div>);
+    }
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal modal-lg" onClick={e=>e.stopPropagation()}>
+          <div className="modal-header"><span className="modal-title">{title}</span><button className="icon-btn" onClick={onClose}><Icon name="close" size={18}/></button></div>
+          <div className="modal-body">{body}</div>
+          <div className="modal-footer"><button className="btn btn-ghost" onClick={onClose}>Close</button></div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div>
+      {kpiModal && <KpiModal id={kpiModal} onClose={()=>setKpiModal(null)}/>}
       {/* KPI row 1 */}
       <div className="grid grid-4 mb-4">
         {[
-          {label:'Active Hires',value:onHire,sub:`${avail} available · ${maint} in workshop`,accent:'var(--blue)',trend:'↑ 1 from last week',up:true},
-          {label:'Fleet Utilisation',value:`${util}%`,sub:`${TRUCKS.length} trucks · ${TRAILERS.length} trailers`,accent:'var(--green)',trend:'On target (>70%)',up:true},
-          {label:'Weekly Revenue',value:fmtCur(weekRev),sub:'Week ending 31 May 2026',accent:'var(--red)',trend:'↑ 10.3% vs last week',up:true},
-          {label:'Monthly Revenue',value:fmtCur(monthRev),sub:`May 2026 — Net ${fmtCur(monthNet)}`,accent:'#8E44AD',trend:'Best month since Oct 2025',up:true},
+          {id:'active-hires',label:'Active Hires',value:onHire,sub:`${avail} available · ${maint} in workshop`,accent:'var(--blue)',trend:'↑ 1 from last week',up:true},
+          {id:'fleet-util',label:'Fleet Utilisation',value:`${util}%`,sub:`${TRUCKS.length} trucks · ${TRAILERS.length} trailers`,accent:'var(--green)',trend:'On target (>70%)',up:true},
+          {id:'weekly-rev',label:'Weekly Revenue',value:fmtCur(weekRev),sub:'Week ending 31 May 2026',accent:'var(--red)',trend:'↑ 10.3% vs last week',up:true},
+          {id:'monthly-rev',label:'Monthly Revenue',value:fmtCur(monthRev),sub:`May 2026 — Net ${fmtCur(monthNet)}`,accent:'#8E44AD',trend:'Best month since Oct 2025',up:true},
         ].map(k=>(
-          <div key={k.label} className="kpi-card" style={{'--accent':k.accent}}>
+          <div key={k.label} className="kpi-card" onClick={()=>setKpiModal(k.id)}
+            style={{'--accent':k.accent,cursor:'pointer',transition:'box-shadow .15s,transform .15s'}}
+            onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 6px 24px rgba(106,27,154,0.18)';e.currentTarget.style.transform='translateY(-2px)';}}
+            onMouseLeave={e=>{e.currentTarget.style.boxShadow='';e.currentTarget.style.transform='';}}>
             <div className="kpi-label">{k.label}</div>
             <div className="kpi-value">{k.value}</div>
             <div className="kpi-sub">{k.sub}</div>
             <div className={`kpi-trend ${k.up?'up':'down'}`}>{k.trend}</div>
+            <div style={{fontSize:10,color:'var(--text3)',marginTop:6}}>Click to expand ↗</div>
           </div>
         ))}
       </div>
       {/* KPI row 2 */}
       <div className="grid grid-4 mb-4">
         {[
-          {label:'Outstanding Invoices',value:fmtCur(outstanding),sub:`${getInvoices().filter(i=>i.status!=='paid').length} invoices pending`,accent:'var(--orange)'},
-          {label:'Overdue Payments',value:fmtCur(overdueAmt),sub:`${overdue.length} invoices overdue`,accent:'var(--red)'},
-          {label:'Weekly Mileage Total',value:`${weeklyKm.toLocaleString()} km`,sub:'All trucks combined',accent:'var(--blue)'},
-          {label:'RUC Cost This Week',value:fmtCur(rucCost),sub:'@ $0.062/km avg',accent:'var(--text3)'},
+          {id:'outstanding',label:'Outstanding Invoices',value:fmtCur(outstanding),sub:`${pendingInvoices.length} invoices pending`,accent:'var(--orange)'},
+          {id:'overdue',label:'Overdue Payments',value:fmtCur(overdueAmt),sub:`${overdue.length} invoices overdue`,accent:'var(--red)'},
+          {id:'mileage',label:'Weekly Mileage Total',value:`${weeklyKm.toLocaleString()} km`,sub:'All trucks combined',accent:'var(--blue)'},
+          {id:'ruc',label:'RUC Cost This Week',value:fmtCur(rucCost),sub:'@ $0.062/km avg',accent:'var(--text3)'},
         ].map(k=>(
-          <div key={k.label} className="kpi-card" style={{'--accent':k.accent}}>
+          <div key={k.label} className="kpi-card" onClick={()=>setKpiModal(k.id)}
+            style={{'--accent':k.accent,cursor:'pointer',transition:'box-shadow .15s,transform .15s'}}
+            onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 6px 24px rgba(106,27,154,0.18)';e.currentTarget.style.transform='translateY(-2px)';}}
+            onMouseLeave={e=>{e.currentTarget.style.boxShadow='';e.currentTarget.style.transform='';}}>
             <div className="kpi-label">{k.label}</div>
             <div className="kpi-value">{k.value}</div>
             <div className="kpi-sub">{k.sub}</div>
+            <div style={{fontSize:10,color:'var(--text3)',marginTop:6}}>Click to expand ↗</div>
           </div>
         ))}
       </div>
