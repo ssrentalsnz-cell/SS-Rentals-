@@ -12,16 +12,16 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --red:#D92B2B;--red-light:#FF4444;--red-dark:#A01E1E;
-  --green:#27AE60;--orange:#E67E22;--blue:#2980B9;
+  --red:#6A1B9A;--red-light:#FF6F00;--red-dark:#4A148C;
+  --green:#27AE60;--orange:#FF6F00;--blue:#6A1B9A;
   --sidebar-w:240px;
-  /* Dark theme (default) */
-  --bg:#0F0F0F;--bg2:#1A1A1A;--bg3:#242424;--bg4:#2E2E2E;
-  --card:#1C1C1E;--card2:#262626;
-  --border:rgba(255,255,255,0.08);--border2:rgba(255,255,255,0.14);
-  --text:#F0F0F0;--text2:#A8A8A8;--text3:#6B6B6B;
-  --sidebar:#0A0A0A;--sidebar-text:#C8C8C8;--sidebar-active:rgba(217,43,43,0.15);
-  --shadow:0 2px 12px rgba(0,0,0,0.4);
+  /* SS Rentals Brand Theme — White/Purple/Orange */
+  --bg:#FFFFFF;--bg2:#F8F5FF;--bg3:#F0EBF8;--bg4:#E8E0F5;
+  --card:#FFFFFF;--card2:#F8F5FF;
+  --border:rgba(106,27,154,0.12);--border2:rgba(106,27,154,0.22);
+  --text:#1a0533;--text2:#5c3d7a;--text3:#9b7ab5;
+  --sidebar:#1a0533;--sidebar-text:#e8d5f5;--sidebar-active:rgba(255,111,0,0.15);
+  --shadow:0 2px 12px rgba(106,27,154,0.12);
 }
 body.light{
   --bg:#F2F2F7;--bg2:#FFFFFF;--bg3:#E8E8ED;--bg4:#D8D8DC;
@@ -48,7 +48,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sa
 .nav-item.active{background:var(--sidebar-active);color:var(--red-light);border:1px solid rgba(217,43,43,0.25)}
 .nav-item .nav-icon{width:18px;height:18px;flex-shrink:0;opacity:.8}
 .nav-item.active .nav-icon{opacity:1}
-.nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center}
+.nav-badge{margin-left:auto;background:#FF6F00;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center}
 .sidebar-footer{margin-top:auto;padding:12px 10px;border-top:1px solid rgba(255,255,255,0.06)}
 /* MAIN */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
@@ -5106,7 +5106,7 @@ const SyncStatusBar = ({syncState, onManualSync, onOpenSetup}) => {
 
 /* ─── MAIN APP ────────────────────────────────────── */
 const App = () => {
-  const [theme,setTheme]=useState('dark');
+  const [theme,setTheme]=useState('light');
   const [page,setPage]=useState('dashboard');
   const [sheetsSetupOpen, setSheetsSetupOpen] = useState(false);
   const [showNewHireWizard, setShowNewHireWizard] = useState(false);
