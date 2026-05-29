@@ -1316,6 +1316,9 @@ const Dashboard = ({theme,setPage}) => {
         </div>
       </div>
 
+      {/* Monthly P&L Tabs */}
+      <DashboardPnl />
+
       {/* AI Operational Summary */}
       <div className="card" style={{borderLeft:'3px solid var(--red)',background:'linear-gradient(135deg,var(--card) 0%,var(--bg3) 100%)'}}>
         <div className="card-header"><span className="card-title">🤖 AI Operational Summary — 24 May 2026</span><span className="badge badge-blue">AI Generated</span></div>
@@ -1332,6 +1335,95 @@ const Dashboard = ({theme,setPage}) => {
 };
 
 /* ─── FLEET PAGE ──────────────────────────────────── */
+/* ─── DASHBOARD P&L PANEL ─────────────────────────── */
+const DashboardPnl = () => {
+  const months = PNL_DETAIL.slice(-12);
+  const [selMonth, setSelMonth] = React.useState(months[months.length-1].month);
+  const d = months.find(m=>m.month===selMonth) || months[months.length-1];
+  const fmtMonth = m => { const [y,mo] = m.split('-'); return new Date(+y,+mo-1,1).toLocaleDateString('en-NZ',{month:'short',year:'2-digit'}); };
+  const isProfit = d.net >= 0;
+  const expenseRows = [
+    {label:'Insurance',value:d.insurance},{label:'Navman / RUC Purchase',value:d.navman_ruc},
+    {label:'RUC Charges',value:d.ruc},{label:'Other Expenses',value:d.other},
+    {label:'Repairs & Maintenance',value:d.repairs},{label:'Flexi Finance',value:d.flexi},
+    {label:'Heartland Finance',value:d.heartland},{label:'Advertising',value:d.advertising},
+    {label:'GST / Other Tax',value:d.gst},
+  ].filter(r=>r.value>0);
+  return (
+    <div className="card mb-4" style={{padding:0,overflow:'hidden'}}>
+      <div style={{padding:'16px 20px 0',borderBottom:'1px solid var(--border)'}}>
+        <div className="card-header" style={{marginBottom:12}}>
+          <span className="card-title">Monthly P&amp;L</span>
+          <span className="badge badge-blue">Last {months.length} Months</span>
+        </div>
+        <div style={{display:'flex',gap:4,overflowX:'auto',flexWrap:'wrap'}}>
+          {months.map(m=>{
+            const active = m.month===selMonth;
+            const profit = m.net>=0;
+            return (
+              <button key={m.month} onClick={()=>setSelMonth(m.month)} style={{
+                padding:'6px 12px',borderRadius:'7px 7px 0 0',border:'none',cursor:'pointer',
+                fontSize:12,fontWeight:active?700:500,whiteSpace:'nowrap',
+                background:active?'var(--card)':'var(--bg3)',
+                color:active?(profit?'#27AE60':'#FF6F00'):'var(--text2)',
+                borderBottom:active?'2px solid '+(profit?'#27AE60':'#FF6F00'):'2px solid transparent',
+              }}>
+                {fmtMonth(m.month)}
+                <span style={{display:'block',fontSize:10,fontWeight:600,color:profit?'#27AE60':'#FF6F00'}}>{profit?'+':''}{fmtCur(m.net)}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{padding:20}}>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16}}>
+          <h3 style={{fontSize:15,fontWeight:700,color:'var(--text)',margin:0}}>
+            {new Date(selMonth+'-01').toLocaleDateString('en-NZ',{month:'long',year:'numeric'})}
+          </h3>
+          <span className={`badge ${isProfit?'badge-green':'badge-orange'}`}>
+            {isProfit?'Profit':'Loss'}: {fmtCur(Math.abs(d.net))}
+          </span>
+        </div>
+        <div className="grid" style={{gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:20}}>
+          <div style={{background:'rgba(39,174,96,0.07)',border:'1px solid rgba(39,174,96,0.2)',borderRadius:10,padding:'14px 16px'}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#27AE60',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Total Revenue</div>
+            <div style={{fontSize:24,fontWeight:800,color:'var(--text)'}}>{fmtCur(d.revenue)}</div>
+          </div>
+          <div style={{background:'rgba(255,111,0,0.07)',border:'1px solid rgba(255,111,0,0.2)',borderRadius:10,padding:'14px 16px'}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#FF6F00',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Total Expenses</div>
+            <div style={{fontSize:24,fontWeight:800,color:'var(--text)'}}>{fmtCur(d.expenses)}</div>
+          </div>
+          <div style={{background:isProfit?'rgba(39,174,96,0.07)':'rgba(255,111,0,0.07)',border:`1px solid ${isProfit?'rgba(39,174,96,0.2)':'rgba(255,111,0,0.2)'}`,borderRadius:10,padding:'14px 16px'}}>
+            <div style={{fontSize:11,fontWeight:700,color:isProfit?'#27AE60':'#FF6F00',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Net {isProfit?'Profit':'Loss'}</div>
+            <div style={{fontSize:24,fontWeight:800,color:isProfit?'#27AE60':'#FF6F00'}}>{isProfit?'':'-'}{fmtCur(Math.abs(d.net))}</div>
+            <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>Margin: {d.revenue>0?Math.round((d.net/d.revenue)*100):0}%</div>
+          </div>
+        </div>
+        <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.6px',marginBottom:10}}>Expense Breakdown</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'2px 24px'}}>
+          {expenseRows.map(r=>(
+            <div key={r.label} style={{display:'flex',justifyContent:'space-between',padding:'7px 0',borderBottom:'1px solid var(--border)'}}>
+              <span style={{fontSize:13,color:'var(--text2)'}}>{r.label}</span>
+              <span style={{fontSize:13,fontWeight:600,color:'var(--text)'}}>{fmtCur(r.value)}</span>
+            </div>
+          ))}
+        </div>
+        {d.revenue>0&&(
+          <div style={{marginTop:16}}>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'var(--text2)',marginBottom:4}}>
+              <span>Expenses as % of Revenue</span><span>{Math.round((d.expenses/d.revenue)*100)}%</span>
+            </div>
+            <div className="progress">
+              <div className="progress-bar" style={{width:`${Math.min(100,Math.round((d.expenses/d.revenue)*100))}%`,background:d.expenses/d.revenue>1?'#FF6F00':d.expenses/d.revenue>0.85?'#F39C12':'#27AE60'}}/>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+
 const FleetPage = ({theme}) => {
   const [tab,setTab]=useState('trucks');
   const [sel,setSel]=useState(null);
