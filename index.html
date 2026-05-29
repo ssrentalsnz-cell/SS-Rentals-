@@ -727,9 +727,12 @@ const fetchXeroInvoices = async (accessToken, tenantId, onPageProgress) => {
   const all = [];
   let page = 1;
   while (true) {
-    const url = XERO_PROXY + '/xero-api/api.xro/2.0/Invoices?Type=ACCREC&Statuses=DRAFT,SUBMITTED,AUTHORISED,PAID,VOIDED&page=' + page + '&pageSize=100';
+    // pageSize=100 is the Xero default; some proxies strip it so we include it anyway
+    const url = XERO_PROXY + '/xero-api/api.xro/2.0/Invoices?Type=ACCREC&Statuses=DRAFT,SUBMITTED,AUTHORISED,PAID,VOIDED&page=' + page + '&pageSize=100&summaryOnly=false';
     const res = await fetch(url, { headers:{ Authorization:'Bearer '+accessToken, 'Xero-tenant-id':tenantId } });
     if (!res.ok) {
+      // On page 2+ a non-OK response means we hit the end or an error — stop gracefully
+      if (page > 1) { console.warn('Xero page '+page+' returned '+res.status+', stopping pagination'); break; }
       const txt = await res.text().catch(()=>'');
       throw new Error('Invoice fetch failed (page '+page+', '+res.status+'): '+txt.slice(0,200));
     }
@@ -737,9 +740,12 @@ const fetchXeroInvoices = async (accessToken, tenantId, onPageProgress) => {
     const batch = data.Invoices || [];
     all.push(...batch);
     if (onPageProgress) onPageProgress('Fetching invoices... page '+page+' ('+all.length+' so far)');
-    if (batch.length < 100) break;
+    // Stop if: fewer than 100 returned, OR Xero pagination says we are on the last page
+    const pagination = data.pagination || {};
+    const hasMore = pagination.pageCount ? page < pagination.pageCount : batch.length >= 100;
+    if (!hasMore) break;
     page++;
-    if (page > 50) break;
+    if (page > 50) break; // safety cap: 5,000 invoices
   }
   return all;
 };
