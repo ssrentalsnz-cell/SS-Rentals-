@@ -722,19 +722,54 @@ const getXeroTenantId = async (accessToken) => {
   return tenants[0].tenantId;
 };
 
-const fetchXeroInvoices = async (accessToken, tenantId) => {
-  const res = await fetch(XERO_PROXY + '/xero-api/api.xro/2.0/Invoices?Type=ACCREC&Statuses=DRAFT,SUBMITTED,AUTHORISED,PAID&page=1', {
-    headers:{ Authorization:'Bearer '+accessToken, 'Xero-tenant-id':tenantId }
-  });
-  if (!res.ok) {
-    const txt = await res.text().catch(()=>'');
-    throw new Error('Invoice fetch failed (' + res.status + '): ' + txt.slice(0,200));
+// Fetch ALL invoices from Xero by paginating through every page (100 per page)
+const fetchXeroInvoices = async (accessToken, tenantId, onProgress) => {
+  const allInvoices = [];
+  let page = 1;
+  const pageSize = 100;
+  while (true) {
+    const url = XERO_PROXY + '/xero-api/api.xro/2.0/Invoices?Type=ACCREC&Statuses=DRAFT,SUBMITTED,AUTHORISED,PAID,VOIDED&page=' + page + '&pageSize=' + pageSize;
+    const res = await fetch(url, {
+      headers:{ Authorization:'Bearer '+accessToken, 'Xero-tenant-id':tenantId }
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(()=>'');
+      throw new Error('Invoice fetch failed (page ' + page + ', status ' + res.status + '): ' + txt.slice(0,200));
+    }
+    const data = await res.json();
+    const batch = data.Invoices || [];
+    allInvoices.push(...batch);
+    if (onProgress) onProgress('Fetching invoices… page ' + page + ' (' + allInvoices.length + ' so far)');
+    // Stop when we get fewer than a full page — no more data
+    if (batch.length < pageSize) break;
+    page++;
+    // Safety cap at 50 pages (5,000 invoices) to avoid infinite loops
+    if (page > 50) break;
   }
-  const data = await res.json();
-  return data.Invoices || [];
+  return allInvoices;
 };
 
-const mapXeroStatus = s => ({'DRAFT':'draft','SUBMITTED':'sent','AUTHORISED':'sent','PAID':'paid','VOIDED':'void'}[s]||'draft');
+// Xero doesn't have an OVERDUE status — it's AUTHORISED with a DueDate in the past
+const mapXeroStatus = (xi) => {
+  const s = xi.Status;
+  if (s === 'PAID') return 'paid';
+  if (s === 'VOIDED') return 'void';
+  if (s === 'DRAFT') return 'draft';
+  if (s === 'SUBMITTED') return 'sent';
+  if (s === 'AUTHORISED') {
+    // Check if overdue: DueDate is in the past and there's still an amount owing
+    if (xi.DueDate && xi.AmountDue > 0) {
+      // Xero DueDate format: "/Date(1234567890000+0000)/"
+      const match = xi.DueDate.match(/\/Date\((\d+)/);
+      if (match) {
+        const dueMs = parseInt(match[1]);
+        if (dueMs < Date.now()) return 'overdue';
+      }
+    }
+    return 'sent';
+  }
+  return 'draft';
+};
 
 const syncXeroToApp = async (config, onProgress, onDone, onError) => {
   try {
@@ -758,18 +793,27 @@ const syncXeroToApp = async (config, onProgress, onDone, onError) => {
       tenantId = await getXeroTenantId(accessToken);
       saveXeroConfig({ ...config, accessToken, refreshToken, tokenExpiry, tenantId });
     }
-    onProgress('Fetching invoices from Xero…', 45);
-    const xeroInvs = await fetchXeroInvoices(accessToken, tenantId);
+    onProgress('Fetching all invoices from Xero…', 35);
+    const xeroInvs = await fetchXeroInvoices(accessToken, tenantId, (msg) => onProgress(msg, 50));
     onProgress('Matching ' + xeroInvs.length + ' invoices…', 75);
     const statusMap = {};
     xeroInvs.forEach(xi => {
-      if (xi.InvoiceNumber) statusMap[xi.InvoiceNumber] = { status:mapXeroStatus(xi.Status), xeroId:xi.InvoiceID };
+      if (xi.InvoiceNumber) {
+        statusMap[xi.InvoiceNumber] = {
+          status: mapXeroStatus(xi),
+          xeroId: xi.InvoiceID,
+          amountDue: xi.AmountDue,
+          amountPaid: xi.AmountPaid,
+          total: xi.Total,
+        };
+      }
     });
     const updates = [];
     INVOICES.forEach(inv => {
       const match = statusMap[inv.id];
       if (match) {
-        if (match.status !== inv.status || match.xeroId !== inv.xero_id) {
+        const changed = match.status !== inv.status || match.xeroId !== inv.xero_id;
+        if (changed) {
           updates.push({ id:inv.id, oldStatus:inv.status, newStatus:match.status });
           inv.status = match.status;
           inv.xero_id = match.xeroId;
