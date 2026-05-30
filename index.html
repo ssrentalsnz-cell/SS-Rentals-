@@ -366,9 +366,9 @@ const buildSheetRows = () => ({
       t.weekly_rate||0,0,t.location,0,0]),
   ],
   customers: [
-    ['ID','Company','Contact','Phone','Email','Status','Credit Rating','Outstanding','YTD Revenue','Weekly Rate','Payment Terms','Joined','Notes'],
-    ...CUSTOMERS.map(c=>[c.id,c.company,c.contact,c.phone,c.email,c.status,c.credit_rating,
-      c.outstanding,c.ytd_revenue,c.weekly_truck+c.weekly_trailer,c.payment_terms,c.joined,c.notes]),
+    ['ID','Company','Contact','Phone','Email','Status','Credit Rating','Outstanding','YTD Revenue','Weekly Rate','Payment Terms','Joined','Notes','Address'],
+    ...getAllCustomers().map(c=>[c.id,c.company,c.contact||'',c.phone||'',c.email||'',c.status||'active',c.credit_rating||'',
+      c.outstanding||0,c.ytd_revenue||0,(c.weekly_truck||0)+(c.weekly_trailer||0),c.payment_terms||'Weekly',c.joined||'',c.notes||'',c.address||'']),
   ],
   hires: [
     ['Hire ID','Customer','Truck','Trailer','Start','End','Status','Weekly Rate','Mileage Rate','RUC Rate','Bond','Bond Paid','Signed','Insurance','Notes'],
@@ -462,23 +462,68 @@ const pullHiresFromSheet = (rows) => {
 // Pull customer changes from Google Sheets
 const pullCustomersFromSheet = (rows) => {
   if (!rows || rows.length < 2) return 0;
-  const headers = rows[0];
-  const idIdx = headers.indexOf('ID');
-  const outIdx = headers.indexOf('Outstanding');
-  const notesIdx = headers.indexOf('Notes');
-  const statusIdx = headers.indexOf('Status');
-  if (idIdx === -1) return 0;
+  const headers = rows[0].map(h => (h||'').trim());
+  const col = (name) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
+  const idIdx      = col('ID');
+  const compIdx    = col('Company');
+  const contIdx    = col('Contact');
+  const phoneIdx   = col('Phone');
+  const emailIdx   = col('Email');
+  const addressIdx = col('Address');
+  const statusIdx  = col('Status');
+  const outIdx     = col('Outstanding');
+  const notesIdx   = col('Notes');
+  const truckIdx   = col('Truck');
+  const trailerIdx = col('Trailer');
+  if (idIdx === -1 && compIdx === -1) return 0;
+
+  const existingNewCusts = loadNewCustomers();
+  const allKnownIds = new Set([...CUSTOMERS.map(c=>c.id), ...existingNewCusts.map(c=>c.id)]);
   let updated = 0;
+  let addedNew = 0;
+
   rows.slice(1).forEach(row => {
-    const id = row[idIdx];
-    const cust = CUSTOMERS.find(c => c.id === id);
-    if (!cust) return;
-    if (outIdx !== -1 && row[outIdx] !== undefined) { const v = parseFloat(row[outIdx]); if (!isNaN(v)) cust.outstanding = v; }
-    if (notesIdx !== -1 && row[notesIdx] !== undefined) cust.notes = row[notesIdx];
-    if (statusIdx !== -1 && row[statusIdx]) cust.status = row[statusIdx];
-    updated++;
+    if (!row || row.every(c => !c)) return; // skip empty rows
+    const id = idIdx !== -1 ? (row[idIdx]||'').trim() : '';
+    const company = compIdx !== -1 ? (row[compIdx]||'').trim() : '';
+    if (!company) return; // must have a company name
+
+    if (id && allKnownIds.has(id)) {
+      // Update existing customer fields
+      const cust = CUSTOMERS.find(c => c.id === id);
+      if (cust) {
+        if (outIdx !== -1 && row[outIdx] !== undefined) { const v = parseFloat(row[outIdx]); if (!isNaN(v)) cust.outstanding = v; }
+        if (notesIdx !== -1 && row[notesIdx] !== undefined) cust.notes = row[notesIdx];
+        if (statusIdx !== -1 && row[statusIdx]) cust.status = row[statusIdx];
+        updated++;
+      }
+    } else {
+      // New customer from sheet — add to localStorage
+      const newId = id || ('CS' + String(Date.now() + addedNew).slice(-6));
+      const newCust = {
+        id: newId,
+        company,
+        contact:  contIdx  !== -1 ? (row[contIdx]||'').trim()  : '',
+        phone:    phoneIdx !== -1 ? (row[phoneIdx]||'').trim()  : '',
+        email:    emailIdx !== -1 ? (row[emailIdx]||'').trim()  : '',
+        address:  addressIdx !== -1 ? (row[addressIdx]||'').trim() : '',
+        status:   statusIdx !== -1 && row[statusIdx] ? row[statusIdx].trim().toLowerCase() : 'active',
+        outstanding: outIdx !== -1 ? (parseFloat(row[outIdx])||0) : 0,
+        notes:    notesIdx !== -1 ? (row[notesIdx]||'').trim()  : '',
+        truck:    truckIdx !== -1 ? (row[truckIdx]||'').trim()  : '',
+        trailer:  trailerIdx !== -1 ? (row[trailerIdx]||'').trim() : '',
+        credit_rating:'B+', ytd_revenue:0, weekly_truck:0, weekly_trailer:0,
+        payment_terms:'Weekly', joined: new Date().toISOString().slice(0,10),
+        _fromSheet: true,
+      };
+      existingNewCusts.push(newCust);
+      allKnownIds.add(newId);
+      addedNew++;
+    }
   });
-  return updated;
+
+  if (addedNew > 0) saveNewCustomers(existingNewCusts);
+  return updated + addedNew;
 };
 
 // Parse NZ date formats like "27/04/26", "27/4/2026"
