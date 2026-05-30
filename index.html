@@ -4330,57 +4330,80 @@ const logMessage = (entry) => {
   return log;
 };
 
-const SMS_PROXY = 'https://xero-proxy.ssrentalsnz.workers.dev';
+// ── ClickSend credentials (stored in localStorage) ──────────────
+const CS_CREDS_KEY = 'ss_rentals_clicksend_creds';
+const CS_DEFAULT_CREDS = {username:'ssrentalsnz@gmail.com', apiKey:'1EC9DA95-EDD2-5A7A-1909-3D1BE3C36EAC'};
+const loadCSCreds = () => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CS_CREDS_KEY)||'null');
+    return stored || CS_DEFAULT_CREDS;
+  } catch { return CS_DEFAULT_CREDS; }
+};
+const saveCSCreds = c => localStorage.setItem(CS_CREDS_KEY, JSON.stringify(c));
+// Pre-save defaults on first load if not already set
+if (!localStorage.getItem(CS_CREDS_KEY)) saveCSCreds(CS_DEFAULT_CREDS);
 
 // Format NZ phone number to E.164 international format
 const formatNZPhone = (phone) => {
   if (!phone) return '';
-  let p = phone.replace(/[\s\-().]/g, ''); // remove spaces, dashes, brackets
-  if (p.startsWith('+64')) return p;        // already international
-  if (p.startsWith('64')) return '+' + p;   // missing plus
-  if (p.startsWith('0')) return '+64' + p.slice(1); // local format 0xx -> +64xx
-  return '+64' + p;                          // no prefix at all
+  let p = phone.replace(/[\s\-().]/g, '');
+  if (p.startsWith('+64')) return p;
+  if (p.startsWith('64')) return '+' + p;
+  if (p.startsWith('0')) return '+64' + p.slice(1);
+  return '+64' + p;
 };
 
-// Send SMS via ClickSend through Cloudflare Worker
-const sendSMSReal = async (phone, message) => {
-  try {
-    const res = await fetch(SMS_PROXY + '/sms', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: phone, message, from_name: 'SS Rentals' })
-    });
-    const data = await res.json();
-    const msgStatus = data?.data?.messages?.[0]?.status;
-    if (msgStatus === 'SUCCESS' || res.ok) return { status: 'sent', messageId: data?.data?.messages?.[0]?.message_id };
-    return { status: 'failed', error: data?.data?.messages?.[0]?.status || 'Unknown error' };
-  } catch(e) { return { status: 'failed', error: e.message }; }
+// Build Basic Auth header from stored ClickSend credentials
+const csAuth = () => {
+  const creds = loadCSCreds();
+  if (!creds?.username || !creds?.apiKey) return null;
+  return 'Basic ' + btoa(creds.username + ':' + creds.apiKey);
 };
 
-// Send bulk SMS via ClickSend
+// Send bulk SMS directly via ClickSend REST API (supports CORS from browser)
 const sendBulkSMSReal = async (messages) => {
+  const auth = csAuth();
+  if (!auth) return messages.map(() => ({ status: 'NO_CREDENTIALS', error: 'ClickSend credentials not configured. Go to Settings → SMS Setup.' }));
   try {
-    // Format all phone numbers before sending
-    const formatted = messages.map(m => ({ ...m, to: formatNZPhone(m.to) }));
-    console.log('Sending SMS to:', formatted.map(m=>m.to));
-    const res = await fetch(SMS_PROXY + '/sms/bulk', {
+    const formatted = messages.map(m => ({
+      to: formatNZPhone(m.to),
+      body: m.body,
+      source: 'SS Rentals',
+    }));
+    const res = await fetch('https://rest.clicksend.com/v3/sms/send', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: formatted })
+      headers: { 'Authorization': auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: formatted }),
     });
     const data = await res.json();
-    console.log('ClickSend response:', JSON.stringify(data));
+    if (!res.ok) return messages.map(() => ({ status: 'FAILED', error: data?.response_msg || 'API error ' + res.status }));
     return data?.data?.messages || [];
-  } catch(e) { console.error('SMS error:', e); return []; }
+  } catch(e) { return messages.map(() => ({ status: 'FAILED', error: e.message })); }
 };
 
-// Fetch SMS delivery history from ClickSend
+// Fetch SMS delivery history directly from ClickSend
 const fetchSMSHistory = async () => {
+  const auth = csAuth();
+  if (!auth) return [];
   try {
-    const res = await fetch(SMS_PROXY + '/sms/history');
+    const res = await fetch('https://rest.clicksend.com/v3/sms/history?limit=50', {
+      headers: { 'Authorization': auth },
+    });
     const data = await res.json();
     return data?.data?.data || [];
   } catch(e) { return []; }
+};
+
+// Test ClickSend credentials
+const testCSCreds = async () => {
+  const auth = csAuth();
+  if (!auth) return { ok: false, msg: 'No credentials saved.' };
+  try {
+    const res = await fetch('https://rest.clicksend.com/v3/account', { headers: { 'Authorization': auth } });
+    const data = await res.json();
+    if (res.ok) return { ok: true, msg: 'Connected! Account: ' + (data?.data?.username || 'OK') + ' · Balance: $' + (data?.data?.balance || '?') };
+    return { ok: false, msg: data?.response_msg || 'Auth failed — check username and API key.' };
+  } catch(e) { return { ok: false, msg: e.message }; }
 };
 
 // Email via mailto (no email API yet)
@@ -4449,6 +4472,101 @@ const DeliveryStatusTab = () => {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ─── SMS SETUP PANEL ───────────────────────────────── */
+const SMSSetupPanel = () => {
+  const [creds, setCreds] = React.useState(() => loadCSCreds() || {username:'',apiKey:''});
+  const [testing, setTesting] = React.useState(false);
+  const [testResult, setTestResult] = React.useState(null);
+  const saved = loadCSCreds();
+  const isConnected = saved?.username && saved?.apiKey;
+
+  const handleSave = () => {
+    if (!creds.username || !creds.apiKey) { alert('Please enter both username and API key.'); return; }
+    saveCSCreds(creds);
+    setTestResult({ok:true, msg:'Credentials saved! Click "Test Connection" to verify.'});
+  };
+
+  const handleTest = async () => {
+    if (!loadCSCreds()) { setTestResult({ok:false, msg:'Save credentials first.'}); return; }
+    setTesting(true); setTestResult(null);
+    const result = await testCSCreds();
+    setTestResult(result);
+    setTesting(false);
+  };
+
+  const handleDisconnect = () => {
+    localStorage.removeItem(CS_CREDS_KEY);
+    setCreds({username:'',apiKey:''});
+    setTestResult(null);
+  };
+
+  return (
+    <div className="card" style={{borderLeft:`3px solid ${isConnected?'#FF6F00':'var(--border2)'}`}}>
+      <div style={{display:'flex',alignItems:'center',gap:16}}>
+        <div style={{width:48,height:48,borderRadius:12,background:isConnected?'rgba(255,111,0,0.12)':'var(--bg3)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:22}}>
+          💬
+        </div>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:2,display:'flex',alignItems:'center',gap:8}}>
+            ClickSend SMS
+            {isConnected ? <span className="badge badge-green">Connected</span> : <span className="badge badge-gray">Not Connected</span>}
+          </div>
+          <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}>Sends SMS reminders and notifications to customers via ClickSend</div>
+          {isConnected && <div style={{fontSize:11,color:'var(--text3)'}}>Account: {saved.username}</div>}
+        </div>
+        {isConnected && (
+          <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-end'}}>
+            <button className="btn btn-primary btn-sm" onClick={handleTest} disabled={testing} style={{background:'#FF6F00',borderColor:'#e06000'}}>
+              {testing ? 'Testing…' : 'Test Connection'}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={handleDisconnect}>Disconnect</button>
+          </div>
+        )}
+      </div>
+
+      {!isConnected && (
+        <div style={{marginTop:16}}>
+          <div style={{padding:'10px 14px',background:'rgba(255,111,0,0.07)',border:'1px solid rgba(255,111,0,0.2)',borderRadius:8,fontSize:12,marginBottom:14,lineHeight:1.8}}>
+            <strong>Setup:</strong> Create a free account at <strong>clicksend.com</strong> → go to <strong>API Credentials</strong> → copy your <strong>Username</strong> and <strong>API Key</strong>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+            <div className="form-group" style={{marginBottom:0}}>
+              <label className="form-label">ClickSend Username (email)</label>
+              <input className="form-control" type="email" placeholder="you@email.com" value={creds.username} onChange={e=>setCreds(c=>({...c,username:e.target.value}))}/>
+            </div>
+            <div className="form-group" style={{marginBottom:0}}>
+              <label className="form-label">API Key</label>
+              <input className="form-control" type="password" placeholder="Your ClickSend API key" value={creds.apiKey} onChange={e=>setCreds(c=>({...c,apiKey:e.target.value}))}/>
+            </div>
+          </div>
+          <button className="btn btn-primary" onClick={handleSave} style={{background:'#FF6F00',borderColor:'#e06000'}}>
+            Save & Connect
+          </button>
+        </div>
+      )}
+
+      {isConnected && (
+        <div style={{marginTop:14,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+          <div className="form-group" style={{marginBottom:0}}>
+            <label className="form-label">Username</label>
+            <input className="form-control" value={creds.username} onChange={e=>setCreds(c=>({...c,username:e.target.value}))} onBlur={handleSave}/>
+          </div>
+          <div className="form-group" style={{marginBottom:0}}>
+            <label className="form-label">API Key</label>
+            <input className="form-control" type="password" value={creds.apiKey} onChange={e=>setCreds(c=>({...c,apiKey:e.target.value}))} onBlur={handleSave}/>
+          </div>
+        </div>
+      )}
+
+      {testResult && (
+        <div style={{marginTop:12,padding:'10px 14px',background:testResult.ok?'rgba(39,174,96,0.08)':'rgba(211,47,47,0.08)',border:`1px solid ${testResult.ok?'rgba(39,174,96,0.25)':'rgba(211,47,47,0.25)'}`,borderRadius:8,fontSize:13,color:testResult.ok?'#27AE60':'#d32f2f',fontWeight:600}}>
+          {testResult.ok ? '✅ ' : '❌ '}{testResult.msg}
         </div>
       )}
     </div>
@@ -4533,24 +4651,30 @@ const CommunicationsPage = () => {
       const smsMessages = allMessages.filter(m=>m.cust.phone).map(m=>({ to: m.cust.phone, body: m.smsText }));
       if (smsMessages.length > 0) {
         setSendResult({sending:true, msg:'Sending '+smsMessages.length+' SMS via ClickSend…'});
+        // Check credentials before attempting
+        const csCreds = loadCSCreds();
+        if (!csCreds?.username || !csCreds?.apiKey) {
+          setSendResult({error: 'ClickSend not configured. Go to Settings → SMS Setup to enter your ClickSend username and API key.'});
+          setSending(false); return;
+        }
         const bulkResults = await sendBulkSMSReal(smsMessages);
         allMessages.forEach((m,i) => {
           const r = bulkResults[i];
-          console.log('Result for', m.cust.company, ':', JSON.stringify(r));
-          // Kudosity: success = no error OR error.code === 0
-          const kudoSuccess = r && (r.error === null || r.error === undefined || r.error?.code === 0 || r.status === 'SUCCESS');
-          const status = kudoSuccess ? 'sent' : m.cust.phone ? 'failed' : 'no_phone';
+          // ClickSend direct API: status 'SUCCESS' means queued/sent
+          const ok = r && (r.status === 'SUCCESS' || r.status === 'QUEUED');
+          const status = ok ? 'sent' : r?.status === 'NO_CREDENTIALS' ? 'failed' : m.cust.phone ? 'failed' : 'no_phone';
+          const errNote = (!ok && r?.error) ? r.error : (!ok && r?.status) ? r.status : '';
           results.push({
             custId:m.custId, customerName:m.cust.company, channel:'sms',
             templateId:useCustom?'custom':selectedTemplate,
             templateName:useCustom?'Custom Message':tpl.name,
-            subject:m.emailSubj, preview:m.smsText.slice(0,80)+'…',
+            subject:m.emailSubj, preview:m.smsText.slice(0,80),
             status, phone:m.cust.phone, messageId:r?.message_id,
-            deliveryStatus:r?.status,
+            deliveryStatus:r?.status, errorNote: errNote,
           });
         });
         allMessages.filter(m=>!m.cust.phone).forEach(m=>{
-          results.push({custId:m.custId,customerName:m.cust.company,channel:'sms',status:'no_phone',phone:'',preview:m.smsText.slice(0,60)+'…',templateName:useCustom?'Custom':tpl.name});
+          results.push({custId:m.custId,customerName:m.cust.company,channel:'sms',status:'no_phone',phone:'',preview:m.smsText.slice(0,60),templateName:useCustom?'Custom':tpl.name});
         });
       }
     }
@@ -4597,6 +4721,13 @@ const CommunicationsPage = () => {
 
       {/* ── COMPOSE TAB ── */}
       {tab==='compose'&&(
+        <div>
+        {!loadCSCreds()?.username&&(
+          <div className="alert alert-orange mb-4" style={{marginBottom:16}}>
+            <Icon name="warning" size={15}/>
+            <div><strong>ClickSend SMS not configured.</strong> Go to <strong>Settings</strong> → <strong>SMS Setup</strong> to enter your ClickSend credentials before sending messages.</div>
+          </div>
+        )}
         <div className="grid" style={{gridTemplateColumns:'1fr 1.4fr',gap:16,alignItems:'start'}}>
           {/* Left: Customer selector */}
           <div>
@@ -4737,6 +4868,7 @@ const CommunicationsPage = () => {
             </div>
           </div>
         </div>
+      </div>
       )}
 
       {/* ── LOG TAB ── */}
@@ -6092,6 +6224,9 @@ const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xer
             )}
             {xeroSyncState?.error&&<div className="alert alert-red" style={{marginTop:12}}><Icon name="warning" size={14}/><span>{xeroSyncState.error}</span></div>}
           </div>
+
+          {/* ClickSend SMS Setup Panel */}
+          <SMSSetupPanel/>
 
           {/* Google Sheets Live Sync Panel */}
           <div className="card" style={{borderLeft:`3px solid ${sheetsConfig?.accessToken?'#34A853':'var(--border2)'}`}}>
