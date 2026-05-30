@@ -2225,7 +2225,7 @@ td:last-child{font-weight:700;color:#1a1a2e}
 @media print{body{margin:1.5cm}@page{size:A4;margin:1.5cm}}
 </style></head><body>
 <div class="header">
-  <div class="logo">${logoSrc?`<img src="${logoSrc}" alt="SS Rentals">`:''}</div>
+  <div class="logo">${logoSrc?'<img src="'+logoSrc+'" alt="SS Rentals">':''}</div>
   <div class="title-block">
     <h1>SS Rentals ${f.chargeType==='monthly'&&!f.weeklyRate?'Lease':'Rental'} Quotation</h1>
     <div class="subtitle">Quote No: ${f.quoteNumber} &nbsp;|&nbsp; Date: ${new Date(f.quoteDate).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'})}</div>
@@ -2236,29 +2236,29 @@ td:last-child{font-weight:700;color:#1a1a2e}
     <h3>Prepared For</h3>
     <p><strong>${f.companyName||'—'}</strong></p>
     <p>Attn: ${f.contactName||'—'}</p>
-    ${f.contactPhone?`<p>Phone: ${f.contactPhone}</p>`:''}
-    ${f.contactEmail?`<p>Email: ${f.contactEmail}</p>`:''}
+    ${f.contactPhone?'<p>Phone: '+f.contactPhone+'</p>':''}
+    ${f.contactEmail?'<p>Email: '+f.contactEmail+'</p>':''}
   </div>
   <div class="info-box">
     <h3>Hire Details</h3>
     <p><strong>Type:</strong> ${vehicleLabel}</p>
-    ${f.hireDuration?`<p><strong>Duration:</strong> ${f.hireDuration} ${f.hireDurationUnit}</p>`:''}
-    ${f.startDate?`<p><strong>Start Date:</strong> ${new Date(f.startDate).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'})}</p>`:''}
-    ${f.endDate?`<p><strong>End Date:</strong> ${new Date(f.endDate).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'})}</p>`:''}
-    ${f.validDays?`<p><strong>Quote Valid:</strong> ${f.validDays} days from issue</p>`:''}
+    ${f.hireDuration?'<p><strong>Duration:</strong> '+f.hireDuration+' '+f.hireDurationUnit+'</p>':''}
+    ${f.startDate?'<p><strong>Start Date:</strong> '+new Date(f.startDate).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'})+'</p>':''}
+    ${f.endDate?'<p><strong>End Date:</strong> '+new Date(f.endDate).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'})+'</p>':''}
+    ${f.validDays?'<p><strong>Quote Valid:</strong> '+f.validDays+' days from issue</p>':''}
   </div>
 </div>
-${f.validDays?`<div class="validity">⚠️ This quotation is valid for <strong>${f.validDays} days</strong> from the issue date. Rates are subject to change after this period.</div>`:''}
+${f.validDays?'<div class="validity">⚠️ This quotation is valid for <strong>'+f.validDays+' days</strong> from the issue date. Rates are subject to change after this period.</div>':''}
 <h2>Vehicle Details</h2>
 <table>
-${f.truckDesc?`<tr><td>Truck</td><td>${f.truckDesc}</td></tr>`:''}
-${f.trailerDesc?`<tr><td>Trailer</td><td>${f.trailerDesc}</td></tr>`:''}
+${f.truckDesc?'<tr><td>Truck</td><td>'+f.truckDesc+'</td></tr>':''}
+${f.trailerDesc?'<tr><td>Trailer</td><td>'+f.trailerDesc+'</td></tr>':''}
 </table>
 <h2>${(f.chargeType==='monthly'&&!f.weeklyRate)?'Lease Charges':'Hire Charges'}</h2>
 <table>
-${chargeRows.map(([l,v])=>`<tr><td>${l}</td><td>${v}</td></tr>`).join('')}
+${chargeRows.map(([l,v])=>'<tr><td>'+l+'</td><td>'+v+'</td></tr>').join('')}
 </table>
-${extraRows.length>0?`<h2>Alternative Lease Terms</h2><table>${extraRows.map(([l,v])=>`<tr><td>${l}</td><td>${v}</td></tr>`).join('')}</table>`:''}
+${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l,v])=>'<tr><td>'+l+'</td><td>'+v+'</td></tr>').join('')+'</table>':''}
 <h2>Notes & Conditions</h2>
 <div class="notes">${f.notes.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
 <div class="sig-block">
@@ -2362,6 +2362,7 @@ ${extraRows.length>0?`<h2>Alternative Lease Terms</h2><table>${extraRows.map(([l
       {sel&&<HireModal h={sel} onClose={()=>setSel(null)}/>}
       {showNew&&<NewHireModal onClose={()=>setShowNew(false)}/>}
       </>}
+
 
       {/* ── QUOTES TAB ───────────────────────────────── */}
       {pageTab==='quotes' && (
