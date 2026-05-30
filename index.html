@@ -461,8 +461,10 @@ const pullHiresFromSheet = (rows) => {
 
 // Pull customer changes from Google Sheets
 const pullCustomersFromSheet = (rows) => {
-  if (!rows || rows.length < 2) return 0;
+  if (!rows || rows.length < 2) { console.log('[Customers Sync] No rows or only header'); return 0; }
   const headers = rows[0].map(h => (h||'').trim());
+  console.log('[Customers Sync] Headers found:', headers);
+  console.log('[Customers Sync] Total rows (incl header):', rows.length);
   const col = (name) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
   const idIdx      = col('ID');
   const compIdx    = col('Company');
@@ -499,6 +501,7 @@ const pullCustomersFromSheet = (rows) => {
       }
     } else {
       // New customer from sheet — add to localStorage
+      console.log('[Customers Sync] NEW customer found in sheet:', company, '| id:', id);
       const newId = id || ('CS' + String(Date.now() + addedNew).slice(-6));
       const newCust = {
         id: newId,
@@ -523,6 +526,7 @@ const pullCustomersFromSheet = (rows) => {
   });
 
   if (addedNew > 0) saveNewCustomers(existingNewCusts);
+  console.log('[Customers Sync] Updated:', updated, '| Added new:', addedNew);
   return updated + addedNew;
 };
 
