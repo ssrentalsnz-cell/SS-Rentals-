@@ -461,12 +461,14 @@ const pullHiresFromSheet = (rows) => {
 
 // Pull customer changes from Google Sheets
 const pullCustomersFromSheet = (rows) => {
-  if (!rows || rows.length < 2) { console.log('[Customers Sync] No rows or only header'); return 0; }
+  if (!rows || rows.length < 2) return 0;
   const headers = rows[0].map(h => (h||'').trim());
-  console.log('[Customers Sync] Headers found:', headers);
-  console.log('[Customers Sync] Total rows (incl header):', rows.length);
-  console.log('[Customers Sync] All rows preview:', rows.slice(1).map(r => r[0]+' | '+r[1]));
-  const col = (name) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
+  const col = (name) => {
+    // Try exact match first, then case-insensitive
+    let i = headers.findIndex(h => h === name);
+    if (i === -1) i = headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
+    return i;
+  };
   const idIdx      = col('ID');
   const compIdx    = col('Company');
   const contIdx    = col('Contact');
@@ -476,67 +478,64 @@ const pullCustomersFromSheet = (rows) => {
   const statusIdx  = col('Status');
   const outIdx     = col('Outstanding');
   const notesIdx   = col('Notes');
-  const truckIdx   = col('Truck');
-  const trailerIdx = col('Trailer');
-  if (idIdx === -1 && compIdx === -1) return 0;
+
+  // Build a fresh map of all known companies (lowercase) -> customer
+  const allCusts = getAllCustomers();
+  const byCompany = {};
+  allCusts.forEach(c => { byCompany[c.company.toLowerCase().trim()] = c; });
+  const byId = {};
+  allCusts.forEach(c => { if (c.id) byId[c.id] = c; });
 
   const existingNewCusts = loadNewCustomers();
-  const allKnownIds = new Set([...CUSTOMERS.map(c=>c.id), ...existingNewCusts.map(c=>c.id)]);
-  const allKnownCompanies = new Set(getAllCustomers().map(c=>c.company.toLowerCase().trim()));
   let updated = 0;
   let addedNew = 0;
 
-  rows.slice(1).forEach(row => {
-    if (!row || row.every(c => !c)) return; // skip empty rows
-    const id = idIdx !== -1 ? (row[idIdx]||'').trim() : '';
-    const company = compIdx !== -1 ? (row[compIdx]||'').trim() : '';
-    if (!company) return; // must have a company name
+  rows.slice(1).forEach((row, rowIdx) => {
+    if (!row || row.every(c => !c)) return;
+    const id      = idIdx  >= 0 ? (row[idIdx]||'').toString().trim()  : '';
+    const company = compIdx >= 0 ? (row[compIdx]||'').toString().trim() : '';
+    if (!company) return;
 
-    if (id && allKnownIds.has(id)) {
-      // Update existing customer — check both hardcoded and new customers
-      const cust = CUSTOMERS.find(c => c.id === id);
-      if (cust) {
-        if (outIdx !== -1 && row[outIdx] !== undefined) { const v = parseFloat(row[outIdx]); if (!isNaN(v)) cust.outstanding = v; }
-        if (notesIdx !== -1 && row[notesIdx] !== undefined) cust.notes = row[notesIdx];
-        if (statusIdx !== -1 && row[statusIdx]) cust.status = row[statusIdx];
-        updated++;
+    const compKey = company.toLowerCase().trim();
+    const existingById = id ? byId[id] : null;
+    const existingByName = byCompany[compKey];
+    const existing = existingById || existingByName;
+
+    if (existing) {
+      // Update fields on existing customer
+      if (outIdx >= 0 && row[outIdx] !== undefined && row[outIdx] !== '') {
+        const v = parseFloat(row[outIdx]); if (!isNaN(v)) existing.outstanding = v;
       }
-      // else: ID is known (new customer already in localStorage) — no action needed
+      if (notesIdx >= 0 && row[notesIdx] !== undefined) existing.notes = row[notesIdx];
+      if (statusIdx >= 0 && row[statusIdx]) existing.status = row[statusIdx].toLowerCase().trim();
+      updated++;
     } else {
-      // Check by company name too — avoid duplicates
-      const alreadyExists = getAllCustomers().some(c =>
-        c.company.toLowerCase().trim() === company.toLowerCase().trim()
-      );
-      if (!alreadyExists) {
-        console.log('[Customers Sync] NEW customer found in sheet:', company, '| id:', id);
-        const newId = id || ('CS' + String(Date.now() + addedNew).slice(-6));
-        const newCust = {
-          id: newId,
-          company,
-          contact:  contIdx  !== -1 ? (row[contIdx]||'').trim()  : '',
-          phone:    phoneIdx !== -1 ? (row[phoneIdx]||'').trim()  : '',
-          email:    emailIdx !== -1 ? (row[emailIdx]||'').trim()  : '',
-          address:  addressIdx !== -1 ? (row[addressIdx]||'').trim() : '',
-          status:   statusIdx !== -1 && row[statusIdx] ? row[statusIdx].trim().toLowerCase() : 'active',
-          outstanding: outIdx !== -1 ? (parseFloat(row[outIdx])||0) : 0,
-          notes:    notesIdx !== -1 ? (row[notesIdx]||'').trim()  : '',
-          truck:    truckIdx !== -1 ? (row[truckIdx]||'').trim()  : '',
-          trailer:  trailerIdx !== -1 ? (row[trailerIdx]||'').trim() : '',
-          credit_rating:'B+', ytd_revenue:0, weekly_truck:0, weekly_trailer:0,
-          payment_terms:'Weekly', joined: new Date().toISOString().slice(0,10),
-          _fromSheet: true,
-        };
-        existingNewCusts.push(newCust);
-        allKnownIds.add(newId);
-        addedNew++;
-      } else {
-        console.log('[Customers Sync] Skipping duplicate company name:', company);
-      }
+      // Genuinely new customer — not in app at all
+      const newId = id || ('CS' + String(Date.now() + rowIdx).slice(-6));
+      const newCust = {
+        id: newId, company,
+        contact:  contIdx  >= 0 ? (row[contIdx]||'').toString().trim()  : '',
+        phone:    phoneIdx >= 0 ? (row[phoneIdx]||'').toString().trim()  : '',
+        email:    emailIdx >= 0 ? (row[emailIdx]||'').toString().trim()  : '',
+        address:  addressIdx >= 0 ? (row[addressIdx]||'').toString().trim() : '',
+        status:   statusIdx >= 0 && row[statusIdx] ? row[statusIdx].toString().toLowerCase().trim() : 'active',
+        outstanding: outIdx >= 0 ? (parseFloat(row[outIdx])||0) : 0,
+        notes:    notesIdx >= 0 ? (row[notesIdx]||'').toString().trim() : '',
+        credit_rating:'B+', ytd_revenue:0, weekly_truck:0, weekly_trailer:0,
+        payment_terms:'Weekly', joined: new Date().toISOString().slice(0,10),
+        _fromSheet: true,
+      };
+      existingNewCusts.push(newCust);
+      byCompany[compKey] = newCust;
+      byId[newId] = newCust;
+      addedNew++;
     }
   });
 
-  if (addedNew > 0) saveNewCustomers(existingNewCusts);
-  console.log('[Customers Sync] Updated:', updated, '| Added new:', addedNew);
+  if (addedNew > 0) {
+    saveNewCustomers(existingNewCusts);
+    console.log('[Customers Sync] Added', addedNew, 'new customer(s) from sheet');
+  }
   return updated + addedNew;
 };
 
@@ -6665,7 +6664,7 @@ const App = () => {
     await runFullSync(
       config,
       (msg,pct)=>setSyncState(s=>({...s,syncMsg:msg,syncPct:pct})),
-      (ts)=>{setSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',syncPct:0}));syncInProgress.current=false;setDataRefreshKey(k=>k+1);},
+      (ts)=>{setSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',syncPct:0}));syncInProgress.current=false;setDataRefreshKey(k=>k+1+Math.random());},
       (err)=>{setSyncState(s=>({...s,syncing:false,error:err,syncMsg:'',syncPct:0}));syncInProgress.current=false;}
     );
   },[sheetsConfig]);
