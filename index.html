@@ -5114,14 +5114,7 @@ td:last-child{font-size:11pt}
 <tr><td>Certificate of Fitness (COF) Expires</td><td>${d.truckCOF}</td></tr>
 <tr><td>Registration Expires</td><td>${d.truckRego2}</td></tr></table>
 
-${d.trailerRego ? `<h2>2. TRAILER DESCRIPTION</h2>
-<table><tr><td>Manufacturer</td><td>${d.trailerMake}</td></tr>
-<tr><td>Year of Manufacture</td><td>${d.trailerYear}</td></tr>
-<tr><td>Registration Number</td><td>${d.trailerRego}</td></tr>
-<tr><td>Description</td><td>${d.trailerDesc}</td></tr>
-<tr><td>Colour</td><td>${d.trailerColour||'White'}</td></tr>
-<tr><td>Certificate of Fitness (COF) Expires</td><td>${d.trailerCOF}</td></tr>
-<tr><td>Registration Expires</td><td>${d.trailerRegoExp}</td></tr></table>` : ''}
+${d.trailerRego ? '<h2>2. TRAILER DESCRIPTION</h2><table><tr><td>Manufacturer</td><td>'+d.trailerMake+'</td></tr><tr><td>Year of Manufacture</td><td>'+d.trailerYear+'</td></tr><tr><td>Registration Number</td><td>'+d.trailerRego+'</td></tr><tr><td>Description</td><td>'+d.trailerDesc+'</td></tr><tr><td>Colour</td><td>'+(d.trailerColour||'White')+'</td></tr><tr><td>Certificate of Fitness (COF) Expires</td><td>'+d.trailerCOF+'</td></tr><tr><td>Registration Expires</td><td>'+d.trailerRegoExp+'</td></tr></table>' : ''}
 
 <h2>${d.trailerRego?'3':'2'}. TRUCK LOCATION</h2>
 <table><tr><td>Originating Premises</td><td>280a Peak Road, Cambridge</td></tr>
