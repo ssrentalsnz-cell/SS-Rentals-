@@ -4784,57 +4784,405 @@ p{margin:5px 0}
 </div>
 </body></html>`;
 };
-/* ─── DOCUMENTS PAGE ──────────────────────────────── */
+/* ─── DOCUMENTS PAGE ────────────────────────────────── */
+const LEASE_AGREEMENTS_KEY = 'ss_rentals_lease_agreements';
+const loadLeaseAgreements = () => { try { return JSON.parse(localStorage.getItem(LEASE_AGREEMENTS_KEY)||'[]'); } catch { return []; } };
+const saveLeaseAgreements = docs => localStorage.setItem(LEASE_AGREEMENTS_KEY, JSON.stringify(docs));
+
 const DocumentsPage = () => {
-  const [search,setSearch]=useState('');
-  const [typeFilter,setTypeFilter]=useState('all');
-  const types=['all','Lease Agreement','Hire Agreement','Insurance','COF','Registration','Vehicle Schedule'];
-  const docLog = loadDocLog();
-  const generatedDocs = docLog.map(d=>({
-    id:d.id, name:(d.type==='schedule'?'Schedule':'Lease Agreement')+' — '+(d.customer||'Unknown')+' ('+d.hireId+')',
-    type:'Lease Agreement', size:'Generated', date:d.generatedAt?.slice(0,10)||'', signed:false,
-    _data:d
-  }));
-  const allDocs = [...generatedDocs, ...DOCUMENTS];
-  const filtered = allDocs.filter(d=>(typeFilter==='all'||d.type===typeFilter)&&d.name.toLowerCase().includes(search.toLowerCase()));
-  const icons={Hire:'invoice',Insurance:'check',COF:'documents',Registration:'documents',Vehicle:'fleet'};
+  const [tab, setTab] = React.useState('library');
+  const [search, setSearch] = React.useState('');
+  const [typeFilter, setTypeFilter] = React.useState('all');
+  const [leaseStep, setLeaseStep] = React.useState(1);
+  const [savedAgreements, setSavedAgreements] = React.useState(loadLeaseAgreements);
+
+  const emptyLease = () => ({
+    companyName:'',contactName:'',contactPhone:'',contactEmail:'',address:'',
+    guarantorName:'',guarantorAddress:'',guarantorPhone:'',
+    truckRego:'',truckMake:'',truckModel:'',truckYear:'',truckVIN:'',truckColour:'White',truckCOF:'',truckRegoExp:'',
+    trailerRego:'',trailerMake:'',trailerYear:'',trailerCOF:'',trailerRegoExp:'',
+    startDate:'',endDate:'',weeklyRate:'',mileageRate:'0.18',rucRate:'0.062',bond:'5000',maxMileage:'',
+    docType:'Truck and Trailer Lease Agreement',notes:'',
+  });
+  const [form, setForm] = React.useState(emptyLease);
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const fmtDocDate = s => {
+    if (!s) return '';
+    const d = new Date(s);
+    if (isNaN(d)) return s;
+    return d.toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'});
+  };
+
+  const buildDocData = () => ({
+    hireId: 'LA-' + Date.now(),
+    agreementDate: fmtDocDate(new Date().toISOString().slice(0,10)),
+    hirerCompany: form.companyName,
+    hirerContact: form.contactName,
+    startDate: fmtDocDate(form.startDate),
+    endDate: fmtDocDate(form.endDate),
+    weeklyRate: parseFloat(form.weeklyRate||0).toLocaleString('en-NZ',{minimumFractionDigits:2}),
+    weeklyTrailer: '0.00',
+    mileageRate: form.mileageRate,
+    rucRate: form.rucRate,
+    bond: parseFloat(form.bond||0).toLocaleString('en-NZ',{minimumFractionDigits:2}),
+    maxMileage: form.maxMileage,
+    truckMake: form.truckMake, truckModel: form.truckModel, truckYear: form.truckYear,
+    truckRego: form.truckRego, truckRego2: form.truckRegoExp, truckVIN: form.truckVIN,
+    truckDesc: `${form.truckMake} ${form.truckModel}`, truckColour: form.truckColour||'White',
+    truckCOF: fmtDocDate(form.truckCOF),
+    trailerMake: form.trailerMake, trailerModel: '', trailerYear: form.trailerYear,
+    trailerRego: form.trailerRego, trailerRegoExp: fmtDocDate(form.trailerRegoExp),
+    trailerDesc: form.trailerMake||'', trailerColour: 'White',
+    trailerCOF: fmtDocDate(form.trailerCOF),
+    guarantorName: form.guarantorName,
+    guarantorAddress: form.guarantorAddress,
+    guarantorPhone: form.guarantorPhone,
+    docTitle: form.docType,
+  });
+
+  const handleDownload = (type) => {
+    const d = buildDocData();
+    const label = type==='schedule' ? 'Truck_Schedule' : d.docTitle.replace(/\s+/g,'_');
+    const filename = `${label}_${(form.companyName||'Draft').replace(/\s+/g,'_')}.pdf`;
+    const html = type==='schedule' ? generateScheduleHTML(d) : generateAgreementHTML(d);
+    const printHTML = html.replace('</head>', `<script>window.onload=function(){document.title='${filename.replace('.pdf','')}';setTimeout(function(){window.print();},400);};<\/script><style>@media print{@page{size:A4;margin:1.5cm}body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style></head>`);
+    const win = window.open('', '_blank');
+    if (!win) { alert('Please allow pop-ups for this site.'); return; }
+    win.document.write(printHTML); win.document.close();
+  };
+
+  const handleSave = () => {
+    if (!form.companyName) { alert('Please enter a company name.'); return; }
+    const rec = { id:'LA-'+Date.now(), savedAt:new Date().toISOString(), form:{...form} };
+    const updated = [rec, ...savedAgreements];
+    setSavedAgreements(updated); saveLeaseAgreements(updated);
+    alert('Saved to Documents!');
+  };
+
+  const handleLoad = (rec) => {
+    setForm({...emptyLease(),...rec.form}); setLeaseStep(1); setTab('lease-builder');
+  };
+
+  const handleDelete = (id) => {
+    const updated = savedAgreements.filter(a=>a.id!==id);
+    setSavedAgreements(updated); saveLeaseAgreements(updated);
+  };
+
+  const tabStyle = t => ({
+    padding:'10px 18px',border:'none',cursor:'pointer',fontSize:13,fontWeight:tab===t?700:500,
+    borderBottom:tab===t?'2px solid #6A1B9A':'2px solid transparent',
+    background:'none',color:tab===t?'#6A1B9A':'var(--text2)',transition:'all .15s',whiteSpace:'nowrap',
+  });
+
+  const inputRow = (k,l,type='text',ph='') => (
+    <div key={k} className="form-group" style={{marginBottom:0}}>
+      <label className="form-label">{l}</label>
+      <input className="form-control" type={type} placeholder={ph} value={form[k]||''} onChange={e=>set(k,e.target.value)}/>
+    </div>
+  );
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex gap-2">
-          <input style={{width:240}} placeholder="Search documents…" value={search} onChange={e=>setSearch(e.target.value)}/>
-          <select style={{width:180}} value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
-            {types.map(t=><option key={t}>{t}</option>)}
-          </select>
-        </div>
-        <button className="btn btn-primary"><Icon name="plus" size={14}/> Upload Document</button>
+      <div style={{display:'flex',borderBottom:'1px solid var(--border)',marginBottom:20,overflowX:'auto'}}>
+        <button style={tabStyle('library')} onClick={()=>setTab('library')}>📁 Document Library</button>
+        <button style={tabStyle('lease-builder')} onClick={()=>setTab('lease-builder')}>📝 New Lease Agreement</button>
+        <button style={tabStyle('saved')} onClick={()=>setTab('saved')}>
+          💾 Saved Agreements
+          {savedAgreements.length>0&&<span style={{marginLeft:6,background:'#6A1B9A',color:'#fff',borderRadius:10,padding:'1px 7px',fontSize:10,verticalAlign:'middle'}}>{savedAgreements.length}</span>}
+        </button>
       </div>
-      <div className="grid grid-4 mb-4">
-        {[{l:'Total Documents',v:allDocs.length},{l:'Lease Agreements',v:generatedDocs.length},{l:'Signed',v:DOCUMENTS.filter(d=>d.signed).length},{l:'Expiring Soon',v:2}].map(k=>(
-          <div key={k.l} className="card card-sm"><div className="kpi-label">{k.l}</div><div style={{fontSize:22,fontWeight:800,marginTop:4}}>{k.v}</div></div>
-        ))}
-      </div>
-      <div className="grid grid-auto">
-        {filtered.map(d=>(
-          <div key={d.id} className="card card-sm" style={{cursor:'pointer',transition:'border .15s'}} onMouseEnter={e=>e.currentTarget.style.borderColor='var(--red)'} onMouseLeave={e=>e.currentTarget.style.borderColor='var(--border)'}>
-            <div style={{width:44,height:44,borderRadius:10,background:'rgba(217,43,43,.12)',display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12}}>
-              <Icon name="documents" size={22} color="var(--red)"/>
-            </div>
-            <div style={{fontWeight:700,fontSize:13,marginBottom:4,lineHeight:1.4}}>{d.name}</div>
-            <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>{d.type} · {d.size}</div>
-            <div style={{fontSize:11,color:'var(--text3)',marginBottom:10}}>{fmt(d.date)}{d.customer?' · '+custName(d.customer):''}</div>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              {d.signed?<span className="badge badge-green">Signed</span>:<span className="badge badge-gray">Unsigned</span>}
-              <button className="btn btn-ghost btn-sm"><Icon name="download" size={13}/></button>
-            </div>
+
+      {/* ── LIBRARY TAB ─────────────────────────────── */}
+      {tab==='library' && (
+        <div>
+          <div className="grid grid-4 mb-4">
+            {[{l:'Total Documents',v:DOCUMENTS.length},{l:'Saved Lease Agreements',v:savedAgreements.length},{l:'Signed',v:DOCUMENTS.filter(d=>d.signed).length},{l:'Expiring Soon',v:2}].map(k=>(
+              <div key={k.l} className="card card-sm"><div className="kpi-label">{k.l}</div><div style={{fontSize:22,fontWeight:800,marginTop:4}}>{k.v}</div></div>
+            ))}
           </div>
-        ))}
-      </div>
+          <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap'}}>
+            <input style={{width:220}} placeholder="Search documents..." value={search} onChange={e=>setSearch(e.target.value)}/>
+            <select style={{width:160}} value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
+              {['all','Hire Agreement','Insurance','COF','Registration','Vehicle Schedule'].map(t=><option key={t}>{t}</option>)}
+            </select>
+            <div style={{flex:1}}/>
+            <button className="btn btn-primary" onClick={()=>{setForm(emptyLease());setLeaseStep(1);setTab('lease-builder');}}>
+              <Icon name="plus" size={14}/> New Lease Agreement
+            </button>
+          </div>
+          <div className="grid grid-auto">
+            {DOCUMENTS.filter(d=>(typeFilter==='all'||d.type===typeFilter)&&d.name.toLowerCase().includes(search.toLowerCase())).map(d=>(
+              <div key={d.id} className="card card-sm" style={{cursor:'pointer'}}>
+                <div style={{width:44,height:44,borderRadius:10,background:'rgba(217,43,43,.12)',display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12}}>
+                  <Icon name="documents" size={22} color="var(--red)"/>
+                </div>
+                <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{d.name}</div>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>{d.type} · {d.size}</div>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  {d.signed?<span className="badge badge-green">Signed</span>:<span className="badge badge-gray">Unsigned</span>}
+                  <button className="btn btn-ghost btn-sm"><Icon name="download" size={13}/></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── LEASE BUILDER TAB ───────────────────────── */}
+      {tab==='lease-builder' && (
+        <div>
+          {/* Step tabs */}
+          <div style={{display:'flex',gap:0,marginBottom:20,background:'var(--bg3)',borderRadius:10,padding:4}}>
+            {[{n:1,l:'Customer'},{n:2,l:'Vehicle'},{n:3,l:'Terms'},{n:4,l:'Guarantee'},{n:5,l:'Download'}].map(s=>(
+              <button key={s.n} onClick={()=>setLeaseStep(s.n)} style={{
+                flex:1,padding:'8px 6px',border:'none',cursor:'pointer',borderRadius:7,fontSize:12,
+                fontWeight:leaseStep===s.n?700:500,
+                background:leaseStep===s.n?'var(--card)':'transparent',
+                color:leaseStep===s.n?'#6A1B9A':'var(--text3)',
+                boxShadow:leaseStep===s.n?'0 1px 4px rgba(0,0,0,.12)':'none',transition:'all .15s',
+              }}>{s.n}. {s.l}</button>
+            ))}
+          </div>
+
+          {/* Step 1 — Customer */}
+          {leaseStep===1&&(
+            <div className="card">
+              <div className="card-header"><span className="card-title">Step 1 — Customer / Hirer Details</span></div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:16}}>
+                {inputRow('companyName','Company / Business Name *')}
+                {inputRow('contactName','Contact Person *')}
+                {inputRow('contactPhone','Phone Number')}
+                {inputRow('contactEmail','Email Address','email')}
+                <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
+                  <label className="form-label">Address</label>
+                  <input className="form-control" value={form.address||''} onChange={e=>set('address',e.target.value)}/>
+                </div>
+              </div>
+              <div style={{padding:'12px 14px',background:'var(--bg3)',borderRadius:8,marginBottom:16}}>
+                <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:8}}>Quick-fill from existing customer:</div>
+                <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                  {getAllCustomers().filter(c=>c.status!=='blacklisted').map(c=>(
+                    <button key={c.id} className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>setForm(f=>({...f,
+                      companyName:c.company,contactName:c.contact,contactPhone:c.phone,
+                      contactEmail:c.email||'',address:c.address||'',
+                    }))}>{c.company}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{display:'flex',justifyContent:'flex-end'}}>
+                <button className="btn btn-primary" onClick={()=>setLeaseStep(2)}>Next: Vehicle Details →</button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2 — Vehicle */}
+          {leaseStep===2&&(
+            <div className="card">
+              <div className="card-header"><span className="card-title">Step 2 — Vehicle Details</span></div>
+              <div className="form-group" style={{marginBottom:16}}>
+                <label className="form-label">Agreement Type</label>
+                <select className="form-control" value={form.docType} onChange={e=>set('docType',e.target.value)}>
+                  <option>Truck and Trailer Lease Agreement</option>
+                  <option>Truck Lease Agreement</option>
+                  <option>Trailer Lease Agreement</option>
+                </select>
+              </div>
+              <div style={{fontWeight:700,fontSize:11,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:10}}>Truck Details</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label className="form-label">Registration Number</label>
+                  <select className="form-control" value={form.truckRego} onChange={e=>{
+                    const t=TRUCKS.find(t=>t.rego===e.target.value);
+                    if(t) setForm(f=>({...f,truckRego:t.rego,truckMake:t.make,truckModel:t.model,truckYear:(t.year||'').toString(),truckVIN:t.vin||'',truckCOF:t.cof_expiry||'',truckRegoExp:t.rego_expiry||''}));
+                    else set('truckRego',e.target.value);
+                  }}>
+                    <option value="">Select truck…</option>
+                    {TRUCKS.map(t=><option key={t.id} value={t.rego}>{t.rego} — {t.make} {t.model}</option>)}
+                  </select>
+                </div>
+                {inputRow('truckMake','Make')}
+                {inputRow('truckModel','Model')}
+                {inputRow('truckYear','Year')}
+                {inputRow('truckVIN','VIN Number')}
+                {inputRow('truckColour','Colour')}
+                {inputRow('truckCOF','COF Expiry (YYYY-MM-DD)')}
+                {inputRow('truckRegoExp','Rego Expiry (YYYY-MM-DD)')}
+              </div>
+              {(form.docType==='Truck and Trailer Lease Agreement'||form.docType==='Trailer Lease Agreement')&&(<>
+                <div style={{fontWeight:700,fontSize:11,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:10}}>Trailer Details</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
+                  <div className="form-group" style={{marginBottom:0}}>
+                    <label className="form-label">Trailer Registration</label>
+                    <select className="form-control" value={form.trailerRego} onChange={e=>{
+                      const t=TRAILERS.find(t=>t.rego===e.target.value);
+                      if(t) setForm(f=>({...f,trailerRego:t.rego,trailerMake:t.make,trailerYear:(t.year||'').toString(),trailerCOF:t.cof_expiry||'',trailerRegoExp:t.rego_expiry||''}));
+                      else set('trailerRego',e.target.value);
+                    }}>
+                      <option value="">Select trailer…</option>
+                      {TRAILERS.map(t=><option key={t.id} value={t.rego}>{t.rego} — {t.make}</option>)}
+                    </select>
+                  </div>
+                  {inputRow('trailerMake','Make / Model')}
+                  {inputRow('trailerYear','Year')}
+                  {inputRow('trailerCOF','COF Expiry (YYYY-MM-DD)')}
+                  {inputRow('trailerRegoExp','Rego Expiry (YYYY-MM-DD)')}
+                </div>
+              </>)}
+              <div style={{display:'flex',justifyContent:'space-between'}}>
+                <button className="btn btn-ghost" onClick={()=>setLeaseStep(1)}>← Back</button>
+                <button className="btn btn-primary" onClick={()=>setLeaseStep(3)}>Next: Lease Terms →</button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3 — Terms */}
+          {leaseStep===3&&(
+            <div className="card">
+              <div className="card-header"><span className="card-title">Step 3 — Lease Terms & Rates</span></div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:16}}>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label className="form-label">Commencement Date</label>
+                  <input className="form-control" type="date" value={form.startDate} onChange={e=>set('startDate',e.target.value)}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label className="form-label">Return / End Date</label>
+                  <input className="form-control" type="date" value={form.endDate} onChange={e=>set('endDate',e.target.value)}/>
+                </div>
+                {inputRow('weeklyRate','Weekly Rate (NZD, excl. GST)','number')}
+                {inputRow('bond','Bond Amount (NZD)','number')}
+                {inputRow('mileageRate','Mileage Rate ($/km)','number')}
+                {inputRow('rucRate','RUC Rate ($/km)','number')}
+                <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
+                  <label className="form-label">Maximum Mileage <span style={{fontWeight:400,color:'var(--text3)'}}>— appears on schedule (e.g. 130,000 km p.a.)</span></label>
+                  <input className="form-control" placeholder="Leave blank for default" value={form.maxMileage} onChange={e=>set('maxMileage',e.target.value)}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
+                  <label className="form-label">Additional Notes</label>
+                  <textarea className="form-control" rows={2} value={form.notes} onChange={e=>set('notes',e.target.value)} style={{resize:'vertical'}}/>
+                </div>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between'}}>
+                <button className="btn btn-ghost" onClick={()=>setLeaseStep(2)}>← Back</button>
+                <button className="btn btn-primary" onClick={()=>setLeaseStep(4)}>Next: Personal Guarantee →</button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4 — Guarantee */}
+          {leaseStep===4&&(
+            <div className="card">
+              <div className="card-header"><span className="card-title">Step 4 — Personal Guarantee</span></div>
+              <div style={{padding:'12px 14px',background:'rgba(106,27,154,0.07)',border:'1px solid rgba(106,27,154,0.2)',borderRadius:8,marginBottom:16,fontSize:12,color:'var(--text2)'}}>
+                The guarantor is jointly and severally liable for all obligations. These details appear in the Personal Guarantee clause.
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:16}}>
+                <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}><label className="form-label">Guarantor Full Name</label><input className="form-control" value={form.guarantorName||''} onChange={e=>set('guarantorName',e.target.value)}/></div>
+                <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}><label className="form-label">Guarantor Address</label><input className="form-control" value={form.guarantorAddress||''} onChange={e=>set('guarantorAddress',e.target.value)}/></div>
+                {inputRow('guarantorPhone','Guarantor Phone')}
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between'}}>
+                <button className="btn btn-ghost" onClick={()=>setLeaseStep(3)}>← Back</button>
+                <button className="btn btn-primary" onClick={()=>setLeaseStep(5)}>Next: Review & Download →</button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 5 — Review & Download */}
+          {leaseStep===5&&(
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">Step 5 — Review & Download</span>
+                <span className="badge badge-blue">{form.docType}</span>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:20}}>
+                {[['Company',form.companyName||'—'],['Contact',form.contactName||'—'],['Phone',form.contactPhone||'—'],
+                  ['Truck',form.truckRego?`${form.truckRego} — ${form.truckMake} ${form.truckModel}`:'—'],
+                  ['Trailer',form.trailerRego||'None'],['Weekly Rate',form.weeklyRate?`$${form.weeklyRate}/wk`:'—'],
+                  ['Start Date',fmtDocDate(form.startDate)||'—'],['End Date',fmtDocDate(form.endDate)||'—'],['Bond',`$${form.bond}`],
+                  ['Mileage Rate',`$${form.mileageRate}/km`],['RUC Rate',`$${form.rucRate}/km`],['Guarantor',form.guarantorName||'—'],
+                ].map(([l,v])=>(
+                  <div key={l} style={{padding:'8px 10px',background:'var(--bg3)',borderRadius:7}}>
+                    <div style={{fontSize:10,color:'var(--text3)',marginBottom:2}}>{l}</div>
+                    <div style={{fontWeight:700,fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {!form.companyName&&<div style={{padding:'10px 14px',background:'rgba(255,111,0,0.1)',border:'1px solid rgba(255,111,0,0.3)',borderRadius:8,marginBottom:16,fontSize:13,color:'#FF6F00'}}>⚠️ Company name is required.</div>}
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+                <button className="btn btn-primary" onClick={()=>handleDownload('agreement')} style={{justifyContent:'center'}} disabled={!form.companyName}>
+                  <Icon name="download" size={14}/> Download Lease Agreement (PDF)
+                </button>
+                <button className="btn btn-primary" onClick={()=>handleDownload('schedule')} style={{justifyContent:'center'}} disabled={!form.companyName}>
+                  <Icon name="download" size={14}/> Download Truck Schedule (PDF)
+                </button>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+                <button className="btn btn-ghost" onClick={handleSave} style={{justifyContent:'center',borderColor:'#27AE60',color:'#27AE60'}}>
+                  💾 Save to Documents
+                </button>
+                <button className="btn btn-ghost" onClick={()=>{setForm(emptyLease());setLeaseStep(1);}} style={{justifyContent:'center'}}>
+                  🔄 Start New Agreement
+                </button>
+              </div>
+              <div><button className="btn btn-ghost" onClick={()=>setLeaseStep(4)}>← Back</button></div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── SAVED AGREEMENTS TAB ─────────────────────── */}
+      {tab==='saved'&&(
+        <div>
+          {savedAgreements.length===0 ? (
+            <div className="card" style={{textAlign:'center',padding:'48px 20px',color:'var(--text3)'}}>
+              <div style={{fontSize:40,marginBottom:12}}>📄</div>
+              <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>No saved lease agreements yet</div>
+              <div style={{fontSize:13,marginBottom:16}}>Create one using the "New Lease Agreement" tab and click "Save to Documents".</div>
+              <button className="btn btn-primary" onClick={()=>setTab('lease-builder')}><Icon name="plus" size={14}/> Create New Lease Agreement</button>
+            </div>
+          ) : (
+            <div>
+              <div style={{display:'flex',justifyContent:'flex-end',marginBottom:16}}>
+                <button className="btn btn-primary" onClick={()=>{setForm(emptyLease());setLeaseStep(1);setTab('lease-builder');}}>
+                  <Icon name="plus" size={14}/> New Lease Agreement
+                </button>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:14}}>
+                {savedAgreements.map(a=>(
+                  <div key={a.id} className="card" style={{padding:'16px 18px'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+                      <div style={{width:40,height:40,borderRadius:9,background:'rgba(106,27,154,0.12)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                        <Icon name="documents" size={20} color="#6A1B9A"/>
+                      </div>
+                      <div style={{flex:1,overflow:'hidden'}}>
+                        <div style={{fontWeight:700,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.form.companyName||'Unnamed'}</div>
+                        <div style={{fontSize:11,color:'var(--text3)'}}>{a.form.docType}</div>
+                      </div>
+                    </div>
+                    <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Contact:</strong> {a.form.contactName||'—'} · {a.form.contactPhone||'—'}</div>
+                    <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Truck:</strong> {a.form.truckRego||'—'} {a.form.truckMake} {a.form.truckModel}</div>
+                    <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Period:</strong> {fmtDocDate(a.form.startDate)||'—'} — {fmtDocDate(a.form.endDate)||'—'}</div>
+                    <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Rate:</strong> ${a.form.weeklyRate||'—'}/wk · Bond: ${a.form.bond||'—'}</div>
+                    <div style={{fontSize:10,color:'var(--text3)',marginBottom:12}}>Saved: {new Date(a.savedAt).toLocaleDateString('en-NZ')}</div>
+                    <div style={{display:'flex',gap:8}}>
+                      <button className="btn btn-primary btn-sm" style={{flex:1,justifyContent:'center'}} onClick={()=>handleLoad(a)}>
+                        <Icon name="edit" size={12}/> Open & Edit
+                      </button>
+                      <button className="btn btn-ghost btn-sm" style={{color:'#d32f2f',borderColor:'#d32f2f'}} onClick={()=>{if(window.confirm('Delete this saved agreement?'))handleDelete(a.id);}}>
+                        <Icon name="close" size={12}/>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
-
 /* ─── NAVMAN PAGE ─────────────────────────────────── */
 const NAVMAN_DATA_KEY = 'ss_rentals_navman_data';
 const loadNavmanData = () => { try { return JSON.parse(localStorage.getItem(NAVMAN_DATA_KEY)||'null'); } catch { return null; } };
