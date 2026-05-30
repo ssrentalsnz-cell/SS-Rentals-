@@ -465,6 +465,7 @@ const pullCustomersFromSheet = (rows) => {
   const headers = rows[0].map(h => (h||'').trim());
   console.log('[Customers Sync] Headers found:', headers);
   console.log('[Customers Sync] Total rows (incl header):', rows.length);
+  console.log('[Customers Sync] All rows preview:', rows.slice(1).map(r => r[0]+' | '+r[1]));
   const col = (name) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
   const idIdx      = col('ID');
   const compIdx    = col('Company');
@@ -481,6 +482,7 @@ const pullCustomersFromSheet = (rows) => {
 
   const existingNewCusts = loadNewCustomers();
   const allKnownIds = new Set([...CUSTOMERS.map(c=>c.id), ...existingNewCusts.map(c=>c.id)]);
+  const allKnownCompanies = new Set(getAllCustomers().map(c=>c.company.toLowerCase().trim()));
   let updated = 0;
   let addedNew = 0;
 
@@ -491,7 +493,7 @@ const pullCustomersFromSheet = (rows) => {
     if (!company) return; // must have a company name
 
     if (id && allKnownIds.has(id)) {
-      // Update existing customer fields
+      // Update existing customer — check both hardcoded and new customers
       const cust = CUSTOMERS.find(c => c.id === id);
       if (cust) {
         if (outIdx !== -1 && row[outIdx] !== undefined) { const v = parseFloat(row[outIdx]); if (!isNaN(v)) cust.outstanding = v; }
@@ -499,29 +501,37 @@ const pullCustomersFromSheet = (rows) => {
         if (statusIdx !== -1 && row[statusIdx]) cust.status = row[statusIdx];
         updated++;
       }
+      // else: ID is known (new customer already in localStorage) — no action needed
     } else {
-      // New customer from sheet — add to localStorage
-      console.log('[Customers Sync] NEW customer found in sheet:', company, '| id:', id);
-      const newId = id || ('CS' + String(Date.now() + addedNew).slice(-6));
-      const newCust = {
-        id: newId,
-        company,
-        contact:  contIdx  !== -1 ? (row[contIdx]||'').trim()  : '',
-        phone:    phoneIdx !== -1 ? (row[phoneIdx]||'').trim()  : '',
-        email:    emailIdx !== -1 ? (row[emailIdx]||'').trim()  : '',
-        address:  addressIdx !== -1 ? (row[addressIdx]||'').trim() : '',
-        status:   statusIdx !== -1 && row[statusIdx] ? row[statusIdx].trim().toLowerCase() : 'active',
-        outstanding: outIdx !== -1 ? (parseFloat(row[outIdx])||0) : 0,
-        notes:    notesIdx !== -1 ? (row[notesIdx]||'').trim()  : '',
-        truck:    truckIdx !== -1 ? (row[truckIdx]||'').trim()  : '',
-        trailer:  trailerIdx !== -1 ? (row[trailerIdx]||'').trim() : '',
-        credit_rating:'B+', ytd_revenue:0, weekly_truck:0, weekly_trailer:0,
-        payment_terms:'Weekly', joined: new Date().toISOString().slice(0,10),
-        _fromSheet: true,
-      };
-      existingNewCusts.push(newCust);
-      allKnownIds.add(newId);
-      addedNew++;
+      // Check by company name too — avoid duplicates
+      const alreadyExists = getAllCustomers().some(c =>
+        c.company.toLowerCase().trim() === company.toLowerCase().trim()
+      );
+      if (!alreadyExists) {
+        console.log('[Customers Sync] NEW customer found in sheet:', company, '| id:', id);
+        const newId = id || ('CS' + String(Date.now() + addedNew).slice(-6));
+        const newCust = {
+          id: newId,
+          company,
+          contact:  contIdx  !== -1 ? (row[contIdx]||'').trim()  : '',
+          phone:    phoneIdx !== -1 ? (row[phoneIdx]||'').trim()  : '',
+          email:    emailIdx !== -1 ? (row[emailIdx]||'').trim()  : '',
+          address:  addressIdx !== -1 ? (row[addressIdx]||'').trim() : '',
+          status:   statusIdx !== -1 && row[statusIdx] ? row[statusIdx].trim().toLowerCase() : 'active',
+          outstanding: outIdx !== -1 ? (parseFloat(row[outIdx])||0) : 0,
+          notes:    notesIdx !== -1 ? (row[notesIdx]||'').trim()  : '',
+          truck:    truckIdx !== -1 ? (row[truckIdx]||'').trim()  : '',
+          trailer:  trailerIdx !== -1 ? (row[trailerIdx]||'').trim() : '',
+          credit_rating:'B+', ytd_revenue:0, weekly_truck:0, weekly_trailer:0,
+          payment_terms:'Weekly', joined: new Date().toISOString().slice(0,10),
+          _fromSheet: true,
+        };
+        existingNewCusts.push(newCust);
+        allKnownIds.add(newId);
+        addedNew++;
+      } else {
+        console.log('[Customers Sync] Skipping duplicate company name:', company);
+      }
     }
   });
 
