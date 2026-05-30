@@ -326,6 +326,35 @@ const loadSheetsConfig = () => {
 };
 const saveSheetsConfig = cfg => localStorage.setItem(SHEETS_CONFIG_KEY, JSON.stringify(cfg));
 
+// Silently refresh Google access token when expired (no popup if already consented)
+const refreshSheetsToken = (clientId, callback) => {
+  if (!window.google?.accounts?.oauth2) { callback(null); return; }
+  const client = window.google.accounts.oauth2.initTokenClient({
+    client_id: clientId,
+    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    prompt: '',  // empty string = no consent prompt if already granted
+    callback: (resp) => {
+      if (resp.error || !resp.access_token) { callback(null); return; }
+      const cfg = loadSheetsConfig();
+      if (!cfg) { callback(null); return; }
+      const updated = { ...cfg, accessToken: resp.access_token, tokenExpiry: Date.now() + (resp.expires_in||3600)*1000 };
+      saveSheetsConfig(updated);
+      callback(updated);
+    },
+    error_callback: () => callback(null),
+  });
+  client.requestAccessToken();
+};
+
+// Get a valid Sheets config — refreshes token silently if within 5 min of expiry
+const getValidSheetsConfig = (cfg, callback) => {
+  if (!cfg?.clientId || !cfg?.spreadsheetId) { callback(null); return; }
+  const fiveMin = 5 * 60 * 1000;
+  const needsRefresh = !cfg.accessToken || !cfg.tokenExpiry || Date.now() > cfg.tokenExpiry - fiveMin;
+  if (!needsRefresh) { callback(cfg); return; }
+  refreshSheetsToken(cfg.clientId, (refreshed) => callback(refreshed || cfg));
+};
+
 const buildSheetRows = () => ({
   fleet: [
     ['Rego','Make','Model','Year','Type','Status','Odometer','COF Expiry','Rego Expiry','Hirer','Weekly Rate','RUC Balance','Location','Rev YTD','Maint YTD'],
@@ -6036,7 +6065,7 @@ const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xer
               <div style={{flex:1}}>
                 <div style={{fontWeight:700,fontSize:14,marginBottom:2,display:'flex',alignItems:'center',gap:8}}>
                   Google Sheets Live Sync
-                  {sheetsConfig?.accessToken&&<span className="badge badge-green">Connected</span>}
+                  {sheetsConfig?.clientId&&(sheetsConfig?.accessToken && sheetsConfig?.tokenExpiry > Date.now() ? <span className="badge badge-green">Connected</span> : <span className="badge badge-orange">Reconnecting…</span>)}
                 </div>
                 <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}>Auto-syncs fleet, customers, hires, invoices, maintenance &amp; P&L every 5 minutes</div>
                 <div style={{fontSize:11,color:'var(--text3)'}}>
@@ -6180,7 +6209,7 @@ const SheetsSetupModal = ({open, onClose, onSave, initialConfig}) => {
         setStatus({ok:false, msg: err.type==='popup_closed' ? 'Popup was closed — please try again.' : `Error: ${err.type}`});
       }
     });
-    client.requestAccessToken({prompt:'consent'});
+    client.requestAccessToken({prompt: initialConfig?.accessToken ? '' : 'consent'});
   };
 
   if (!open) return null;
@@ -6388,7 +6417,12 @@ const App = () => {
   const doSync = useCallback(async (cfg) => {
     if (syncInProgress.current) return;
     const config = cfg || sheetsConfig;
-    if (!config?.accessToken || !config?.spreadsheetId) return;
+    if (!config?.clientId || !config?.spreadsheetId) return;
+    const fiveMin = 5 * 60 * 1000;
+    if (!config.accessToken || !config.tokenExpiry || Date.now() > config.tokenExpiry - fiveMin) {
+      getValidSheetsConfig(config, (refreshed) => { if (refreshed?.accessToken) setSheetsConfig(refreshed); });
+      return;
+    }
     syncInProgress.current = true;
     setSyncState(s=>({...s,syncing:true,error:null,syncMsg:'Starting…',syncPct:0}));
     await runFullSync(
@@ -6399,14 +6433,28 @@ const App = () => {
     );
   },[sheetsConfig]);
 
-  // 5-minute auto-sync trigger
+  // 5-minute auto-sync trigger + token refresh on load
   useEffect(()=>{
-    if (!sheetsConfig?.accessToken) return;
+    if (!sheetsConfig?.clientId) return;
     if (autoSyncTimer.current) clearInterval(autoSyncTimer.current);
-    doSync(sheetsConfig);
-    autoSyncTimer.current = setInterval(()=>doSync(), 5*60*1000);
+    // On load: silently refresh token first, then sync
+    getValidSheetsConfig(sheetsConfig, (refreshed) => {
+      if (refreshed?.accessToken) {
+        if (refreshed.accessToken !== sheetsConfig.accessToken) setSheetsConfig(refreshed);
+        doSync(refreshed);
+      }
+    });
+    autoSyncTimer.current = setInterval(()=>{
+      const cfg = loadSheetsConfig();
+      getValidSheetsConfig(cfg, (refreshed) => {
+        if (refreshed?.accessToken) {
+          if (refreshed.accessToken !== sheetsConfig?.accessToken) setSheetsConfig(refreshed);
+          doSync(refreshed);
+        }
+      });
+    }, 5*60*1000);
     return ()=>clearInterval(autoSyncTimer.current);
-  },[sheetsConfig]);
+  },[sheetsConfig?.clientId]);
 
   const handleSaveConfig = (cfg) => { saveSheetsConfig(cfg); setSheetsConfig(cfg); };
 
