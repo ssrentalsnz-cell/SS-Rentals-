@@ -962,19 +962,51 @@ const NAV_BASE = [
   {id:'communications',label:'Communications',icon:'chat',section:'finance'},
   {id:'settings',label:'Settings',icon:'settings',section:'system'},
 ];
-const getNavBadges = () => {
+// ── Notification read-state ─────────────────────────────────────
+const NAV_READ_KEY = 'ss_rentals_nav_read';
+const loadReadState = () => { try { return JSON.parse(localStorage.getItem(NAV_READ_KEY)||'{}'); } catch { return {}; } };
+const saveReadState = s => localStorage.setItem(NAV_READ_KEY, JSON.stringify(s));
+
+// Mark a page as read — stores the current alert count + timestamp
+const markPageRead = (pageId, count) => {
+  const s = loadReadState();
+  s[pageId] = { count, readAt: Date.now() };
+  saveReadState(s);
+};
+
+// Returns raw alert counts (what actually needs attention)
+const getRawAlerts = () => {
   const allV = [...TRUCKS,...TRAILERS];
   const effectiveH = getEffectiveHires();
+  const invoices = getInvoices();
   // Fleet: COF/rego expiring within 30 days
-  const fleetAlerts = allV.filter(v=>daysDiff(v.cof_expiry)<=30||daysDiff(v.rego_expiry)<=30).length;
-  // Invoicing: draft + overdue invoices
-  const invoiceAlerts = getInvoices().filter(i=>i.status==='draft'||i.status==='overdue').length;
-  // Maintenance: overdue or scheduled within 30 days
-  const maintAlerts = MAINTENANCE.filter(m=>m.status==='scheduled'&&daysDiff(m.date)<=30).length;
+  const fleet = allV.filter(v=>daysDiff(v.cof_expiry)<=30||daysDiff(v.rego_expiry)<=30).length;
+  // Invoicing: ONLY overdue invoices (not drafts — those are expected)
+  const invoicing = invoices.filter(i=>i.status==='overdue').length;
+  // Maintenance: scheduled within 30 days
+  const maintenance = MAINTENANCE.filter(m=>m.status==='scheduled'&&daysDiff(m.date)<=30).length;
   // Hires: active hires expiring within 7 days
-  const hireAlerts = effectiveH.filter(h=>h.status==='active'&&daysDiff(h.end)<=7&&daysDiff(h.end)>=0).length;
-  const commAlerts = getInvoices().filter(i=>i.status==='overdue').length;
-  return { fleet:fleetAlerts||undefined, invoicing:invoiceAlerts||undefined, maintenance:maintAlerts||undefined, hires:hireAlerts||undefined, communications:commAlerts||undefined };
+  const hires = effectiveH.filter(h=>h.status==='active'&&daysDiff(h.end)<=7&&daysDiff(h.end)>=0).length;
+  // Communications: ONLY genuinely overdue (same as invoicing overdue, not a duplicate count)
+  // Show only if there are overdue invoices that haven't been actioned (30+ days overdue)
+  const communications = invoices.filter(i=>i.status==='overdue'&&Math.abs(daysDiff(i.due))>14).length;
+  return { fleet, invoicing, maintenance, hires, communications };
+};
+
+// Returns badges to show — suppresses badge if user has already seen this count
+const getNavBadges = () => {
+  const raw = getRawAlerts();
+  const readState = loadReadState();
+  const badges = {};
+  Object.entries(raw).forEach(([page, count]) => {
+    if (!count) return;
+    const read = readState[page];
+    // Show badge if: never read, OR count increased since last read
+    if (!read || read.count < count) {
+      badges[page] = count;
+    }
+  });
+  return badges;
 };
 const NAV = NAV_BASE;
 const Sidebar = ({page,setPage}) => {
@@ -994,7 +1026,12 @@ const Sidebar = ({page,setPage}) => {
         <div key={sec} className="sidebar-section">
           <div className="sidebar-section-label">{sec}</div>
           {NAV.filter(n=>n.section===sec).map(n=>(
-            <button key={n.id} className={`nav-item ${page===n.id?'active':''}`} onClick={()=>setPage(n.id)}>
+            <button key={n.id} className={`nav-item ${page===n.id?'active':''}`} onClick={()=>{
+              setPage(n.id);
+              // Clear badge when user clicks the nav item
+              const raw=getRawAlerts();
+              if(raw[n.id]) markPageRead(n.id, raw[n.id]);
+            }}>
               <Icon name={n.icon} size={17}/>
               <span>{n.label}</span>
               {(()=>{const badges=getNavBadges();const b=badges[n.id];return b?<span className="nav-badge">{b}</span>:null;})()}
@@ -6346,6 +6383,12 @@ const App = () => {
   const [showNewHireWizard, setShowNewHireWizard] = useState(false);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
   const [sheetsConfig, setSheetsConfig] = useState(()=>loadSheetsConfig());
+
+  // Clear badge for the current page on load
+  useEffect(()=>{
+    const raw = getRawAlerts();
+    if(raw[page]) markPageRead(page, raw[page]);
+  },[page]);
   const [syncState, setSyncState] = useState({configured:false,syncing:false,lastSync:null,error:null,syncMsg:'',syncPct:0});
   const autoSyncTimer = useRef(null);
   const syncInProgress = useRef(false);
