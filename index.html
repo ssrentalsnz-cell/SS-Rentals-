@@ -1924,46 +1924,24 @@ const QUOTE_TEMPLATES = [
   { id:'QT001', name:'Truck & Trailer Rental Quote', type:'truck_trailer', chargeType:'weekly',
     truckDesc:'2019 Volvo 8x4 Curtainside Truck', trailerDesc:'2017 Domett 5-Axle Curtainside Pull Trailer',
     weeklyRate:2430.58, monthlyRate:0, dailyRate:0, rucRate:0.65, mileageRate:0.30, maxMileage:'130,000 km p.a. (10,833 km/month)',
-    notes:'All prices are in NZD and exclude GST.
-RUC and mileage charges apply on top of weekly hire rates.
-Contract maximum mileage is 130,000 km per annum.
-Quotes exclude GST, fuel, and insurance costs.
-This is a fully maintained truck and trailer quote.' },
+    notes:'All prices are in NZD and exclude GST.\nRUC and mileage charges apply on top of weekly hire rates.\nContract maximum mileage is 130,000 km per annum.\nQuotes exclude GST, fuel, and insurance costs.\nThis is a fully maintained truck and trailer quote.' },
   { id:'QT002', name:'Truck Only Rental Quote', type:'truck_only', chargeType:'weekly',
     truckDesc:'2019 Volvo 8x4 Curtainside Truck', trailerDesc:'',
     weeklyRate:1716.99, monthlyRate:0, dailyRate:0, rucRate:0.45, mileageRate:0.22, maxMileage:'130,000 km p.a. (10,833 km/month)',
-    notes:'All prices are in NZD and exclude GST.
-RUC and mileage charges apply on top of weekly hire rates.
-Contract maximum mileage is 130,000 km per annum.
-Quotes exclude GST, fuel, and insurance costs.
-This is a fully maintained truck quote.' },
+    notes:'All prices are in NZD and exclude GST.\nRUC and mileage charges apply on top of weekly hire rates.\nContract maximum mileage is 130,000 km per annum.\nQuotes exclude GST, fuel, and insurance costs.\nThis is a fully maintained truck quote.' },
   { id:'QT003', name:'Truck & Trailer Monthly Quote (4-Axle)', type:'truck_trailer', chargeType:'monthly',
     truckDesc:'2018 Hino 8x4 Curtainside Truck with Tail Lift', trailerDesc:'2011 Fruehauf 4-Axle Curtainside Pull Trailer',
     weeklyRate:0, monthlyRate:7830.58, dailyRate:0, rucRate:0.71, mileageRate:0.22, maxMileage:'130,000 km p.a. (10,833 km/month)',
-    notes:'All prices are in NZD and exclude GST.
-RUC and mileage charges apply on top of monthly hire rates.
-Contract maximum mileage is 130,000 km per annum.
-Quotes exclude GST, fuel, and insurance costs.
-This is a fully maintained truck and trailer quote.' },
+    notes:'All prices are in NZD and exclude GST.\nRUC and mileage charges apply on top of monthly hire rates.\nContract maximum mileage is 130,000 km per annum.\nQuotes exclude GST, fuel, and insurance costs.\nThis is a fully maintained truck and trailer quote.' },
   { id:'QT004', name:'5-Axle Pull Trailer Lease Quote', type:'trailer_only', chargeType:'monthly',
     truckDesc:'', trailerDesc:'2022 22-Pallet TMC 5-Axle Curtainside Pull Trailer',
     weeklyRate:0, monthlyRate:3390.85, dailyRate:0, rucRate:0.18, mileageRate:0.15, maxMileage:'192,000 km p.a. (16,000 km/month)',
-    notes:'All prices are in NZD and exclude GST.
-Trailer will be fully branded to customer colours.
-RUC and mileage charges apply on top of monthly hire rates.
-Contract maximum mileage is 192,000 km per annum.
-Quotes exclude GST and insurance costs.
-This is a fully maintained trailer quote.' },
+    notes:'All prices are in NZD and exclude GST.\nTrailer will be fully branded to customer colours.\nRUC and mileage charges apply on top of monthly hire rates.\nContract maximum mileage is 192,000 km per annum.\nQuotes exclude GST and insurance costs.\nThis is a fully maintained trailer quote.' },
   { id:'QT005', name:'Swinglift Lease Quote (Multi-Term)', type:'truck_trailer', chargeType:'monthly',
     truckDesc:'2022 Volvo 8x4 Sleeper-Cab Tractor Unit', trailerDesc:'2026 Patchell Quad-Axle Swinglift Trailer',
     weeklyRate:0, monthlyRate:11189.33, dailyRate:0, rucRate:0, mileageRate:0, maxMileage:'130,000 km p.a.',
     extraTerms:[{label:'5-Year Rate',monthly:11189.33},{label:'3-Year Rate',monthly:12191.33},{label:'1-Year Rate',monthly:13289.33}],
-    notes:'All prices are in NZD and exclude GST.
-RUC charges will be paid by hirer via DDB.
-Mileage charges are included in the monthly lease payment.
-Contract maximum mileage is 130,000 km per annum.
-Quotes exclude GST, fuel, and insurance costs.
-This is a fully maintained truck and trailer lease quote.' },
+    notes:'All prices are in NZD and exclude GST.\nRUC charges will be paid by hirer via DDB.\nMileage charges are included in the monthly lease payment.\nContract maximum mileage is 130,000 km per annum.\nQuotes exclude GST, fuel, and insurance costs.\nThis is a fully maintained truck and trailer lease quote.' },
 ];
 
 const HiresPage = ({refreshKey=0}) => {
@@ -2152,9 +2130,7 @@ const HiresPage = ({refreshKey=0}) => {
     maxMileage: tpl?.maxMileage || '130,000 km p.a. (10,833 km/month)',
     extraTerms: tpl?.extraTerms || [],
     // Notes
-    notes: tpl?.notes || 'All prices are in NZD and exclude GST.
-RUC and mileage charges apply on top of hire rates.
-Quotes exclude GST, fuel, and insurance costs.',
+    notes: tpl?.notes || 'All prices are in NZD and exclude GST.\nRUC and mileage charges apply on top of hire rates.\nQuotes exclude GST, fuel, and insurance costs.',
   });
   const [quoteForm, setQuoteForm] = useState(() => emptyQuote(null));
   const setQF = (k,v) => setQuoteForm(f=>({...f,[k]:v}));
@@ -2273,7 +2249,7 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
 </div>
 </body></html>`;
 
-    const printHTML = html.replace('</head>', `<script>window.onload=function(){document.title='${filename}';setTimeout(function(){window.print();},400);};<\/script></head>`);
+    const printHTML = html.replace('</head>', '<scr'+'ipt>window.onload=function(){document.title="'+filename+'";setTimeout(function(){window.print();},400);};</'+'script></head>');
     const win = window.open('','_blank');
     if(!win){alert('Please allow pop-ups for this site.');return;}
     win.document.write(printHTML); win.document.close();
@@ -4959,20 +4935,7 @@ const HireDocModal = ({hire, onClose}) => {
     const filename = `${label}_${d.hireId}_${d.hirerCompany.replace(/\s+/g,'_')}.pdf`;
     const html = type === 'schedule' ? generateScheduleHTML(d) : generateAgreementHTML(d);
     // Inject auto-print script and suggested filename into the HTML
-    const printHTML = html.replace('</head>', `
-<script>
-  window.onload = function() {
-    document.title = '${filename.replace('.pdf','')}';
-    setTimeout(function(){ window.print(); }, 400);
-  };
-<\/script>
-<style>
-  @media print {
-    @page { size: A4; margin: 1.5cm; }
-    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  }
-</style>
-</head>`);
+    const printHTML = html.replace('</head>', '<scr'+'ipt>window.onload=function(){document.title="'+filename.replace('.pdf','')+'";setTimeout(function(){window.print();},400);};</'+'script><style>@media print{@page{size:A4;margin:1.5cm}body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style></head>');
     const win = window.open('', '_blank');
     if (!win) { alert('Please allow pop-ups for this site to download PDF documents.'); return; }
     win.document.write(printHTML);
@@ -5370,7 +5333,7 @@ const DocumentsPage = () => {
     const label = type==='schedule' ? 'Truck_Schedule' : d.docTitle.replace(/\s+/g,'_');
     const filename = `${label}_${(form.companyName||'Draft').replace(/\s+/g,'_')}.pdf`;
     const html = type==='schedule' ? generateScheduleHTML(d) : generateAgreementHTML(d);
-    const printHTML = html.replace('</head>', `<script>window.onload=function(){document.title='${filename.replace('.pdf','')}';setTimeout(function(){window.print();},400);};<\/script><style>@media print{@page{size:A4;margin:1.5cm}body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style></head>`);
+    const printHTML = html.replace('</head>', '<scr'+'ipt>window.onload=function(){document.title="'+filename.replace('.pdf','')+'";setTimeout(function(){window.print();},400);};</'+'script><style>@media print{@page{size:A4;margin:1.5cm}body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style></head>');
     const win = window.open('', '_blank');
     if (!win) { alert('Please allow pop-ups for this site.'); return; }
     win.document.write(printHTML); win.document.close();
