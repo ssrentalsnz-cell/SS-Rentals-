@@ -495,6 +495,7 @@ const pullCustomersFromSheet = (rows) => {
     const id      = idIdx  >= 0 ? (row[idIdx]||'').toString().trim()  : '';
     const company = compIdx >= 0 ? (row[compIdx]||'').toString().trim() : '';
     if (!company) return;
+    console.log('[Sync row]', rowIdx+1, '| id:', JSON.stringify(id), '| company:', company);
 
     const compKey = company.toLowerCase().trim();
     const existingById = id ? byId[id] : null;
@@ -1746,14 +1747,15 @@ const createNewCustomer = (data) => {
   return cust;
 };
 
-const CustomersPage = () => {
+const CustomersPage = ({refreshKey=0}) => {
   const [sel,setSel]=useState(null);
   const [search,setSearch]=useState('');
   const [showAdd,setShowAdd]=useState(false);
   const [editingCust,setEditingCust]=useState(null);
   const [custRefresh,setCustRefresh]=useState(0);
   const [statusFilter, setStatusFilter] = useState('all');
-  const allCusts = getAllCustomers();
+  const [allCusts, setAllCusts] = useState(()=>getAllCustomers());
+  useEffect(()=>{ setAllCusts(getAllCustomers()); }, [refreshKey, custRefresh]);
   const filtered=allCusts.filter(c=>{
     if (statusFilter !== 'all' && c.status !== statusFilter) return false;
     if (!search) return true;
@@ -6697,7 +6699,7 @@ const App = () => {
   const pages={
     dashboard:<Dashboard theme={theme} setPage={setPage}/>,
     fleet:<FleetPage theme={theme}/>,
-    customers:<CustomersPage/>,
+    customers:<CustomersPage refreshKey={dataRefreshKey}/>,
     hires:<HiresPage refreshKey={dataRefreshKey}/>,
     invoicing:<InvoicingPage/>,
     maintenance:<MaintenancePage/>,
