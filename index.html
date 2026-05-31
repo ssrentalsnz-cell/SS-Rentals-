@@ -698,10 +698,13 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
             if (knownNames.has(compLower)) return;
             if (id && knownIds.has(id)) return;
             const newId = id || ('CS'+(Date.now()+ri).toString().slice(-6));
+            const rawCont = contI>=0?(row[contI]||'').toString().trim():'';
+            const rawPh = phoneI>=0?(row[phoneI]||'').toString().trim():'';
+            const phOk = /^[\d\s\+\-\(\)]{6,}$/.test(rawPh);
             newOnes.push({
               id: newId, company,
-              contact: contI>=0?(row[contI]||'').toString().trim():'',
-              phone: phoneI>=0?(row[phoneI]||'').toString().trim():'',
+              contact: (!phOk && rawPh) ? (rawCont+' '+rawPh).trim() : rawCont,
+              phone: phOk ? rawPh : '',
               email: emailI>=0?(row[emailI]||'').toString().trim():'',
               status: statusI>=0&&row[statusI]?row[statusI].toString().toLowerCase().trim():'prospect',
               notes: notesI>=0?(row[notesI]||'').toString().trim():'',
@@ -1874,10 +1877,16 @@ const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
         if (knownNames.has(compLower)) return;
         if (id && knownIds.has(id)) return;
         const newId = id||('CS'+(Date.now()+ri).toString().slice(-6));
+        // Smart phone/name detection: if phone field looks like a name not a number, append to contact
+        const rawContact = contI>=0?(row[contI]||'').toString().trim():'';
+        const rawPhone = phoneI>=0?(row[phoneI]||'').toString().trim():'';
+        const looksLikePhone = /^[\d\s\+\-\(\)]{6,}$/.test(rawPhone);
+        const contactFull = (!looksLikePhone && rawPhone) ? (rawContact+' '+rawPhone).trim() : rawContact;
+        const phoneFinal = looksLikePhone ? rawPhone : '';
         newOnes.push({
           id:newId, company,
-          contact:contI>=0?(row[contI]||'').toString().trim():'',
-          phone:phoneI>=0?(row[phoneI]||'').toString().trim():'',
+          contact:contactFull,
+          phone:phoneFinal,
           email:emailI>=0?(row[emailI]||'').toString().trim():'',
           status:statusI>=0&&row[statusI]?row[statusI].toString().toLowerCase().trim():'prospect',
           notes:notesI>=0?(row[notesI]||'').toString().trim():'',
@@ -2923,24 +2932,24 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
                       {(quoteForm.chargeType==='daily'||true)&&(
                         <div className="form-group" style={{marginBottom:0,opacity:quoteForm.chargeType==='daily'?1:.55}}>
                           <label className="form-label">Daily Rate (NZD)</label>
-                          <input className="form-control" type="number" step="0.01" value={quoteForm.dailyRate} onChange={e=>setQF('dailyRate',parseFloat(e.target.value)||0)}/>
+                          <input className="form-control" type="number" step="0.01" value={quoteForm.dailyRate} onChange={e=>setQF('dailyRate',parseFloat(e.target.value)||0)} onFocus={e=>e.target.select()}/>
                         </div>
                       )}
                       <div className="form-group" style={{marginBottom:0,opacity:quoteForm.chargeType==='weekly'?1:.55}}>
                         <label className="form-label">Weekly Rate (NZD)</label>
-                        <input className="form-control" type="number" step="0.01" value={quoteForm.weeklyRate} onChange={e=>setQF('weeklyRate',parseFloat(e.target.value)||0)}/>
+                        <input className="form-control" type="number" step="0.01" value={quoteForm.weeklyRate} onChange={e=>setQF('weeklyRate',parseFloat(e.target.value)||0)} onFocus={e=>e.target.select()}/>
                       </div>
                       <div className="form-group" style={{marginBottom:0,opacity:quoteForm.chargeType==='monthly'?1:.55}}>
                         <label className="form-label">Monthly Rate (NZD)</label>
-                        <input className="form-control" type="number" step="0.01" value={quoteForm.monthlyRate} onChange={e=>setQF('monthlyRate',parseFloat(e.target.value)||0)}/>
+                        <input className="form-control" type="number" step="0.01" value={quoteForm.monthlyRate} onChange={e=>setQF('monthlyRate',parseFloat(e.target.value)||0)} onFocus={e=>e.target.select()}/>
                       </div>
                       <div className="form-group" style={{marginBottom:0}}>
                         <label className="form-label">RUC Rate (¢/km)</label>
-                        <input className="form-control" type="number" step="0.01" value={quoteForm.rucRate} onChange={e=>setQF('rucRate',parseFloat(e.target.value)||0)}/>
+                        <input className="form-control" type="number" step="0.01" value={quoteForm.rucRate} onChange={e=>setQF('rucRate',parseFloat(e.target.value)||0)} onFocus={e=>e.target.select()}/>
                       </div>
                       <div className="form-group" style={{marginBottom:0}}>
                         <label className="form-label">Mileage Rate (¢/km)</label>
-                        <input className="form-control" type="number" step="0.01" value={quoteForm.mileageRate} onChange={e=>setQF('mileageRate',parseFloat(e.target.value)||0)}/>
+                        <input className="form-control" type="number" step="0.01" value={quoteForm.mileageRate} onChange={e=>setQF('mileageRate',parseFloat(e.target.value)||0)} onFocus={e=>e.target.select()}/>
                       </div>
                       <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
                         <label className="form-label">Maximum Mileage Allowance</label>
@@ -4387,7 +4396,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
                     <span>Mileage Rate ($/km)</span>
                     <span style={{color:'var(--text3)',fontWeight:400,fontSize:10}}>charged to hirer</span>
                   </label>
-                  <input type="number" step="0.001" value={form.mileageRate} onChange={e=>set('mileageRate',parseFloat(e.target.value)||0)}/>
+                  <input type="number" step="0.001" value={form.mileageRate} onChange={e=>set('mileageRate',parseFloat(e.target.value)||0)} onFocus={e=>e.target.select()}/>
                   <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>e.g. 0.18 = 18 cents/km</div>
                 </div>
                 <div className="form-group" style={{marginBottom:0}}>
@@ -4395,7 +4404,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
                     <span>RUC Rate ($/km)</span>
                     <span style={{color:'var(--text3)',fontWeight:400,fontSize:10}}>road user charges</span>
                   </label>
-                  <input type="number" step="0.001" value={form.rucRate} onChange={e=>set('rucRate',parseFloat(e.target.value)||0)}/>
+                  <input type="number" step="0.001" value={form.rucRate} onChange={e=>set('rucRate',parseFloat(e.target.value)||0)} onFocus={e=>e.target.select()}/>
                   <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>e.g. 0.062 = standard RUC</div>
                 </div>
                 <div className="form-group" style={{marginBottom:0}}>
@@ -6623,14 +6632,14 @@ const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xer
             <div className="form-group"><label>Company Name</label><input defaultValue="SS Rentals Ltd"/></div>
             <div className="form-group"><label>GST Number</label><input defaultValue="123-456-789"/></div>
             <div className="form-group"><label>Address</label><input defaultValue="Auckland, New Zealand"/></div>
-            <div className="form-group"><label>Default RUC Rate ($/km)</label><input defaultValue="0.062" type="number"/></div>
+            <div className="form-group"><label>Default RUC Rate ($/km)</label><input defaultValue="0.062" type="number" onFocus={e=>e.target.select()}/></div>
             <button className="btn btn-primary btn-sm">Save Changes</button>
           </div>
           <div className="card"><div className="card-header"><span className="card-title">Invoice Settings</span></div>
             <div className="form-group"><label>Invoice Prefix</label><input defaultValue="INV-2026-"/></div>
-            <div className="form-group"><label>Default Payment Terms (days)</label><input defaultValue="7" type="number"/></div>
+            <div className="form-group"><label>Default Payment Terms (days)</label><input defaultValue="7" type="number" onFocus={e=>e.target.select()}/></div>
             <div className="form-group"><label>Invoice Day</label><select><option>Monday (weekly)</option><option>Sunday</option></select></div>
-            <div className="form-group"><label>GST Rate (%)</label><input defaultValue="15" type="number"/></div>
+            <div className="form-group"><label>GST Rate (%)</label><input defaultValue="15" type="number" onFocus={e=>e.target.select()}/></div>
             <button className="btn btn-primary btn-sm">Save Changes</button>
           </div>
         </div>
