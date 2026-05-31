@@ -329,29 +329,41 @@ const saveSheetsConfig = cfg => localStorage.setItem(SHEETS_CONFIG_KEY, JSON.str
 // Silently refresh Google access token when expired (no popup if already consented)
 const refreshSheetsToken = (clientId, callback) => {
   if (!window.google?.accounts?.oauth2) { callback(null); return; }
-  const client = window.google.accounts.oauth2.initTokenClient({
-    client_id: clientId,
-    scope: 'https://www.googleapis.com/auth/spreadsheets',
-    prompt: '',  // empty string = no consent prompt if already granted
-    callback: (resp) => {
-      if (resp.error || !resp.access_token) { callback(null); return; }
-      const cfg = loadSheetsConfig();
-      if (!cfg) { callback(null); return; }
-      const updated = { ...cfg, accessToken: resp.access_token, tokenExpiry: Date.now() + (resp.expires_in||3600)*1000 };
-      saveSheetsConfig(updated);
-      callback(updated);
-    },
-    error_callback: () => callback(null),
-  });
-  client.requestAccessToken();
+  try {
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: 'https://www.googleapis.com/auth/spreadsheets',
+      prompt: 'none',  // NEVER show popup — fail silently if session expired
+      hint: loadSheetsConfig()?.userEmail || '',
+      callback: (resp) => {
+        if (resp.error || !resp.access_token) { callback(null); return; }
+        const cfg = loadSheetsConfig();
+        if (!cfg) { callback(null); return; }
+        const updated = { ...cfg, accessToken: resp.access_token, tokenExpiry: Date.now() + (resp.expires_in||3600)*1000 };
+        saveSheetsConfig(updated);
+        callback(updated);
+      },
+      error_callback: (err) => {
+        // Silent failure — don't popup, just use existing token
+        console.log('[Sheets] Silent token refresh failed:', err?.type || err);
+        callback(null);
+      },
+    });
+    client.requestAccessToken();
+  } catch(e) {
+    console.log('[Sheets] Token client error:', e.message);
+    callback(null);
+  }
 };
 
-// Get a valid Sheets config — refreshes token silently if within 5 min of expiry
+// Get a valid Sheets config — refreshes token silently if expired, never pops up
 const getValidSheetsConfig = (cfg, callback) => {
   if (!cfg?.clientId || !cfg?.spreadsheetId) { callback(null); return; }
   const fiveMin = 5 * 60 * 1000;
   const needsRefresh = !cfg.accessToken || !cfg.tokenExpiry || Date.now() > cfg.tokenExpiry - fiveMin;
+  // If token still valid, use it immediately
   if (!needsRefresh) { callback(cfg); return; }
+  // Try silent refresh — if it fails, still use the existing token (sync will fail gracefully)
   refreshSheetsToken(cfg.clientId, (refreshed) => callback(refreshed || cfg));
 };
 
@@ -6693,7 +6705,7 @@ const SheetsSetupModal = ({open, onClose, onSave, initialConfig}) => {
         setStatus({ok:false, msg: err.type==='popup_closed' ? 'Popup was closed — please try again.' : `Error: ${err.type}`});
       }
     });
-    client.requestAccessToken({prompt: initialConfig?.accessToken ? '' : 'consent'});
+    client.requestAccessToken({prompt: initialConfig?.accessToken ? 'none' : 'consent'});
   };
 
   if (!open) return null;
@@ -6923,19 +6935,17 @@ const App = () => {
     );
   },[sheetsConfig]);
 
-  // 5-minute auto-sync trigger + token refresh on load
+  // 5-minute auto-sync — only syncs if token is valid, never triggers popup
   useEffect(()=>{
     if (!sheetsConfig?.clientId) return;
     if (autoSyncTimer.current) clearInterval(autoSyncTimer.current);
-    // On load: silently refresh token first, then sync
-    getValidSheetsConfig(sheetsConfig, (refreshed) => {
-      if (refreshed?.accessToken) {
-        if (refreshed.accessToken !== sheetsConfig.accessToken) setSheetsConfig(refreshed);
-        doSync(refreshed);
-      }
-    });
+    // On load: only sync if token is still valid (not expired)
+    const tokenOk = sheetsConfig?.accessToken && sheetsConfig?.tokenExpiry && Date.now() < sheetsConfig.tokenExpiry;
+    if (tokenOk) doSync(sheetsConfig);
+    // Every 5 min: try silent refresh then sync — never popup
     autoSyncTimer.current = setInterval(()=>{
       const cfg = loadSheetsConfig();
+      if (!cfg?.clientId) return;
       getValidSheetsConfig(cfg, (refreshed) => {
         if (refreshed?.accessToken) {
           if (refreshed.accessToken !== sheetsConfig?.accessToken) setSheetsConfig(refreshed);
