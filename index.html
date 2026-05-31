@@ -673,7 +673,17 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
             const company = compI>=0 ? (row[compI]||'').toString().trim() : '';
             if (!company) return;
             const id = idI>=0 ? (row[idI]||'').toString().trim() : '';
-            if (knownNames.has(company.toLowerCase().trim())) return;
+            const compLower = company.toLowerCase().trim();
+            // Check if already exists with real data
+            const existingEntry = [...CUSTOMERS,...existing].find(c=>c.company.toLowerCase().trim()===compLower);
+            if (existingEntry && (existingEntry.phone||existingEntry.contact||existingEntry.email)) return;
+            // If exists but empty (broken entry from previous sync), remove it and re-add
+            if (existingEntry && !existingEntry.phone && !existingEntry.contact) {
+              const idx2 = existing.findIndex(c=>c.company.toLowerCase().trim()===compLower);
+              if (idx2 >= 0) existing.splice(idx2, 1);
+              knownNames.delete(compLower);
+            }
+            if (knownNames.has(compLower)) return;
             if (id && knownIds.has(id)) return;
             const newId = id || ('CS'+(Date.now()+ri).toString().slice(-6));
             newOnes.push({
@@ -1815,7 +1825,16 @@ const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
         const company = (row[compI]||'').toString().trim();
         if (!company) return;
         const id = idI>=0?(row[idI]||'').toString().trim():'';
-        if (knownNames.has(company.toLowerCase().trim())) return;
+        const compLower = company.toLowerCase().trim();
+        // If exists in localStorage but has no real data (broken entry), remove and re-add
+        const existIdx = existing.findIndex(c=>c.company.toLowerCase().trim()===compLower);
+        if (existIdx >= 0) {
+          const e = existing[existIdx];
+          if (e.phone||e.contact||e.email) return; // has real data — skip
+          existing.splice(existIdx,1); knownNames.delete(compLower); // remove broken entry
+        }
+        if (CUSTOMERS.some(c=>c.company.toLowerCase().trim()===compLower)) return;
+        if (knownNames.has(compLower)) return;
         if (id && knownIds.has(id)) return;
         const newId = id||('CS'+(Date.now()+ri).toString().slice(-6));
         newOnes.push({
