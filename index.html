@@ -2385,7 +2385,9 @@ const HiresPage = ({refreshKey=0}) => {
     validDays: '14',
     // Customer
     companyName: '', contactName: '', contactPhone: '', contactEmail: '',
+    contactAddress: '',
     useExistingCustomer: '',
+    customerMode: 'new',  // 'existing' or 'new'
     // Vehicle
     vehicleType: tpl?.type || 'truck_trailer',
     truckDesc: tpl?.truckDesc || '',
@@ -2414,12 +2416,27 @@ const HiresPage = ({refreshKey=0}) => {
     setQuoteStep(2);
   };
 
-  const saveQuote = () => {
+  const saveQuote = (andSaveCustomer=false) => {
     if(!quoteForm.companyName){alert('Please enter a company name.');return;}
+    // Auto-save new customer to database if they don't already exist
+    if (quoteForm.customerMode==='new' && quoteForm.companyName) {
+      const existing = getAllCustomers().find(c=>c.company.toLowerCase().trim()===quoteForm.companyName.toLowerCase().trim());
+      if (!existing) {
+        createNewCustomer({
+          company: quoteForm.companyName,
+          contact: quoteForm.contactName||'',
+          phone: quoteForm.contactPhone||'',
+          email: quoteForm.contactEmail||'',
+          address: quoteForm.contactAddress||'',
+          status: 'active',
+          _fromQuote: true,
+        });
+      }
+    }
     const rec = {id:'Q-'+Date.now(), savedAt:new Date().toISOString(), form:{...quoteForm}};
     const updated = [rec, ...savedQuotes];
     setSavedQuotes(updated); saveQuotesToStorage(updated);
-    alert('Quote saved!');
+    alert('Quote saved!' + (quoteForm.customerMode==='new'?' Customer also saved to database.':''));
   };
 
   const deleteQuote = (id) => {
@@ -2434,6 +2451,17 @@ const HiresPage = ({refreshKey=0}) => {
   };
 
   const downloadQuotePDF = () => {
+    // Auto-save new customer when downloading
+    if (quoteForm.customerMode==='new' && quoteForm.companyName) {
+      const existing = getAllCustomers().find(c=>c.company.toLowerCase().trim()===quoteForm.companyName.toLowerCase().trim());
+      if (!existing) {
+        createNewCustomer({
+          company: quoteForm.companyName, contact: quoteForm.contactName||'',
+          phone: quoteForm.contactPhone||'', email: quoteForm.contactEmail||'',
+          address: quoteForm.contactAddress||'', status:'active', _fromQuote:true,
+        });
+      }
+    }
     const f = quoteForm;
     const fmtMoney = v => v>0?`$${parseFloat(v).toLocaleString('en-NZ',{minimumFractionDigits:2})}`:'—';
     const vehicleLabel = f.vehicleType==='truck_only'?'Truck Only':f.vehicleType==='trailer_only'?'Trailer Only':'Truck & Trailer';
@@ -2723,38 +2751,76 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
                   {/* Customer */}
                   <div className="card" style={{padding:'14px 16px'}}>
                     <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Customer / Hirer</div>
-                    <div className="form-group" style={{marginBottom:10}}>
-                      <label className="form-label">Quick-fill from existing customer</label>
-                      <select className="form-control" value={quoteForm.useExistingCustomer} onChange={e=>{
-                        const cid = e.target.value;
-                        setQF('useExistingCustomer',cid);
-                        if(cid){
-                          const c = getAllCustomers().find(x=>x.id===cid);
-                          if(c) setQuoteForm(f=>({...f,useExistingCustomer:cid,companyName:c.company,contactName:c.contact,contactPhone:c.phone,contactEmail:c.email||''}));
-                        }
-                      }}>
-                        <option value="">— Select existing customer —</option>
-                        {getAllCustomers().filter(c=>c.status!=='blacklisted').map(c=><option key={c.id} value={c.id}>{c.company}</option>)}
-                      </select>
+
+                    {/* Mode toggle */}
+                    <div style={{display:'flex',gap:0,marginBottom:14,borderRadius:8,overflow:'hidden',border:'1.5px solid #6A1B9A'}}>
+                      {[['existing','👤 Existing Customer'],['new','➕ New Customer']].map(([v,l])=>(
+                        <button key={v} onClick={()=>{
+                          setQF('customerMode',v);
+                          if(v==='existing') setQuoteForm(f=>({...f,customerMode:v,companyName:'',contactName:'',contactPhone:'',contactEmail:'',contactAddress:'',useExistingCustomer:''}));
+                          else setQuoteForm(f=>({...f,customerMode:'new',useExistingCustomer:''}));
+                        }} style={{
+                          flex:1,padding:'9px 8px',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,
+                          background:(quoteForm.customerMode||'new')===v?'#6A1B9A':'transparent',
+                          color:(quoteForm.customerMode||'new')===v?'#fff':'#6A1B9A',transition:'all .15s',
+                        }}>{l}</button>
+                      ))}
                     </div>
-                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                      <div className="form-group" style={{marginBottom:0}}>
-                        <label className="form-label">Company Name *</label>
-                        <input className="form-control" value={quoteForm.companyName} onChange={e=>setQF('companyName',e.target.value)}/>
+
+                    {/* Existing customer */}
+                    {(quoteForm.customerMode==='existing')&&(
+                      <div>
+                        <div className="form-group" style={{marginBottom:10}}>
+                          <label className="form-label">Select Customer</label>
+                          <select className="form-control" value={quoteForm.useExistingCustomer} onChange={e=>{
+                            const cid=e.target.value; setQF('useExistingCustomer',cid);
+                            if(cid){const c=getAllCustomers().find(x=>x.id===cid);
+                              if(c) setQuoteForm(f=>({...f,useExistingCustomer:cid,companyName:c.company,contactName:c.contact||'',contactPhone:c.phone||'',contactEmail:c.email||'',contactAddress:c.address||''}));}
+                          }}>
+                            <option value="">— Select customer —</option>
+                            {getAllCustomers().filter(c=>c.status!=='blacklisted').sort((a,b)=>a.company.localeCompare(b.company)).map(c=><option key={c.id} value={c.id}>{c.company} {c.contact?'· '+c.contact:''}</option>)}
+                          </select>
+                        </div>
+                        {quoteForm.companyName&&(
+                          <div style={{padding:'10px 12px',background:'rgba(106,27,154,0.06)',borderRadius:8,fontSize:12}}>
+                            <strong>{quoteForm.companyName}</strong>
+                            {quoteForm.contactName&&<span style={{color:'var(--text2)'}}> · {quoteForm.contactName}</span>}
+                            {quoteForm.contactPhone&&<span style={{color:'var(--text2)'}}> · {quoteForm.contactPhone}</span>}
+                          </div>
+                        )}
                       </div>
-                      <div className="form-group" style={{marginBottom:0}}>
-                        <label className="form-label">Contact Person</label>
-                        <input className="form-control" value={quoteForm.contactName} onChange={e=>setQF('contactName',e.target.value)}/>
+                    )}
+
+                    {/* New customer */}
+                    {(quoteForm.customerMode==='new'||!quoteForm.customerMode)&&(
+                      <div>
+                        <div style={{padding:'8px 12px',background:'rgba(39,174,96,0.07)',border:'1px solid rgba(39,174,96,0.2)',borderRadius:7,fontSize:11,color:'#27AE60',marginBottom:12,fontWeight:600}}>
+                          ✅ New customer details will be automatically saved to the database when you save this quote.
+                        </div>
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                          <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
+                            <label className="form-label">Company / Business Name *</label>
+                            <input className="form-control" placeholder="e.g. GSR Transport Limited" value={quoteForm.companyName} onChange={e=>setQF('companyName',e.target.value)}/>
+                          </div>
+                          <div className="form-group" style={{marginBottom:0}}>
+                            <label className="form-label">Contact Person</label>
+                            <input className="form-control" placeholder="Full name" value={quoteForm.contactName} onChange={e=>setQF('contactName',e.target.value)}/>
+                          </div>
+                          <div className="form-group" style={{marginBottom:0}}>
+                            <label className="form-label">Phone / Mobile *</label>
+                            <input className="form-control" placeholder="027 xxx xxxx" value={quoteForm.contactPhone} onChange={e=>setQF('contactPhone',e.target.value)}/>
+                          </div>
+                          <div className="form-group" style={{marginBottom:0}}>
+                            <label className="form-label">Email</label>
+                            <input className="form-control" type="email" placeholder="email@company.co.nz" value={quoteForm.contactEmail} onChange={e=>setQF('contactEmail',e.target.value)}/>
+                          </div>
+                          <div className="form-group" style={{marginBottom:0}}>
+                            <label className="form-label">Address</label>
+                            <input className="form-control" placeholder="City, Region" value={quoteForm.contactAddress||''} onChange={e=>setQF('contactAddress',e.target.value)}/>
+                          </div>
+                        </div>
                       </div>
-                      <div className="form-group" style={{marginBottom:0}}>
-                        <label className="form-label">Phone</label>
-                        <input className="form-control" value={quoteForm.contactPhone} onChange={e=>setQF('contactPhone',e.target.value)}/>
-                      </div>
-                      <div className="form-group" style={{marginBottom:0}}>
-                        <label className="form-label">Email</label>
-                        <input className="form-control" type="email" value={quoteForm.contactEmail} onChange={e=>setQF('contactEmail',e.target.value)}/>
-                      </div>
-                    </div>
+                    )}
                   </div>
 
                   {/* Hire details */}
