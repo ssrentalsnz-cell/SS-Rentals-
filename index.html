@@ -4685,30 +4685,32 @@ const csAuth = () => {
 };
 
 // Send bulk SMS directly via ClickSend REST API (supports CORS from browser)
+const SMS_WORKER = 'https://xero-proxy.ssrentalsnz.workers.dev/sms';
+
 const sendBulkSMSReal = async (messages) => {
-  const auth = csAuth();
-  if (!auth) return messages.map(() => ({ status: 'NO_CREDENTIALS', error: 'ClickSend credentials not configured. Go to Settings → SMS Setup.' }));
+  const creds = loadCSCreds();
+  if (!creds?.username || !creds?.apiKey) return messages.map(() => ({ status: 'FAILED', error: 'ClickSend credentials not configured.' }));
   try {
     const formatted = messages.map(m => ({
       to: formatNZPhone(m.to),
       body: m.body,
-      source: 'ssrentalsnz',
-      from: 'SSRentals',
     }));
-    const res = await fetch('https://rest.clicksend.com/v3/sms/send', {
+    const res = await fetch(SMS_WORKER, {
       method: 'POST',
-      headers: { 'Authorization': auth, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: formatted }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: creds.username,
+        apiKey: creds.apiKey,
+        messages: formatted,
+      }),
     });
     const data = await res.json();
-    console.log('[ClickSend] Response:', res.status, JSON.stringify(data).slice(0,500));
-    if (!res.ok) return messages.map(() => ({ status: 'FAILED', error: data?.response_msg || data?.message || 'API error ' + res.status }));
-    // ClickSend response: data.data.messages[] each with status='SUCCESS' and status_code=200
-    const msgs = data?.data?.messages || [];
+    console.log('[SMS Worker] Response:', res.status, JSON.stringify(data).slice(0, 500));
+    if (!res.ok) return messages.map(() => ({ status: 'FAILED', error: data?.error || 'SMS send failed: ' + res.status }));
+    const msgs = data?.messages || [];
     return msgs.map(m => ({
       status: m.status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
       message_id: m.message_id,
-      message: m.custom_string || '',
       to: m.to,
     }));
   } catch(e) { return messages.map(() => ({ status: 'FAILED', error: e.message })); }
@@ -4735,6 +4737,12 @@ const testCSCreds = async () => {
     const res = await fetch('https://rest.clicksend.com/v3/account', { headers: { 'Authorization': auth } });
     const data = await res.json();
     if (res.ok) return { ok: true, msg: 'Connected! Account: ' + (data?.data?.username || 'OK') + ' · Balance: $' + (data?.data?.balance || '?') };
+    if (res.status === 403) {
+      const msg = data?.response_msg || '';
+      if (msg.includes('allowlist') || msg.includes('Host not')) {
+        return { ok: false, msg: '⚠️ IP Allowlist blocking requests. Fix: Log into clicksend.com → Settings → API Credentials → remove the IP allowlist restriction.' };
+      }
+    }
     return { ok: false, msg: data?.response_msg || 'Auth failed — check username and API key.' };
   } catch(e) { return { ok: false, msg: e.message }; }
 };
