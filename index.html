@@ -506,7 +506,7 @@ const pullCustomersFromSheet = (rows) => {
       contact:  contIdx  >= 0 ? (row[contIdx]||'').toString().trim()  : '',
       phone:    phoneIdx >= 0 ? (row[phoneIdx]||'').toString().trim()  : '',
       email:    emailIdx >= 0 ? (row[emailIdx]||'').toString().trim()  : '',
-      status:   statusIdx >= 0 && row[statusIdx] ? row[statusIdx].toString().toLowerCase().trim() : 'active',
+      status:   statusIdx >= 0 && row[statusIdx] ? row[statusIdx].toString().toLowerCase().trim() : 'prospect',
       outstanding: outIdx >= 0 ? (parseFloat(row[outIdx])||0) : 0,
       notes:    notesIdx >= 0 ? (row[notesIdx]||'').toString().trim() : '',
       credit_rating:'B+', ytd_revenue:0, weekly_truck:0, weekly_trailer:0,
@@ -707,7 +707,8 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
               notes: notesI>=0?(row[notesI]||'').toString().trim():'',
               credit_rating:'B+',ytd_revenue:0,weekly_truck:0,weekly_trailer:0,
               outstanding:0,payment_terms:'Weekly',
-              joined:new Date().toISOString().slice(0,10),_fromSheet:true
+              joined:new Date().toISOString().slice(0,10),_fromSheet:true,
+              status: 'prospect',
             });
             knownNames.add(company.toLowerCase().trim());
             knownIds.add(newId);
@@ -1777,15 +1778,23 @@ const saveNewCustomers = list => localStorage.setItem(CUST_NEW_KEY, JSON.stringi
 // Clean up any blank/invalid entries from previous sync attempts
 const cleanNewCustomers = () => {
   const list = loadNewCustomers();
-  // Remove entries that came from sheet but have no real contact data (broken imports)
+  // Remove broken imports; fix active→prospect for unconfirmed customers
+  const hireIds = new Set(getEffectiveHires ? getEffectiveHires().map(h=>h.customer) : []);
+  let changed = false;
   const clean = list.filter(c => {
     if (!c.company || !c.company.trim() || !c.id) return false;
     if (c._fromSheet && !c.phone && !c.contact && !c.email) return false;
     return true;
+  }).map(c => {
+    // Downgrade active→prospect for sheet/quote customers with no confirmed hire
+    if (c.status === 'active' && (c._fromSheet || c._fromQuote) && !hireIds.has(c.id)) {
+      changed = true;
+      return {...c, status:'prospect'};
+    }
+    return c;
   });
-  if (clean.length !== list.length) {
+  if (clean.length !== list.length || changed) {
     saveNewCustomers(clean);
-    console.log('[Cleanup] Removed', list.length - clean.length, 'broken customer entries');
   }
 };
 cleanNewCustomers();
@@ -1798,7 +1807,7 @@ const getAllCustomers = () => {
 const createNewCustomer = (data) => {
   const id = 'C' + String(Date.now()).slice(-6);
   const cust = {
-    id, status:'active', credit_rating:'B+', outstanding:0, ytd_revenue:0,
+    id, status:'prospect', credit_rating:'B+', outstanding:0, ytd_revenue:0,
     weekly_truck:0, weekly_trailer:0, payment_terms:'Weekly',
     joined: new Date().toISOString().slice(0,10),
     notes:'', nzbn:'', truck:'', trailer:'',
@@ -1870,7 +1879,7 @@ const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
           contact:contI>=0?(row[contI]||'').toString().trim():'',
           phone:phoneI>=0?(row[phoneI]||'').toString().trim():'',
           email:emailI>=0?(row[emailI]||'').toString().trim():'',
-          status:statusI>=0&&row[statusI]?row[statusI].toString().toLowerCase().trim():'active',
+          status:statusI>=0&&row[statusI]?row[statusI].toString().toLowerCase().trim():'prospect',
           notes:notesI>=0?(row[notesI]||'').toString().trim():'',
           credit_rating:'B+',ytd_revenue:0,weekly_truck:0,weekly_trailer:0,
           outstanding:0,payment_terms:'Weekly',
@@ -1999,7 +2008,7 @@ const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
   const CustomerFormModal = ({existing, onClose}) => {
     const [vals,setVals]=useState(existing ? {...existing} : {
       company:'', director:'', contact:'', phone:'', email:'', address:'',
-      nzbn:'', credit_rating:'B+', payment_terms:'Weekly', notes:'', status:'active',
+      nzbn:'', credit_rating:'B+', payment_terms:'Weekly', notes:'', status:'prospect',
       weekly_truck:0, weekly_trailer:0, outstanding:0, ytd_revenue:0
     });
     const sv = (k,v) => setVals(p=>({...p,[k]:v}));
@@ -2074,7 +2083,8 @@ const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
               </div>
               <div className="form-group">
                 <label>Status</label>
-                <select value={vals.status||'active'} onChange={e=>sv('status',e.target.value)}>
+                <select value={vals.status||'prospect'} onChange={e=>sv('status',e.target.value)}>
+                  <option value="prospect">Prospect</option>
                   <option value="active">Active</option>
                   <option value="inactive">Inactive</option>
                   <option value="blacklisted">Blacklisted</option>
@@ -2267,6 +2277,7 @@ const HiresPage = ({refreshKey=0}) => {
               <div className="form-group"><label>Hire End Date</label><input type="date" value={vals.end} onChange={e=>setVals(v=>({...v,end:e.target.value}))}/></div>
               <div className="form-group"><label>Status</label>
                 <select value={vals.status} onChange={e=>setVals(v=>({...v,status:e.target.value}))}>
+                  <option value="prospect">Prospect</option>
                   <option value="active">Active</option>
                   <option value="completed">Completed</option>
                   <option value="cancelled">Cancelled</option>
