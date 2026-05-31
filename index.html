@@ -4685,35 +4685,39 @@ const csAuth = () => {
 };
 
 // Send bulk SMS directly via ClickSend REST API (supports CORS from browser)
-const SMS_WORKER = 'https://xero-proxy.ssrentalsnz.workers.dev/sms';
-
 const sendBulkSMSReal = async (messages) => {
   const creds = loadCSCreds();
   if (!creds?.username || !creds?.apiKey) return messages.map(() => ({ status: 'FAILED', error: 'ClickSend credentials not configured.' }));
-  try {
-    const formatted = messages.map(m => ({
-      to: formatNZPhone(m.to),
-      body: m.body,
-    }));
-    const res = await fetch(SMS_WORKER, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: creds.username,
-        apiKey: creds.apiKey,
-        messages: formatted,
-      }),
-    });
-    const data = await res.json();
-    console.log('[SMS Worker] Response:', res.status, JSON.stringify(data).slice(0, 500));
-    if (!res.ok) return messages.map(() => ({ status: 'FAILED', error: data?.error || 'SMS send failed: ' + res.status }));
-    const msgs = data?.messages || [];
-    return msgs.map(m => ({
-      status: m.status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
-      message_id: m.message_id,
-      to: m.to,
-    }));
-  } catch(e) { return messages.map(() => ({ status: 'FAILED', error: e.message })); }
+  const auth = 'Basic ' + btoa(creds.username + ':' + creds.apiKey);
+  // Try worker first, fall back to direct
+  const endpoints = [
+    { url: 'https://xero-proxy.ssrentalsnz.workers.dev/sms', useWorker: true },
+    { url: 'https://rest.clicksend.com/v3/sms/send', useWorker: false },
+  ];
+  for (const ep of endpoints) {
+    try {
+      let res, body;
+      if (ep.useWorker) {
+        body = JSON.stringify({ username: creds.username, apiKey: creds.apiKey, messages: messages.map(m=>({to:formatNZPhone(m.to),body:m.body})) });
+        res = await fetch(ep.url, { method:'POST', headers:{'Content-Type':'application/json'}, body });
+        const txt = await res.text();
+        if (txt === 'Host not in allowlist') continue; // old worker still running, try next
+        const data = JSON.parse(txt);
+        if (!res.ok) { console.warn('[SMS] Worker error:', data); continue; }
+        const msgs = data?.messages || [];
+        return msgs.map(m => ({ status: m.status==='SUCCESS'?'SUCCESS':'FAILED', message_id: m.message_id, to: m.to }));
+      } else {
+        body = JSON.stringify({ messages: messages.map(m=>({to:formatNZPhone(m.to),body:m.body,source:'ssrentalsnz'})) });
+        res = await fetch(ep.url, { method:'POST', headers:{'Authorization':auth,'Content-Type':'application/json'}, body });
+        const data = await res.json();
+        console.log('[SMS Direct] Response:', res.status, JSON.stringify(data).slice(0,300));
+        if (!res.ok) return messages.map(() => ({ status: 'FAILED', error: data?.response_msg || 'Error ' + res.status }));
+        const msgs = data?.data?.messages || [];
+        return msgs.map(m => ({ status: m.status==='SUCCESS'?'SUCCESS':'FAILED', message_id: m.message_id, to: m.to }));
+      }
+    } catch(e) { console.warn('[SMS] Endpoint failed:', ep.url, e.message); }
+  }
+  return messages.map(() => ({ status: 'FAILED', error: 'All SMS endpoints failed. Check console for details.' }));
 };
 
 // Fetch SMS delivery history directly from ClickSend
