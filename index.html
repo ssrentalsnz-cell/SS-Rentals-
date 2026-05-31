@@ -2489,14 +2489,16 @@ const HiresPage = ({refreshKey=0}) => {
       }
     }
     const f = quoteForm;
-    const fmtMoney = v => v>0?`$${parseFloat(v).toLocaleString('en-NZ',{minimumFractionDigits:2})}`:'—';
+    const fmtMoney = v => parseFloat(v)>0?`$${parseFloat(v).toLocaleString('en-NZ',{minimumFractionDigits:2})}`:'—';
+  // For rate fields (¢/km) preserve exact entered value
+  const fmtRate = v => (v!==undefined && v!==null && v!=='' && parseFloat(v)!==0) ? String(v) : '—';
     const vehicleLabel = f.vehicleType==='truck_only'?'Truck Only':f.vehicleType==='trailer_only'?'Trailer Only':'Truck & Trailer';
     const chargeRows = [];
-    if(f.chargeType==='daily'&&f.dailyRate>0) chargeRows.push(['Daily Hire Rate',fmtMoney(f.dailyRate)]);
-    if((f.chargeType==='weekly'||f.weeklyRate>0)&&f.weeklyRate>0) chargeRows.push(['Weekly Hire Rate',fmtMoney(f.weeklyRate)]);
-    if((f.chargeType==='monthly'||f.monthlyRate>0)&&f.monthlyRate>0) chargeRows.push(['Monthly Hire Rate',fmtMoney(f.monthlyRate)]);
-    if(f.rucRate>0) chargeRows.push(['RUC Charges',`${f.rucRate} cents per km`]);
-    if(f.mileageRate>0) chargeRows.push(['Mileage Charges',`${f.mileageRate} cents per km`]);
+    if(f.chargeType==='daily'&&parseFloat(f.dailyRate)>0) chargeRows.push(['Daily Hire Rate',fmtMoney(f.dailyRate)]);
+    if((f.chargeType==='weekly'||parseFloat(f.weeklyRate)>0)&&parseFloat(f.weeklyRate)>0) chargeRows.push(['Weekly Hire Rate',fmtMoney(f.weeklyRate)]);
+    if((f.chargeType==='monthly'||parseFloat(f.monthlyRate)>0)&&parseFloat(f.monthlyRate)>0) chargeRows.push(['Monthly Hire Rate',fmtMoney(f.monthlyRate)]);
+    if(parseFloat(f.rucRate)>0) chargeRows.push(['RUC Charges',`${fmtRate(f.rucRate)} cents per km`]);
+    if(parseFloat(f.mileageRate)>0) chargeRows.push(['Mileage Charges',`${fmtRate(f.mileageRate)} cents per km`]);
     if(f.maxMileage) chargeRows.push(['Maximum Mileage',f.maxMileage]);
     const extraRows = (f.extraTerms||[]).map(t=>[t.label, fmtMoney(t.monthly)+' per month']);
     const filename = `Quote_${f.quoteNumber}_${(f.companyName||'Draft').replace(/\s+/g,'_')}`;
@@ -2938,24 +2940,24 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
                       {(quoteForm.chargeType==='daily'||true)&&(
                         <div className="form-group" style={{marginBottom:0,opacity:quoteForm.chargeType==='daily'?1:.55}}>
                           <label className="form-label">Daily Rate (NZD)</label>
-                          <input className="form-control" type="text" inputMode="decimal" value={quoteForm.dailyRate||''} onChange={e=>setQF('dailyRate',e.target.value)} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';e.target.select();}} onBlur={e=>setQF('dailyRate',parseFloat(e.target.value)||0)}/>
+                          <input className="form-control" type="text" inputMode="decimal" value={quoteForm.dailyRate||''} onChange={e=>setQF('dailyRate',e.target.value)} onFocus={e=>{if(!e.target.value||parseFloat(e.target.value||'0')===0)e.target.value='';else e.target.select();}} onBlur={e=>setQF('dailyRate',e.target.value===''?0:e.target.value)}/>
                         </div>
                       )}
                       <div className="form-group" style={{marginBottom:0,opacity:quoteForm.chargeType==='weekly'?1:.55}}>
                         <label className="form-label">Weekly Rate (NZD)</label>
-                        <input className="form-control" type="text" inputMode="decimal" value={quoteForm.weeklyRate||''} onChange={e=>setQF('weeklyRate',e.target.value)} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';e.target.select();}} onBlur={e=>setQF('weeklyRate',parseFloat(e.target.value)||0)}/>
+                        <input className="form-control" type="text" inputMode="decimal" value={quoteForm.weeklyRate||''} onChange={e=>setQF('weeklyRate',e.target.value)} onFocus={e=>{if(!e.target.value||parseFloat(e.target.value||'0')===0)e.target.value='';else e.target.select();}} onBlur={e=>setQF('weeklyRate',e.target.value===''?0:e.target.value)}/>
                       </div>
                       <div className="form-group" style={{marginBottom:0,opacity:quoteForm.chargeType==='monthly'?1:.55}}>
                         <label className="form-label">Monthly Rate (NZD)</label>
-                        <input className="form-control" type="text" inputMode="decimal" value={quoteForm.monthlyRate||''} onChange={e=>setQF('monthlyRate',e.target.value)} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';e.target.select();}} onBlur={e=>setQF('monthlyRate',parseFloat(e.target.value)||0)}/>
+                        <input className="form-control" type="text" inputMode="decimal" value={quoteForm.monthlyRate||''} onChange={e=>setQF('monthlyRate',e.target.value)} onFocus={e=>{if(!e.target.value||parseFloat(e.target.value||'0')===0)e.target.value='';else e.target.select();}} onBlur={e=>setQF('monthlyRate',e.target.value===''?0:e.target.value)}/>
                       </div>
                       <div className="form-group" style={{marginBottom:0}}>
                         <label className="form-label">RUC Rate (¢/km)</label>
-                        <input className="form-control" type="text" inputMode="decimal" value={quoteForm.rucRate||''} onChange={e=>setQF('rucRate',e.target.value)} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';e.target.select();}} onBlur={e=>setQF('rucRate',parseFloat(e.target.value)||0)}/>
+                        <input className="form-control" type="text" inputMode="decimal" value={quoteForm.rucRate||''} onChange={e=>setQF('rucRate',e.target.value)} onFocus={e=>{if(!e.target.value||parseFloat(e.target.value||'0')===0)e.target.value='';else e.target.select();}} onBlur={e=>setQF('rucRate',e.target.value===''?0:e.target.value)}/>
                       </div>
                       <div className="form-group" style={{marginBottom:0}}>
                         <label className="form-label">Mileage Rate (¢/km)</label>
-                        <input className="form-control" type="text" inputMode="decimal" value={quoteForm.mileageRate||''} onChange={e=>setQF('mileageRate',e.target.value)} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';e.target.select();}} onBlur={e=>setQF('mileageRate',parseFloat(e.target.value)||0)}/>
+                        <input className="form-control" type="text" inputMode="decimal" value={quoteForm.mileageRate||''} onChange={e=>setQF('mileageRate',e.target.value)} onFocus={e=>{if(!e.target.value||parseFloat(e.target.value||'0')===0)e.target.value='';else e.target.select();}} onBlur={e=>setQF('mileageRate',e.target.value===''?0:e.target.value)}/>
                       </div>
                       <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
                         <label className="form-label">Maximum Mileage Allowance</label>
@@ -4402,7 +4404,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
                     <span>Mileage Rate ($/km)</span>
                     <span style={{color:'var(--text3)',fontWeight:400,fontSize:10}}>charged to hirer</span>
                   </label>
-                  <input type="text" inputMode="decimal" value={form.mileageRate||''} onChange={e=>set('mileageRate',e.target.value)} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';e.target.select();}} onBlur={e=>set('mileageRate',parseFloat(e.target.value)||0)}/>
+                  <input type="text" inputMode="decimal" value={form.mileageRate||''} onChange={e=>set('mileageRate',e.target.value)} onFocus={e=>{if(!e.target.value||parseFloat(e.target.value||'0')===0)e.target.value='';else e.target.select();}} onBlur={e=>set('mileageRate',parseFloat(e.target.value)||0)}/>
                   <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>e.g. 0.18 = 18 cents/km</div>
                 </div>
                 <div className="form-group" style={{marginBottom:0}}>
@@ -4410,7 +4412,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
                     <span>RUC Rate ($/km)</span>
                     <span style={{color:'var(--text3)',fontWeight:400,fontSize:10}}>road user charges</span>
                   </label>
-                  <input type="text" inputMode="decimal" value={form.rucRate||''} onChange={e=>set('rucRate',e.target.value)} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';e.target.select();}} onBlur={e=>set('rucRate',parseFloat(e.target.value)||0)}/>
+                  <input type="text" inputMode="decimal" value={form.rucRate||''} onChange={e=>set('rucRate',e.target.value)} onFocus={e=>{if(!e.target.value||parseFloat(e.target.value||'0')===0)e.target.value='';else e.target.select();}} onBlur={e=>set('rucRate',parseFloat(e.target.value)||0)}/>
                   <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>e.g. 0.062 = standard RUC</div>
                 </div>
                 <div className="form-group" style={{marginBottom:0}}>
@@ -6638,14 +6640,14 @@ const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xer
             <div className="form-group"><label>Company Name</label><input defaultValue="SS Rentals Ltd"/></div>
             <div className="form-group"><label>GST Number</label><input defaultValue="123-456-789"/></div>
             <div className="form-group"><label>Address</label><input defaultValue="Auckland, New Zealand"/></div>
-            <div className="form-group"><label>Default RUC Rate ($/km)</label><input defaultValue="0.062" type="text" inputMode="decimal" onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';e.target.select();}}/></div>
+            <div className="form-group"><label>Default RUC Rate ($/km)</label><input defaultValue="0.062" type="text" inputMode="decimal" onFocus={e=>{if(!e.target.value||parseFloat(e.target.value||'0')===0)e.target.value='';else e.target.select();}}/></div>
             <button className="btn btn-primary btn-sm">Save Changes</button>
           </div>
           <div className="card"><div className="card-header"><span className="card-title">Invoice Settings</span></div>
             <div className="form-group"><label>Invoice Prefix</label><input defaultValue="INV-2026-"/></div>
-            <div className="form-group"><label>Default Payment Terms (days)</label><input defaultValue="7" type="text" inputMode="decimal" onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';e.target.select();}}/></div>
+            <div className="form-group"><label>Default Payment Terms (days)</label><input defaultValue="7" type="text" inputMode="decimal" onFocus={e=>{if(!e.target.value||parseFloat(e.target.value||'0')===0)e.target.value='';else e.target.select();}}/></div>
             <div className="form-group"><label>Invoice Day</label><select><option>Monday (weekly)</option><option>Sunday</option></select></div>
-            <div className="form-group"><label>GST Rate (%)</label><input defaultValue="15" type="text" inputMode="decimal" onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';e.target.select();}}/></div>
+            <div className="form-group"><label>GST Rate (%)</label><input defaultValue="15" type="text" inputMode="decimal" onFocus={e=>{if(!e.target.value||parseFloat(e.target.value||'0')===0)e.target.value='';else e.target.select();}}/></div>
             <button className="btn btn-primary btn-sm">Save Changes</button>
           </div>
         </div>
