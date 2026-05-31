@@ -4692,7 +4692,8 @@ const sendBulkSMSReal = async (messages) => {
     const formatted = messages.map(m => ({
       to: formatNZPhone(m.to),
       body: m.body,
-      source: 'SS Rentals',
+      source: 'ssrentalsnz',
+      from: 'SSRentals',
     }));
     const res = await fetch('https://rest.clicksend.com/v3/sms/send', {
       method: 'POST',
@@ -4700,8 +4701,16 @@ const sendBulkSMSReal = async (messages) => {
       body: JSON.stringify({ messages: formatted }),
     });
     const data = await res.json();
-    if (!res.ok) return messages.map(() => ({ status: 'FAILED', error: data?.response_msg || 'API error ' + res.status }));
-    return data?.data?.messages || [];
+    console.log('[ClickSend] Response:', res.status, JSON.stringify(data).slice(0,500));
+    if (!res.ok) return messages.map(() => ({ status: 'FAILED', error: data?.response_msg || data?.message || 'API error ' + res.status }));
+    // ClickSend response: data.data.messages[] each with status='SUCCESS' and status_code=200
+    const msgs = data?.data?.messages || [];
+    return msgs.map(m => ({
+      status: m.status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
+      message_id: m.message_id,
+      message: m.custom_string || '',
+      to: m.to,
+    }));
   } catch(e) { return messages.map(() => ({ status: 'FAILED', error: e.message })); }
 };
 
@@ -4957,7 +4966,7 @@ const CommunicationsPage = () => {
 
     // Build all messages first
     const allMessages = selectedCustomers.map(custId => {
-      const cust = CUSTOMERS.find(c=>c.id===custId);
+      const cust = getAllCustomers().find(c=>c.id===custId);
       if (!cust) return null;
       const vars = buildVars(cust);
       return {
@@ -4982,23 +4991,26 @@ const CommunicationsPage = () => {
           setSending(false); return;
         }
         const bulkResults = await sendBulkSMSReal(smsMessages);
-        allMessages.forEach((m,i) => {
-          const r = bulkResults[i];
-          // ClickSend direct API: status 'SUCCESS' means queued/sent
-          const ok = r && (r.status === 'SUCCESS' || r.status === 'QUEUED');
-          const status = ok ? 'sent' : r?.status === 'NO_CREDENTIALS' ? 'failed' : m.cust.phone ? 'failed' : 'no_phone';
-          const errNote = (!ok && r?.error) ? r.error : (!ok && r?.status) ? r.status : '';
+        console.log('[SMS] Sent to', smsMessages.length, 'numbers. Results:', JSON.stringify(bulkResults));
+        // Map results back using index into smsMessages (not allMessages)
+        let smsIdx = 0;
+        allMessages.forEach((m) => {
+          if (!m.cust.phone) {
+            results.push({custId:m.custId,customerName:m.cust.company,channel:'sms',status:'no_phone',phone:'',preview:m.smsText.slice(0,60),templateName:useCustom?'Custom':tpl?.name||''});
+            return;
+          }
+          const r = bulkResults[smsIdx++];
+          const ok = r && (r.status === 'SUCCESS' || r.status === 'QUEUED' || r.status === 200);
+          const status = ok ? 'sent' : 'failed';
+          const errNote = (!ok && r?.message) ? r.message : (!ok && r?.status) ? String(r.status) : '';
           results.push({
             custId:m.custId, customerName:m.cust.company, channel:'sms',
             templateId:useCustom?'custom':selectedTemplate,
-            templateName:useCustom?'Custom Message':tpl.name,
+            templateName:useCustom?'Custom Message':tpl?.name||'',
             subject:m.emailSubj, preview:m.smsText.slice(0,80),
             status, phone:m.cust.phone, messageId:r?.message_id,
             deliveryStatus:r?.status, errorNote: errNote,
           });
-        });
-        allMessages.filter(m=>!m.cust.phone).forEach(m=>{
-          results.push({custId:m.custId,customerName:m.cust.company,channel:'sms',status:'no_phone',phone:'',preview:m.smsText.slice(0,60),templateName:useCustom?'Custom':tpl.name});
         });
       }
     }
