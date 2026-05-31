@@ -652,7 +652,13 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
       if (hireRows) pullUpdates += pullHiresFromSheet(hireRows);
       // Read Customers tab
       const custRows = await readSheetTab(accessToken, spreadsheetId, 'Customers');
-      if (custRows) pullUpdates += pullCustomersFromSheet(custRows);
+      console.log('[Sync] Raw Customers sheet rows:', JSON.stringify(custRows));
+      if (custRows) {
+        const added = pullCustomersFromSheet(custRows);
+        pullUpdates += added;
+        console.log('[Sync] pullCustomersFromSheet returned:', added);
+        console.log('[Sync] localStorage new customers after pull:', JSON.stringify(loadNewCustomers()));
+      }
     } catch(e) { console.error('Sheet pull error:', e.message); }
 
     // STEP 2: Push all current app data TO Sheets
