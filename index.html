@@ -650,14 +650,53 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
       // Read Hire Management tab
       const hireRows = await readSheetTab(accessToken, spreadsheetId, 'Hire Management');
       if (hireRows) pullUpdates += pullHiresFromSheet(hireRows);
-      // Read Customers tab
+      // Read Customers tab — import any new rows directly
       const custRows = await readSheetTab(accessToken, spreadsheetId, 'Customers');
-      console.log('[Sync] Raw Customers sheet rows:', JSON.stringify(custRows));
-      if (custRows) {
-        const added = pullCustomersFromSheet(custRows);
-        pullUpdates += added;
-        console.log('[Sync] pullCustomersFromSheet returned:', added);
-        console.log('[Sync] localStorage new customers after pull:', JSON.stringify(loadNewCustomers()));
+      if (custRows && custRows.length > 1) {
+        const hdrs = custRows[0].map(h=>(h||'').toString().trim().toLowerCase());
+        const ci = n => hdrs.indexOf(n.toLowerCase());
+        const compI=ci('company'), idI=ci('id'), contI=ci('contact'),
+              phoneI=ci('phone'), emailI=ci('email'), statusI=ci('status'), notesI=ci('notes');
+        if (compI >= 0) {
+          // Get all currently known companies fresh from localStorage
+          const existing = loadNewCustomers();
+          const knownNames = new Set([
+            ...CUSTOMERS.map(c=>c.company.toLowerCase().trim()),
+            ...existing.map(c=>c.company.toLowerCase().trim())
+          ]);
+          const knownIds = new Set([
+            ...CUSTOMERS.map(c=>c.id),
+            ...existing.map(c=>c.id)
+          ]);
+          let newOnes = [];
+          custRows.slice(1).forEach((row,ri) => {
+            const company = compI>=0 ? (row[compI]||'').toString().trim() : '';
+            if (!company) return;
+            const id = idI>=0 ? (row[idI]||'').toString().trim() : '';
+            if (knownNames.has(company.toLowerCase().trim())) return;
+            if (id && knownIds.has(id)) return;
+            const newId = id || ('CS'+(Date.now()+ri).toString().slice(-6));
+            newOnes.push({
+              id: newId, company,
+              contact: contI>=0?(row[contI]||'').toString().trim():'',
+              phone: phoneI>=0?(row[phoneI]||'').toString().trim():'',
+              email: emailI>=0?(row[emailI]||'').toString().trim():'',
+              status: statusI>=0&&row[statusI]?row[statusI].toString().toLowerCase().trim():'active',
+              notes: notesI>=0?(row[notesI]||'').toString().trim():'',
+              credit_rating:'B+',ytd_revenue:0,weekly_truck:0,weekly_trailer:0,
+              outstanding:0,payment_terms:'Weekly',
+              joined:new Date().toISOString().slice(0,10),_fromSheet:true
+            });
+            knownNames.add(company.toLowerCase().trim());
+            knownIds.add(newId);
+          });
+          if (newOnes.length > 0) {
+            const updated = [...existing, ...newOnes];
+            saveNewCustomers(updated);
+            pullUpdates += newOnes.length;
+            console.log('[Sync] Added', newOnes.length, 'new customers:', newOnes.map(c=>c.company));
+          }
+        }
       }
     } catch(e) { console.error('Sheet pull error:', e.message); }
 
@@ -1744,7 +1783,7 @@ const createNewCustomer = (data) => {
   return cust;
 };
 
-const CustomersPage = ({refreshKey=0}) => {
+const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
   const [sel,setSel]=useState(null);
   const [search,setSearch]=useState('');
   const [showAdd,setShowAdd]=useState(false);
@@ -1752,7 +1791,58 @@ const CustomersPage = ({refreshKey=0}) => {
   const [custRefresh,setCustRefresh]=useState(0);
   const [statusFilter, setStatusFilter] = useState('all');
   const [allCusts, setAllCusts] = useState(()=>getAllCustomers());
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState('');
   useEffect(()=>{ setAllCusts(getAllCustomers()); }, [refreshKey, custRefresh]);
+
+  const handleImportFromSheet = async () => {
+    if (!sheetsConfig?.accessToken || !sheetsConfig?.spreadsheetId) {
+      setImportMsg('Google Sheets not connected. Go to Settings first.'); return;
+    }
+    setImporting(true); setImportMsg('Reading Customers sheet…');
+    try {
+      const rows = await readSheetTab(sheetsConfig.accessToken, sheetsConfig.spreadsheetId, 'Customers');
+      if (!rows || rows.length < 2) { setImportMsg('No data found in Customers sheet.'); setImporting(false); return; }
+      const hdrs = rows[0].map(h=>(h||'').toString().trim().toLowerCase());
+      const ci = n => hdrs.indexOf(n.toLowerCase());
+      const compI=ci('company'),idI=ci('id'),contI=ci('contact'),phoneI=ci('phone'),emailI=ci('email'),statusI=ci('status'),notesI=ci('notes');
+      if (compI < 0) { setImportMsg('No "Company" column found in sheet.'); setImporting(false); return; }
+      const existing = loadNewCustomers();
+      const knownNames = new Set([...CUSTOMERS.map(c=>c.company.toLowerCase().trim()),...existing.map(c=>c.company.toLowerCase().trim())]);
+      const knownIds = new Set([...CUSTOMERS.map(c=>c.id),...existing.map(c=>c.id)]);
+      let newOnes = [];
+      rows.slice(1).forEach((row,ri) => {
+        const company = (row[compI]||'').toString().trim();
+        if (!company) return;
+        const id = idI>=0?(row[idI]||'').toString().trim():'';
+        if (knownNames.has(company.toLowerCase().trim())) return;
+        if (id && knownIds.has(id)) return;
+        const newId = id||('CS'+(Date.now()+ri).toString().slice(-6));
+        newOnes.push({
+          id:newId, company,
+          contact:contI>=0?(row[contI]||'').toString().trim():'',
+          phone:phoneI>=0?(row[phoneI]||'').toString().trim():'',
+          email:emailI>=0?(row[emailI]||'').toString().trim():'',
+          status:statusI>=0&&row[statusI]?row[statusI].toString().toLowerCase().trim():'active',
+          notes:notesI>=0?(row[notesI]||'').toString().trim():'',
+          credit_rating:'B+',ytd_revenue:0,weekly_truck:0,weekly_trailer:0,
+          outstanding:0,payment_terms:'Weekly',
+          joined:new Date().toISOString().slice(0,10),_fromSheet:true
+        });
+        knownNames.add(company.toLowerCase().trim());
+        knownIds.add(newId);
+      });
+      if (newOnes.length > 0) {
+        saveNewCustomers([...existing,...newOnes]);
+        setAllCusts(getAllCustomers());
+        setCustRefresh(r=>r+1);
+        setImportMsg('✅ Imported '+newOnes.length+' new customer(s): '+newOnes.map(c=>c.company).join(', '));
+      } else {
+        setImportMsg('✅ All customers already up to date — no new rows found.');
+      }
+    } catch(e) { setImportMsg('Error: '+e.message); }
+    setImporting(false);
+  };
   const filtered=allCusts.filter(c=>{
     if (statusFilter !== 'all' && c.status !== statusFilter) return false;
     if (!search) return true;
@@ -1985,10 +2075,23 @@ const CustomersPage = ({refreshKey=0}) => {
             </button>
           ))}
         </div>
-        <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>
-          <Icon name="plus" size={14}/> Add New Customer
-        </button>
+        <div style={{display:'flex',gap:8}}>
+          {sheetsConfig?.accessToken&&(
+            <button className="btn btn-ghost" onClick={handleImportFromSheet} disabled={importing} style={{borderColor:'#34A853',color:'#34A853'}}>
+              {importing?'⏳ Importing…':'📥 Import from Sheet'}
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>
+            <Icon name="plus" size={14}/> Add New Customer
+          </button>
+        </div>
       </div>
+      {importMsg&&(
+        <div style={{marginBottom:12,padding:'10px 14px',background:importMsg.startsWith('✅')?'rgba(39,174,96,0.08)':'rgba(255,111,0,0.08)',border:`1px solid ${importMsg.startsWith('✅')?'rgba(39,174,96,0.3)':'rgba(255,111,0,0.3)'}`,borderRadius:8,fontSize:13,color:importMsg.startsWith('✅')?'#27AE60':'#FF6F00',fontWeight:500,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span>{importMsg}</span>
+          <button onClick={()=>setImportMsg('')} style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'var(--text3)'}}>×</button>
+        </div>
+      )}
       <div className="grid grid-4 mb-4">
         {[
           {l:'Total Customers',v:allCusts.length},
@@ -6696,7 +6799,7 @@ const App = () => {
   const pages={
     dashboard:<Dashboard theme={theme} setPage={setPage}/>,
     fleet:<FleetPage theme={theme}/>,
-    customers:<CustomersPage refreshKey={dataRefreshKey}/>,
+    customers:<CustomersPage refreshKey={dataRefreshKey} sheetsConfig={sheetsConfig}/>,
     hires:<HiresPage refreshKey={dataRefreshKey}/>,
     invoicing:<InvoicingPage/>,
     maintenance:<MaintenancePage/>,
