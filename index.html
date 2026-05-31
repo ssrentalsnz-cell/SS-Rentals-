@@ -703,7 +703,7 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
               contact: contI>=0?(row[contI]||'').toString().trim():'',
               phone: phoneI>=0?(row[phoneI]||'').toString().trim():'',
               email: emailI>=0?(row[emailI]||'').toString().trim():'',
-              status: statusI>=0&&row[statusI]?row[statusI].toString().toLowerCase().trim():'active',
+              status: statusI>=0&&row[statusI]?row[statusI].toString().toLowerCase().trim():'prospect',
               notes: notesI>=0?(row[notesI]||'').toString().trim():'',
               credit_rating:'B+',ytd_revenue:0,weekly_truck:0,weekly_trailer:0,
               outstanding:0,payment_terms:'Weekly',
@@ -2111,7 +2111,7 @@ const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
         <div className="flex gap-2" style={{flexWrap:'wrap'}}>
           <input style={{width:260}} placeholder="Search by company, contact or director…" value={search} onChange={e=>setSearch(e.target.value)}/>
           {search&&<button className="btn btn-ghost btn-sm" onClick={()=>setSearch('')}>Clear</button>}
-          {['all','active','inactive','blacklisted'].map(s=>(
+          {['all','active','prospect','inactive','blacklisted'].map(s=>(
             <button key={s} className={`btn btn-sm ${statusFilter===s?'btn-primary':'btn-ghost'}`}
               onClick={()=>setStatusFilter(s)}
               style={{textTransform:'capitalize'}}>
@@ -2428,7 +2428,7 @@ const HiresPage = ({refreshKey=0}) => {
           phone: quoteForm.contactPhone||'',
           email: quoteForm.contactEmail||'',
           address: quoteForm.contactAddress||'',
-          status: 'active',
+          status: 'prospect',
           _fromQuote: true,
         });
       }
@@ -2458,7 +2458,7 @@ const HiresPage = ({refreshKey=0}) => {
         createNewCustomer({
           company: quoteForm.companyName, contact: quoteForm.contactName||'',
           phone: quoteForm.contactPhone||'', email: quoteForm.contactEmail||'',
-          address: quoteForm.contactAddress||'', status:'active', _fromQuote:true,
+          address: quoteForm.contactAddress||'', status:'prospect', _fromQuote:true,
         });
       }
     }
@@ -3970,6 +3970,17 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
     const trailer = TRAILERS.find(t => t.id === form.trailer);
     if (trailer && !form.noTrailer) { trailer.status = 'on_hire'; trailer.hirer = form.customer; }
     // Save override
+    // Auto-upgrade customer status from prospect → active when hire is created
+    const hireCustId = custId || form.customer;
+    if (hireCustId) {
+      const hCust = getAllCustomers().find(c=>c.id===hireCustId);
+      if (hCust && hCust.status==='prospect') {
+        const newCusts = loadNewCustomers();
+        const idx = newCusts.findIndex(c=>c.id===hireCustId);
+        if (idx>=0) { newCusts[idx].status='active'; saveNewCustomers(newCusts); }
+        else { saveHireOverride(hireCustId, {status:'active'}); }
+      }
+    }
     // Save full hire to localStorage overrides so it persists across reloads
     saveHireOverride(id, {
       status:'active', end: form.endDate, start: form.startDate,
