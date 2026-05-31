@@ -462,12 +462,16 @@ const pullHiresFromSheet = (rows) => {
 // Pull customer changes from Google Sheets
 const pullCustomersFromSheet = (rows) => {
   if (!rows || rows.length < 2) return 0;
-  const headers = rows[0].map(h => (h||'').toString().trim());
-  const ci = (name) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
-  const compIdx = ci('Company'); const idIdx = ci('ID');
-  const contIdx = ci('Contact'); const phoneIdx = ci('Phone');
-  const emailIdx = ci('Email'); const statusIdx = ci('Status');
-  const notesIdx = ci('Notes'); const outIdx = ci('Outstanding');
+  const headers = rows[0].map(h => (h||'').toString().trim().toLowerCase());
+  const ci = (...names) => { for (const n of names) { const i = headers.findIndex(h=>h===n.toLowerCase()||h.startsWith(n.toLowerCase())); if(i>=0) return i; } return -1; };
+  const compIdx = ci('company name','company');
+  const idIdx   = ci('id');
+  const contIdx = ci('contact person','contact');
+  const phoneIdx= ci('cellphone','phone','mobile');
+  const emailIdx= ci('email');
+  const statusIdx=ci('status');
+  const notesIdx= ci('notes');
+  const outIdx  = ci('outstanding');
 
   if (compIdx === -1) return 0;
 
@@ -651,12 +655,20 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
       const hireRows = await readSheetTab(accessToken, spreadsheetId, 'Hire Management');
       if (hireRows) pullUpdates += pullHiresFromSheet(hireRows);
       // Read Customers tab — import any new rows directly
-      const custRows = await readSheetTab(accessToken, spreadsheetId, 'Customers');
+      // Read both Sheet1 (original) and Customers tab — use whichever has the data
+      const custRowsTab = await readSheetTab(accessToken, spreadsheetId, 'Customers');
+      const sheet1Rows2 = await readSheetTab(accessToken, spreadsheetId, 'Sheet1');
+      const custRows = (sheet1Rows2 && sheet1Rows2.length > (custRowsTab||[]).length) ? sheet1Rows2 : custRowsTab;
       if (custRows && custRows.length > 1) {
         const hdrs = custRows[0].map(h=>(h||'').toString().trim().toLowerCase());
-        const ci = n => hdrs.indexOf(n.toLowerCase());
-        const compI=ci('company'), idI=ci('id'), contI=ci('contact'),
-              phoneI=ci('phone'), emailI=ci('email'), statusI=ci('status'), notesI=ci('notes');
+        const ci = (...names) => { for (const n of names) { const i = hdrs.findIndex(h=>h===n.toLowerCase()||h.startsWith(n.toLowerCase())); if(i>=0) return i; } return -1; };
+        const compI  = ci('company name','company');
+        const idI    = ci('id');
+        const contI  = ci('contact person','contact');
+        const phoneI = ci('cellphone','phone','mobile');
+        const emailI = ci('email');
+        const statusI= ci('status');
+        const notesI = ci('notes');
         if (compI >= 0) {
           // Get all currently known companies fresh from localStorage
           const existing = loadNewCustomers();
@@ -1765,10 +1777,15 @@ const saveNewCustomers = list => localStorage.setItem(CUST_NEW_KEY, JSON.stringi
 // Clean up any blank/invalid entries from previous sync attempts
 const cleanNewCustomers = () => {
   const list = loadNewCustomers();
-  const clean = list.filter(c => c.company && c.company.trim() && c.id);
+  // Remove entries that came from sheet but have no real contact data (broken imports)
+  const clean = list.filter(c => {
+    if (!c.company || !c.company.trim() || !c.id) return false;
+    if (c._fromSheet && !c.phone && !c.contact && !c.email) return false;
+    return true;
+  });
   if (clean.length !== list.length) {
     saveNewCustomers(clean);
-    console.log('[Cleanup] Removed', list.length - clean.length, 'invalid customer entries');
+    console.log('[Cleanup] Removed', list.length - clean.length, 'broken customer entries');
   }
 };
 cleanNewCustomers();
@@ -1811,12 +1828,23 @@ const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
     }
     setImporting(true); setImportMsg('Reading Customers sheet…');
     try {
-      const rows = await readSheetTab(sheetsConfig.accessToken, sheetsConfig.spreadsheetId, 'Customers');
-      if (!rows || rows.length < 2) { setImportMsg('No data found in Customers sheet.'); setImporting(false); return; }
+      // Try both Sheet1 (original) and Customers tab
+      let rows = await readSheetTab(sheetsConfig.accessToken, sheetsConfig.spreadsheetId, 'Sheet1');
+      const custRows = await readSheetTab(sheetsConfig.accessToken, sheetsConfig.spreadsheetId, 'Customers');
+      // Prefer Sheet1 if it has more rows, otherwise use Customers
+      if (!rows || rows.length < 2) rows = custRows;
+      else if (custRows && custRows.length > rows.length) rows = custRows;
+      if (!rows || rows.length < 2) { setImportMsg('No data found in sheet.'); setImporting(false); return; }
       const hdrs = rows[0].map(h=>(h||'').toString().trim().toLowerCase());
-      const ci = n => hdrs.indexOf(n.toLowerCase());
-      const compI=ci('company'),idI=ci('id'),contI=ci('contact'),phoneI=ci('phone'),emailI=ci('email'),statusI=ci('status'),notesI=ci('notes');
-      if (compI < 0) { setImportMsg('No "Company" column found in sheet.'); setImporting(false); return; }
+      const ci = (...names) => { for (const n of names) { const i = hdrs.findIndex(h=>h===n.toLowerCase()||h.startsWith(n.toLowerCase())); if(i>=0) return i; } return -1; };
+      const compI  = ci('company name','company');
+      const idI    = ci('id');
+      const contI  = ci('contact person','contact');
+      const phoneI = ci('cellphone','phone','mobile');
+      const emailI = ci('email');
+      const statusI= ci('status');
+      const notesI = ci('notes');
+      if (compI < 0) { setImportMsg('No "Company" or "Company name" column found in sheet.'); setImporting(false); return; }
       const existing = loadNewCustomers();
       const knownNames = new Set([...CUSTOMERS.map(c=>c.company.toLowerCase().trim()),...existing.map(c=>c.company.toLowerCase().trim())]);
       const knownIds = new Set([...CUSTOMERS.map(c=>c.id),...existing.map(c=>c.id)]);
