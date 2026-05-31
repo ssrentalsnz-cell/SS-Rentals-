@@ -970,7 +970,7 @@ const syncXeroToApp = async (config, onProgress, onDone, onError) => {
     onProgress('Importing ' + xeroInvs.length + ' invoices...', 82);
     // Build customer name lookup
     const custByName = {};
-    CUSTOMERS.forEach(c => { custByName[c.company.toLowerCase().trim()] = c.id; });
+    getAllCustomers().forEach(c => { custByName[c.company.toLowerCase().trim()] = c.id; });
     // Map every Xero invoice to app format
     const xeroImported = xeroInvs.map(xi => {
       const contactName = (xi.Contact && xi.Contact.Name) ? xi.Contact.Name : '';
@@ -3835,7 +3835,7 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
           <table>
             <thead><tr><th>Customer</th><th>Status</th><th>Weekly Rate</th><th>YTD Revenue</th><th>Outstanding</th><th>Credit Rating</th><th>Payment Terms</th></tr></thead>
             <tbody>
-              {CUSTOMERS.filter(c=>c.status==='active').map(c=>(
+              {getAllCustomers().filter(c=>c.status!=='blacklisted').sort((a,b)=>a.company.localeCompare(b.company)).map(c=>(
                 <tr key={c.id}>
                   <td style={{fontWeight:700}}>{c.company}</td>
                   <td><span className="badge badge-green">Active</span></td>
@@ -4923,9 +4923,9 @@ const CommunicationsPage = () => {
   const [filterStatus,setFilterStatus]=useState('overdue');
 
   // Get customers with outstanding balances
-  const overdueCustomers = CUSTOMERS.filter(c=>c.status==='active'&&getInvoices().some(i=>i.customer===c.id&&i.status==='overdue'));
-  const activeCustomers = CUSTOMERS.filter(c=>c.status==='active');
-  const displayCustomers = filterStatus==='overdue'?overdueCustomers:filterStatus==='active'?activeCustomers:CUSTOMERS;
+  const overdueCustomers = getAllCustomers().filter(c=>c.status==='active'&&getInvoices().some(i=>i.customer===c.id&&i.status==='overdue'));
+  const activeCustomers = getAllCustomers().filter(c=>c.status!=='blacklisted');
+  const displayCustomers = filterStatus==='overdue'?overdueCustomers:filterStatus==='active'?activeCustomers:getAllCustomers().filter(c=>c.status!=='blacklisted').sort((a,b)=>a.company.localeCompare(b.company));
 
   const getCustomerInvoices = (custId) => getInvoices().filter(i=>i.customer===custId&&(i.status==='overdue'||i.status==='draft'));
   const getCustomerOverdue = (custId) => getInvoices().filter(i=>i.customer===custId&&i.status==='overdue').reduce((a,i)=>a+i.total,0);
