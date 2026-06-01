@@ -864,14 +864,14 @@ const refreshXeroToken = async (refreshToken) => {
 };
 
 const getXeroTenantId = async (accessToken) => {
-  // Route through proxy to avoid CORS
-  let res = await fetch('https://api.xero.com/connections', {
+  // Use worker path for connections (handles CORS)
+  let res = await fetch(XERO_PROXY + '/xero-api/connections', {
     headers:{ Authorization:'Bearer '+accessToken, Accept:'application/json' }
   }).catch(()=>null);
   if (!res || !res.ok) {
-    res = await fetch(XERO_PROXY + '/xero-api/connections', {
-      headers:{ Authorization:'Bearer '+accessToken }
-    });
+    res = await fetch('https://api.xero.com/connections', {
+      headers:{ Authorization:'Bearer '+accessToken, Accept:'application/json' }
+    }).catch(()=>null);
   }
   if (!res.ok) {
     const txt = await res.text().catch(()=>'');
