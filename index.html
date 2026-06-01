@@ -3749,6 +3749,99 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
     setXeroFetching(false);
   };
 
+  // Export P&L as PDF (print dialog)
+  const handleExportPDF = () => {
+    const months = pnlData;
+    const rows = months.map(m=>`
+      <tr>
+        <td>${m.month}</td>
+        <td style="color:#27AE60;font-weight:700">${fmtCur(m.revenue)}</td>
+        <td>${fmtCur(m.ruc||0)}</td>
+        <td>${fmtCur(m.navman_ruc||0)}</td>
+        <td>${fmtCur(m.insurance||0)}</td>
+        <td>${fmtCur(m.flexi||0)}</td>
+        <td>${fmtCur(m.heartland||0)}</td>
+        <td>${fmtCur(m.repairs||0)}</td>
+        <td>${fmtCur(m.other||0)}</td>
+        <td style="color:#FF6F00;font-weight:700">${fmtCur(m.expenses)}</td>
+        <td style="color:${m.net>=0?'#27AE60':'#d32f2f'};font-weight:700">${fmtCur(m.net)}</td>
+      </tr>`).join('');
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+body{font-family:Arial,sans-serif;font-size:10pt;margin:1.5cm;color:#1a1a2e}
+h1{font-size:16pt;margin-bottom:4px}
+.sub{font-size:10pt;color:#666;margin-bottom:20px}
+table{width:100%;border-collapse:collapse;font-size:9pt}
+th{background:#1a1a2e;color:#fff;padding:7px 8px;text-align:right}
+th:first-child{text-align:left}
+td{padding:6px 8px;border-bottom:1px solid #eee;text-align:right}
+td:first-child{text-align:left;font-weight:600}
+tr:nth-child(even){background:#f9f9f9}
+.total{font-weight:800;background:#f0f4f8;border-top:2px solid #1a1a2e}
+@media print{@page{size:A4 landscape;margin:1.5cm}}
+</style></head><body>
+<h1>SS Rentals — Financial P&L Report</h1>
+<div class="sub">Generated: ${new Date().toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'})} · ${bankTxns.length} bank transactions · YTD Revenue: ${fmtCur(totalRev)}</div>
+<table>
+<thead><tr><th>Month</th><th>Revenue</th><th>RUC</th><th>Navman</th><th>Insurance</th><th>Flexi</th><th>Heartland</th><th>Repairs</th><th>Other</th><th>Total Exp</th><th>Net P&L</th></tr></thead>
+<tbody>${rows}</tbody>
+<tfoot><tr class="total">
+  <td>TOTAL YTD 2026</td>
+  <td style="color:#27AE60">${fmtCur(totalRev)}</td>
+  <td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+  <td style="color:#FF6F00">${fmtCur(totalExp)}</td>
+  <td style="color:${totalNet>=0?'#27AE60':'#d32f2f'}">${fmtCur(totalNet)}</td>
+</tr></tfoot>
+</table>
+</body></html>`;
+    const win = window.open('','_blank');
+    if(!win){alert('Allow pop-ups to export PDF');return;}
+    win.document.write(html);
+    win.document.close();
+    win.onload = ()=>{ win.document.title='SS_Rentals_PL_Report'; setTimeout(()=>win.print(),300); };
+  };
+
+  // Export P&L as Excel (using SheetJS if available, else CSV)
+  const handleExportExcel = () => {
+    if (typeof XLSX !== 'undefined') {
+      // Full Excel export with SheetJS
+      const wb = XLSX.utils.book_new();
+      // P&L sheet
+      const plRows = [
+        ['Month','Revenue','RUC','Navman/GPS','Insurance','Flexi','Heartland','Repairs','Other','Total Expenses','Net P&L','Margin %'],
+        ...pnlData.map(m=>[m.month,m.revenue,m.ruc||0,m.navman_ruc||0,m.insurance||0,m.flexi||0,m.heartland||0,m.repairs||0,m.other||0,m.expenses,m.net,m.revenue>0?Math.round((m.net/m.revenue)*100):0]),
+        ['','','','','','','','','','','',''],
+        ['YTD 2026 TOTAL',totalRev,'','','','','','','',totalExp,totalNet,totalRev>0?Math.round((totalNet/totalRev)*100):0],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(plRows);
+      ws['!cols'] = [{wch:10},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10},{wch:12},{wch:10},{wch:10},{wch:12},{wch:12},{wch:10}];
+      XLSX.utils.book_append_sheet(wb, ws, 'P&L Report');
+      // Bank Transactions sheet
+      if (bankTxns.length > 0) {
+        const txnRows = [
+          ['Date','Payee','Memo','Amount','Type','Category','Source','Imported At'],
+          ...bankTxns.map(t=>[t.date,t.payee,t.memo,t.amount,t.type,CATEGORIES[t.category]?.label||t.category,t.source,t.importedAt])
+        ];
+        const ws2 = XLSX.utils.aoa_to_sheet(txnRows);
+        ws2['!cols'] = [{wch:12},{wch:30},{wch:25},{wch:12},{wch:8},{wch:20},{wch:8},{wch:20}];
+        XLSX.utils.book_append_sheet(wb, ws2, 'Bank Transactions');
+      }
+      XLSX.writeFile(wb, `SS_Rentals_Financial_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+    } else {
+      // Fallback: CSV download
+      const rows = [
+        ['Month','Revenue','RUC','Navman','Insurance','Flexi','Heartland','Repairs','Other','Total Expenses','Net P&L'],
+        ...pnlData.map(m=>[m.month,m.revenue,m.ruc||0,m.navman_ruc||0,m.insurance||0,m.flexi||0,m.heartland||0,m.repairs||0,m.other||0,m.expenses,m.net])
+      ];
+      const csv = rows.map(r=>r.join(',')).join('
+');
+      const blob = new Blob([csv],{type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href=url; a.download=`SS_Rentals_PL_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click(); URL.revokeObjectURL(url);
+    }
+  };
+
   // Pull from Google Sheets bank tab
   const handleSheetsPull = async () => {
     if (!sheetsConfig?.accessToken) { alert('Connect Google Sheets first'); return; }
@@ -3803,8 +3896,8 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
           ))}
         </div>
         <div className="flex gap-2">
-          <button className="btn btn-ghost btn-sm"><Icon name="download" size={13}/> Export PDF</button>
-          <button className="btn btn-ghost btn-sm"><Icon name="download" size={13}/> Export Excel</button>
+          <button className="btn btn-ghost btn-sm" onClick={handleExportPDF}><Icon name="download" size={13}/> Export PDF</button>
+          <button className="btn btn-ghost btn-sm" onClick={handleExportExcel} style={{borderColor:'#217346',color:'#217346'}}><Icon name="download" size={13}/> Export Excel</button>
         </div>
       </div>
 
