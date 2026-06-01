@@ -6583,7 +6583,7 @@ const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xer
               <div style={{flex:1}}>
                 <div style={{fontWeight:700,fontSize:14,marginBottom:2,display:'flex',alignItems:'center',gap:8}}>
                   Google Sheets Live Sync
-                  {sheetsConfig?.clientId&&(sheetsConfig?.accessToken && sheetsConfig?.tokenExpiry > Date.now() ? <span className="badge badge-green">Connected</span> : <span className="badge badge-orange">Reconnecting…</span>)}
+                  {sheetsConfig?.clientId&&(sheetsConfig?.accessToken && sheetsConfig?.tokenExpiry > Date.now() ? <span className="badge badge-green">Connected</span> : <span className="badge badge-gray" title="Click Sync Now to reconnect">Token Expired</span>)}
                 </div>
                 <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}>Auto-syncs fleet, customers, hires, invoices, maintenance &amp; P&L every 5 minutes</div>
                 <div style={{fontSize:11,color:'var(--text3)'}}>
@@ -6942,9 +6942,9 @@ const App = () => {
     if (syncInProgress.current) return;
     const config = cfg || sheetsConfig;
     if (!config?.clientId || !config?.spreadsheetId) return;
-    const fiveMin = 5 * 60 * 1000;
-    if (!config.accessToken || !config.tokenExpiry || Date.now() > config.tokenExpiry - fiveMin) {
-      getValidSheetsConfig(config, (refreshed) => { if (refreshed?.accessToken) setSheetsConfig(refreshed); });
+    // Never auto-refresh token — that causes the Google login popup
+    if (!config.accessToken || !config.tokenExpiry || Date.now() > config.tokenExpiry - 60000) {
+      setSyncState(s=>({...s,error:'Session expired. Click Sync Now in Settings to reconnect.'}));
       return;
     }
     syncInProgress.current = true;
@@ -6957,23 +6957,18 @@ const App = () => {
     );
   },[sheetsConfig]);
 
-  // 5-minute auto-sync — only syncs if token is valid, never triggers popup
+  // 5-minute auto-sync — ONLY syncs when token is valid, NEVER triggers any popup
   useEffect(()=>{
     if (!sheetsConfig?.clientId) return;
     if (autoSyncTimer.current) clearInterval(autoSyncTimer.current);
-    // On load: only sync if token is still valid (not expired)
-    const tokenOk = sheetsConfig?.accessToken && sheetsConfig?.tokenExpiry && Date.now() < sheetsConfig.tokenExpiry;
-    if (tokenOk) doSync(sheetsConfig);
-    // Every 5 min: try silent refresh then sync — never popup
+    // On load: sync only if token still valid
+    const isTokenValid = (cfg) => cfg?.accessToken && cfg?.tokenExpiry && Date.now() < cfg.tokenExpiry - 60000;
+    if (isTokenValid(sheetsConfig)) doSync(sheetsConfig);
+    // Every 5 min: sync ONLY if token still valid — no refresh, no popup ever
     autoSyncTimer.current = setInterval(()=>{
       const cfg = loadSheetsConfig();
-      if (!cfg?.clientId) return;
-      getValidSheetsConfig(cfg, (refreshed) => {
-        if (refreshed?.accessToken) {
-          if (refreshed.accessToken !== sheetsConfig?.accessToken) setSheetsConfig(refreshed);
-          doSync(refreshed);
-        }
-      });
+      if (isTokenValid(cfg)) doSync(cfg);
+      // If token expired: do nothing, just wait for user to manually reconnect
     }, 5*60*1000);
     return ()=>clearInterval(autoSyncTimer.current);
   },[sheetsConfig?.clientId]);
