@@ -3233,14 +3233,31 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
   };
 
   const handlePushToXero = async () => {
-    if (!xeroConfig?.accessToken) { alert('Connect Xero first in Settings → Integrations.'); return; }
+    if (!xeroConfig?.clientId) { alert('Connect Xero first in Settings → Integrations.'); return; }
     if (!window.confirm('Push invoice '+inv.id+' for '+inv.customerName+' ('+fmtCur(inv.total)+' incl GST) to Xero as Draft?')) return;
     setPushing(true); setPushResult(null);
     try {
+      // Refresh Xero token if expired
+      let cfg = xeroConfig;
+      if (!cfg.accessToken || !cfg.tokenExpiry || Date.now() > cfg.tokenExpiry - 60000) {
+        try {
+          if (cfg.refreshToken) {
+            const refreshed = await refreshXeroToken(cfg.refreshToken);
+            cfg = {...cfg, ...refreshed};
+            saveXeroConfig(cfg);
+          } else {
+            setPushResult({ok:false, msg:'Xero session expired. Go to Settings → Xero → Reconnect.'});
+            setPushing(false); return;
+          }
+        } catch(e) {
+          setPushResult({ok:false, msg:'Xero token refresh failed: '+e.message+'. Go to Settings → Reconnect Xero.'});
+          setPushing(false); return;
+        }
+      }
       // Call Xero API directly (supports browser CORS) with proxy fallback
       const xeroDirect = 'https://api.xero.com/api.xro/2.0';
       const xeroViaProxy = XERO_PROXY + '/xero-api/api.xro/2.0';
-      const authHeaders = { Authorization:'Bearer '+xeroConfig.accessToken, 'Xero-tenant-id':xeroConfig.tenantId, 'Content-Type':'application/json' };
+      const authHeaders = { Authorization:'Bearer '+cfg.accessToken, 'Xero-tenant-id':cfg.tenantId||xeroConfig.tenantId, 'Content-Type':'application/json' };
 
       // Helper: try direct first, fall back to proxy
       const xeroFetch = async (path, opts={}) => {
@@ -3287,6 +3304,10 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
         method: 'POST',
         body: JSON.stringify({Invoices:[xeroInvoice]})
       });
+      if (!res) {
+        setPushResult({ok:false, msg:'Could not reach Xero API. Check your internet connection and that Xero is connected in Settings.'});
+        setPushing(false); return;
+      }
       const data = await res.json();
       const created = data?.Invoices?.[0];
       if (created?.InvoiceID) {
