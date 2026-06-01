@@ -3832,8 +3832,7 @@ tr:nth-child(even){background:#f9f9f9}
         ['Month','Revenue','RUC','Navman','Insurance','Flexi','Heartland','Repairs','Other','Total Expenses','Net P&L'],
         ...pnlData.map(m=>[m.month,m.revenue,m.ruc||0,m.navman_ruc||0,m.insurance||0,m.flexi||0,m.heartland||0,m.repairs||0,m.other||0,m.expenses,m.net])
       ];
-      const csv = rows.map(r=>r.join(',')).join('
-');
+      const csv = rows.map(r=>r.join(',')).join('\n');
       const blob = new Blob([csv],{type:'text/csv'});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
