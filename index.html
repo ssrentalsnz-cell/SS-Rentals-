@@ -3237,14 +3237,23 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
     if (!window.confirm('Push invoice '+inv.id+' for '+inv.customerName+' ('+fmtCur(inv.total)+' incl GST) to Xero as Draft?')) return;
     setPushing(true); setPushResult(null);
     try {
-      // Use the same XERO_PROXY path format as the existing Xero sync
-      const xeroBase = XERO_PROXY + '/xero-api/api.xro/2.0';
-      const headers = { Authorization:'Bearer '+xeroConfig.accessToken, 'Xero-tenant-id':xeroConfig.tenantId, 'Content-Type':'application/json' };
+      // Call Xero API directly (supports browser CORS) with proxy fallback
+      const xeroDirect = 'https://api.xero.com/api.xro/2.0';
+      const xeroViaProxy = XERO_PROXY + '/xero-api/api.xro/2.0';
+      const authHeaders = { Authorization:'Bearer '+xeroConfig.accessToken, 'Xero-tenant-id':xeroConfig.tenantId, 'Content-Type':'application/json' };
+
+      // Helper: try direct first, fall back to proxy
+      const xeroFetch = async (path, opts={}) => {
+        let res = await fetch(xeroDirect+path, {...opts, headers:{...authHeaders,...(opts.headers||{})}}).catch(()=>null);
+        if (!res || !res.ok) res = await fetch(xeroViaProxy+path, {...opts, headers:{...authHeaders,...(opts.headers||{})}}).catch(()=>null);
+        return res;
+      };
+
       // Find Xero contact by name
       let contactId = null;
       try {
-        const contactsRes = await fetch(xeroBase+'/Contacts?where=Name%3D%3D%22'+encodeURIComponent(inv.customerName)+'%22', {headers});
-        if (contactsRes.ok) {
+        const contactsRes = await xeroFetch('/Contacts?where=Name%3D%3D%22'+encodeURIComponent(inv.customerName)+'%22');
+        if (contactsRes?.ok) {
           const cd = await contactsRes.json();
           contactId = cd?.Contacts?.[0]?.ContactID || null;
         }
@@ -3274,9 +3283,8 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
         LineItems: lineItems,
       };
 
-      const res = await fetch(xeroBase+'/Invoices', {
+      const res = await xeroFetch('/Invoices', {
         method: 'POST',
-        headers,
         body: JSON.stringify({Invoices:[xeroInvoice]})
       });
       const data = await res.json();
