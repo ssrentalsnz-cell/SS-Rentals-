@@ -3404,9 +3404,7 @@ const parsePDFStatement = async (file) => {
 
 const parsePDFText = (text) => {
   const txns = [];
-  const lines = text.split(/
-|
-/).map(l=>l.trim()).filter(Boolean);
+  const lines = text.split(/\n|\r/).map(l=>l.trim()).filter(Boolean);
   // Pattern: date followed by description and amount
   // NZ bank date patterns: DD Mon YYYY, DD/MM/YYYY, YYYY-MM-DD
   const datePatterns = [
