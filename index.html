@@ -8,6 +8,9 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>if(typeof pdfjsLib!=='undefined')pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -3324,6 +3327,156 @@ const parseASBCsv = (text) => {
   return txns;
 };
 
+// ── Excel / CSV Parser (handles any bank CSV or Excel) ──────────
+const parseExcelFile = (buffer) => {
+  const wb = XLSX.read(buffer, {type:'array', cellDates:true});
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, dateNF:'yyyy-mm-dd'});
+  return parseGenericRows(rows);
+};
+
+const parseGenericRows = (rows) => {
+  if (!rows || rows.length < 2) return [];
+  // Find header row
+  let headerRow = 0;
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    const r = rows[i].map(c=>(c||'').toString().toLowerCase());
+    if (r.some(c=>c.includes('date')) && r.some(c=>c.includes('amount')||c.includes('debit')||c.includes('credit'))) {
+      headerRow = i; break;
+    }
+  }
+  const headers = rows[headerRow].map(c=>(c||'').toString().toLowerCase().trim());
+  const ci = (...names) => { for (const n of names) { const i = headers.findIndex(h=>h.includes(n)); if(i>=0) return i; } return -1; };
+  const dateI   = ci('date');
+  const payeeI  = ci('payee','merchant','description','particulars','other party','tran','narr');
+  const memoI   = ci('memo','reference','details','code','analysis');
+  const amtI    = ci('amount','net amount');
+  const debitI  = ci('debit','withdrawals','payment');
+  const creditI = ci('credit','deposits','receipt');
+  const idI     = ci('unique id','transaction id','id','reference number');
+  if (dateI === -1) return [];
+  const txns = [];
+  rows.slice(headerRow + 1).forEach((row, ri) => {
+    if (!row || row.every(c=>!c)) return;
+    let dateStr = (row[dateI]||'').toString().trim();
+    if (!dateStr) return;
+    // Normalise date to YYYY-MM-DD
+    dateStr = dateStr.replace(/\//g,'-').replace(/(\d{2})-(\d{2})-(\d{4})/,'$3-$2-$1');
+    if (!/^\d{4}-\d{2}-\d{2}/.test(dateStr)) return;
+    dateStr = dateStr.slice(0,10);
+    const payee = payeeI>=0 ? (row[payeeI]||'').toString().trim() : '';
+    const memo  = memoI>=0  ? (row[memoI]||'').toString().trim()  : '';
+    let amount = 0;
+    if (amtI >= 0) {
+      amount = parseFloat((row[amtI]||'').toString().replace(/[^0-9.\-]/g,'')) || 0;
+    } else {
+      const credit = parseFloat((row[creditI]||'').toString().replace(/[^0-9.]/g,'')) || 0;
+      const debit  = parseFloat((row[debitI] ||'').toString().replace(/[^0-9.]/g,'')) || 0;
+      amount = credit > 0 ? credit : -debit;
+    }
+    if (amount === 0) return;
+    const id = idI>=0 ? (row[idI]||'').toString().trim() : '';
+    const uniqueId = id || dateStr+'_'+ri+'_'+Math.abs(amount);
+    txns.push({
+      id: uniqueId, date: dateStr, payee, memo, amount,
+      type: amount>0?'credit':'debit',
+      category: categoriseTxn(payee, memo, amount),
+      source: 'excel', importedAt: new Date().toISOString()
+    });
+  });
+  return txns;
+};
+
+// ── PDF Bank Statement Parser ─────────────────────────────────
+const parsePDFStatement = async (file) => {
+  if (typeof pdfjsLib === 'undefined') throw new Error('PDF library not loaded. Please refresh the page and try again.');
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+  let fullText = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(item=>item.str).join(' ');
+    fullText += pageText + '
+';
+  }
+  return parsePDFText(fullText);
+};
+
+const parsePDFText = (text) => {
+  const txns = [];
+  const lines = text.split(/
+|
+/).map(l=>l.trim()).filter(Boolean);
+  // Pattern: date followed by description and amount
+  // NZ bank date patterns: DD Mon YYYY, DD/MM/YYYY, YYYY-MM-DD
+  const datePatterns = [
+    /(\d{2}\/\d{2}\/\d{4})/,
+    /(\d{2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})/i,
+    /(\d{4}-\d{2}-\d{2})/,
+    /(\d{2}-\d{2}-\d{4})/,
+  ];
+  const amountPattern = /(-?[\$]?\s*[\d,]+\.\d{2})\s*(?:CR|DR|cr|dr)?/g;
+
+  lines.forEach((line, idx) => {
+    let dateStr = null;
+    for (const pat of datePatterns) {
+      const m = line.match(pat);
+      if (m) {
+        const raw = m[1];
+        // Convert to YYYY-MM-DD
+        if (/\d{2}\/\d{2}\/\d{4}/.test(raw)) {
+          const [d,mo,y] = raw.split('/');
+          dateStr = `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
+        } else if (/\d{4}-\d{2}-\d{2}/.test(raw)) {
+          dateStr = raw;
+        } else if (/\d{2}-\d{2}-\d{4}/.test(raw)) {
+          const [d,mo,y] = raw.split('-');
+          dateStr = `${y}-${mo}-${d}`;
+        } else {
+          // "DD Mon YYYY"
+          const parts = raw.split(/\s+/);
+          const months = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+          if (parts.length===3) dateStr = `${parts[2]}-${months[parts[1]]||'01'}-${parts[0].padStart(2,'0')}`;
+        }
+        break;
+      }
+    }
+    if (!dateStr) return;
+
+    // Find amounts in this line
+    const amounts = [];
+    let m;
+    amountPattern.lastIndex = 0;
+    const lineForAmt = line;
+    while ((m = amountPattern.exec(lineForAmt)) !== null) {
+      const raw = m[1].replace(/[\$,\s]/g,'');
+      const val = parseFloat(raw);
+      if (!isNaN(val) && val !== 0) {
+        const isDr = line.slice(m.index).match(/^[^0-9]*DR/i);
+        amounts.push(isDr ? -Math.abs(val) : val);
+      }
+    }
+    if (amounts.length === 0) return;
+
+    // Description = line minus date and amounts
+    let desc = line.replace(datePatterns[0],'').replace(datePatterns[1],'').replace(datePatterns[2],'').replace(datePatterns[3],'');
+    desc = desc.replace(/(-?[\$]?\s*[\d,]+\.\d{2})\s*(?:CR|DR|cr|dr)?/g,'').replace(/\s+/g,' ').trim();
+
+    const amount = amounts[amounts.length-1]; // Usually last amount is transaction amount
+    if (Math.abs(amount) < 0.01) return;
+
+    txns.push({
+      id: dateStr+'_'+idx+'_'+Math.abs(amount),
+      date: dateStr, payee: desc.slice(0,80), memo: '',
+      amount, type: amount>0?'credit':'debit',
+      category: categoriseTxn(desc,'',amount),
+      source: 'pdf', importedAt: new Date().toISOString()
+    });
+  });
+  return txns.filter(t=>t.date&&!/^0{4}/.test(t.date));
+};
+
 // Categorisation
 const CATEGORIES = {
   income:       { label:'Hire Income',          color:'var(--green)',    keywords:['gocardless','d/c from','truck rent','hire','inv','rental','chardikala','empire trucking','pangly','team freight','ss dhillon','reet invest','convoy','baaz','jatana','kahlon','satpal','shah transport','vertex haulage','dhillon','dhadda','s & z','s&z','s&s','pb48','cambridge diese','gsr transport','samra','sukh'] },
@@ -3418,7 +3571,7 @@ const CsvImportModal = ({open, onClose, parsed, onApprove}) => {
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="modal" style={{maxWidth:620}}>
         <div className="modal-header">
-          <span className="modal-title">Review CSV Import</span>
+          <span className="modal-title">Review Import — {parsed?.[0]?.source==="pdf"?"PDF Statement":parsed?.[0]?.source==="excel"?"Excel/CSV File":"ASB CSV"}</span>
           <button className="icon-btn" onClick={onClose}><Icon name="close" size={18}/></button>
         </div>
         <div className="modal-body">
@@ -3493,7 +3646,10 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
   const [searchTxn,setSearchTxn]=useState('');
   const [dateFrom,setDateFrom]=useState('');
   const [dateTo,setDateTo]=useState('');
-  const fileRef = useRef();
+  const fileRef    = useRef();
+  const excelRef   = useRef();
+  const pdfRef     = useRef();
+  const [importType, setImportType] = useState('');
 
   const pnlData = bankTxns.length>0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL;
   const ytdMonths = pnlData.filter(m=>m.month.startsWith('2026'));
@@ -3521,6 +3677,47 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
     };
     reader.readAsText(file);
     e.target.value='';
+  };
+
+  // Handle Excel/CSV file (generic)
+  const handleExcelSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setStatusMsg('Reading file…');
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const buffer = new Uint8Array(ev.target.result);
+        const parsed = parseExcelFile(buffer);
+        if (parsed.length === 0) { setStatusMsg('No transactions found. Check the file format — need columns: Date, Amount/Debit/Credit, Payee/Description.'); return; }
+        setImportType('excel');
+        setParsedCsv(parsed);
+        setShowImportModal(true);
+        setStatusMsg('');
+      } catch(err) { setStatusMsg('Error reading file: '+err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  // Handle PDF bank statement
+  const handlePDFSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setStatusMsg('Reading PDF… (may take a few seconds)');
+    try {
+      const parsed = await parsePDFStatement(file);
+      if (parsed.length === 0) {
+        setStatusMsg('No transactions detected in PDF. The PDF may be scanned/image-based or in an unsupported format. Try exporting as CSV instead.');
+        e.target.value = '';
+        return;
+      }
+      setImportType('pdf');
+      setParsedCsv(parsed);
+      setShowImportModal(true);
+      setStatusMsg('');
+    } catch(err) { setStatusMsg('Error reading PDF: '+err.message); }
+    e.target.value = '';
   };
 
   // Approve import — merge with dedup
@@ -3628,9 +3825,17 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
                 {statusMsg&&<div style={{fontSize:12,marginTop:2,color:statusMsg.startsWith('✓')?'var(--green)':statusMsg.startsWith('Error')||statusMsg.includes('error')?'var(--red-light)':'var(--text2)'}}>{statusMsg}</div>}
               </div>
               <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
-                <input ref={fileRef} type="file" accept=".csv" style={{display:'none'}} onChange={handleFileSelect}/>
+                <input ref={fileRef}  type="file" accept=".csv"                    style={{display:'none'}} onChange={handleFileSelect}/>
+                <input ref={excelRef} type="file" accept=".xlsx,.xls,.csv"         style={{display:'none'}} onChange={handleExcelSelect}/>
+                <input ref={pdfRef}   type="file" accept=".pdf"                    style={{display:'none'}} onChange={handlePDFSelect}/>
                 <button className="btn btn-primary btn-sm" onClick={()=>fileRef.current?.click()}>
-                  <Icon name="download" size={13}/> Upload ASB CSV
+                  📄 Import ASB CSV
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={()=>excelRef.current?.click()} style={{background:'#217346',borderColor:'#1a5c38'}}>
+                  📊 Import Excel / CSV
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={()=>pdfRef.current?.click()} style={{background:'#d32f2f',borderColor:'#b71c1c'}}>
+                  📑 Import PDF Statement
                 </button>
                 <button className="btn btn-ghost btn-sm" onClick={handleXeroFetch} disabled={xeroFetching} style={{borderColor:'#00B8D9',color:'#00B8D9'}}>
                   <Icon name="sync" size={13} color="#00B8D9"/> {xeroFetching?'Fetching…':'Sync from Xero'}
@@ -3653,11 +3858,13 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
               <div style={{fontSize:13,color:'var(--text2)',marginBottom:28,maxWidth:500,margin:'0 auto 28px'}}>
                 Import your ASB statement CSV to automatically track income and expenses and generate real P&amp;L reports. Your data is stored locally — never sent anywhere except Google Sheets if connected.
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,maxWidth:700,margin:'0 auto'}}>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:14,maxWidth:900,margin:'0 auto'}}>
                 {[
-                  {icon:'📥',title:'Upload ASB CSV',desc:'Log in to asb.co.nz → your account → Export → CSV format → upload here'},
-                  {icon:'🔄',title:'Sync from Xero',desc:'If your ASB account is a Xero bank feed, pull transactions directly via the button above'},
-                  {icon:'📊',title:'Pull from Sheets',desc:'If you have a Bank Transactions tab in your Google Sheet, pull it in with dedup protection'},
+                  {icon:'📄',title:'Import ASB CSV',desc:'Log in to asb.co.nz → your account → Export → CSV format → upload here'},
+                  {icon:'📊',title:'Import Excel / CSV',desc:'Upload any bank statement Excel or CSV file — supports most NZ bank formats (ASB, ANZ, BNZ, Westpac, Kiwibank)'},
+                  {icon:'📑',title:'Import PDF Statement',desc:'Upload a PDF bank statement — the system will automatically extract and categorise transactions'},
+                  {icon:'🔄',title:'Sync from Xero',desc:'If your bank account is a Xero bank feed, pull transactions directly via the button above'},
+                  {icon:'📋',title:'Pull from Sheets',desc:'If you have a Bank Transactions tab in your Google Sheet, pull it in with dedup protection'},
                 ].map(c=>(
                   <div key={c.title} style={{padding:'16px',background:'var(--bg3)',borderRadius:10,textAlign:'left'}}>
                     <div style={{fontSize:24,marginBottom:8}}>{c.icon}</div>
