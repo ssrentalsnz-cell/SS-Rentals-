@@ -3029,7 +3029,7 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
 };
 
 /* ─── INVOICING PAGE ──────────────────────────────── */
-const InvoicingPage = () => {
+const InvoicingPage = ({xeroConfig}) => {
   const [tab,setTab]=useState('all');
   const [sel,setSel]=useState(null);
   const [showGen,setShowGen]=useState(false);
@@ -3138,19 +3138,426 @@ const InvoicingPage = () => {
         </table>
       </div>
       {sel&&<InvoiceModal inv={sel} onClose={()=>setSel(null)}/>}
-      {showGen&&(
-        <Modal open onClose={()=>setShowGen(false)} title="Generate Weekly Invoices" footer={<><button className="btn btn-ghost" onClick={()=>setShowGen(false)}>Cancel</button><button className="btn btn-primary">Generate & Push to Xero</button></>}>
-          <p style={{fontSize:13,color:'var(--text2)',marginBottom:16}}>The following weekly invoices will be generated for the period <strong style={{color:'var(--text)'}}>1 June – 7 June 2026</strong> and pushed to Xero:</p>
-          {HIRES.filter(h=>h.status==='active').map(h=>{
-            const c=CUSTOMERS.find(x=>x.id===h.customer);
-            return <div key={h.id} style={{display:'flex',justifyContent:'space-between',padding:'10px 14px',background:'var(--bg3)',borderRadius:8,marginBottom:8,fontSize:13}}><span style={{fontWeight:600}}>{c?.company}</span><span>{truckRego(h.truck)} + {truckRego(h.trailer)}</span><span style={{fontWeight:700}}>{fmtCur(h.weekly_truck+h.weekly_trailer+400)}</span></div>;
-          })}
-          <div className="alert alert-green mt-4"><Icon name="check" size={15}/><div>Mileage and RUC data will be pulled automatically from Navman.</div></div>
-        </Modal>
-      )}
+      {showGen&&<GenerateInvoiceWizard xeroConfig={xeroConfig} onClose={()=>setShowGen(false)}/>}
     </div>
   );
 };
+
+/* ─── GENERATE INVOICE WIZARD ─────────────────────── */
+const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
+  const [step, setStep] = React.useState(1);
+  const [selVehicle, setSelVehicle] = React.useState('');
+  const [invType, setInvType] = React.useState('weekly');
+  const [periodFrom, setPeriodFrom] = React.useState(()=>{
+    const d = new Date(); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10);
+  });
+  const [periodTo, setPeriodTo] = React.useState(()=>new Date().toISOString().slice(0,10));
+  const [inv, setInv] = React.useState(null);
+  const [pushing, setPushing] = React.useState(false);
+  const [pushResult, setPushResult] = React.useState(null);
+  const [auditLog] = React.useState(()=>{ try{return JSON.parse(localStorage.getItem('ss_rentals_inv_audit')||'[]');}catch{return [];} });
+
+  // Resolve vehicle and customer from hires
+  const allHires = getEffectiveHires().filter(h=>h.status==='active');
+  const vehicles = [
+    ...TRUCKS.map(t=>({id:t.id,rego:t.rego,type:'Truck',make:t.make,model:t.model,weekly_km:t.weekly_km,odometer:t.odometer,hirer:t.hirer,hireObj:allHires.find(h=>h.truck===t.id)})),
+    ...TRAILERS.map(t=>({id:t.id,rego:t.rego,type:'Trailer',make:t.make,model:t.model||'',weekly_km:0,odometer:0,hirer:t.hirer,hireObj:allHires.find(h=>h.trailer===t.id)})),
+  ].filter(v=>v.hirer||v.hireObj);
+
+  const selectedVehicle = vehicles.find(v=>v.id===selVehicle);
+  const hire = selectedVehicle?.hireObj || allHires.find(h=>h.truck===selVehicle||h.trailer===selVehicle);
+  const customer = hire ? getAllCustomers().find(c=>c.id===hire.customer) : null;
+  const truck = hire ? TRUCKS.find(t=>t.id===hire.truck) : null;
+  const trailer = hire ? TRAILERS.find(t=>t.id===hire.trailer) : null;
+
+  const getPeriodDays = () => {
+    const d1 = new Date(periodFrom), d2 = new Date(periodTo);
+    return Math.max(1, Math.round((d2-d1)/(1000*60*60*24)));
+  };
+
+  const buildInvoice = () => {
+    if (!hire||!customer) return null;
+    const days = getPeriodDays();
+    const weeks = days/7;
+    // Use hire rates (from localStorage override) or customer defaults
+    const weeklyTruck = hire.weekly_truck || customer.weekly_truck || 0;
+    const weeklyTrailer = hire.weekly_trailer || customer.weekly_trailer || 0;
+    const mileageRate = hire.mileage_rate || customer.mileage_rate || 0;
+    const rucRate = hire.ruc_rate || customer.ruc_rate || 0;
+    const maxMileage = hire.max_mileage || '';
+
+    // Navman mileage — use truck weekly_km as best available data
+    const weeklyKm = truck?.weekly_km || 0;
+    const periodKm = Math.round(weeklyKm * weeks);
+    const mileageCharge = parseFloat((periodKm * mileageRate).toFixed(2));
+    const rucCharge = parseFloat((periodKm * rucRate).toFixed(2));
+
+    let baseRate = 0, baseLabel = '';
+    if (invType==='daily') { baseRate = parseFloat((weeklyTruck/7*days).toFixed(2)); baseLabel = `Daily Hire (${days} days)`; }
+    else if (invType==='weekly') { baseRate = parseFloat((weeklyTruck*weeks).toFixed(2)); baseLabel = `Weekly Hire (${days} days / ${weeks.toFixed(1)} weeks)`; }
+    else { baseRate = weeklyTruck*4.33*Math.max(1,Math.round(weeks/4)); baseLabel = `Monthly Hire`; }
+
+    const trailerCharge = invType==='daily' ? weeklyTrailer/7*days : invType==='weekly' ? weeklyTrailer*weeks : weeklyTrailer*4.33;
+    const subtotal = baseRate + trailerCharge + mileageCharge + rucCharge;
+    const gst = parseFloat((subtotal*0.15).toFixed(2));
+    const total = parseFloat((subtotal+gst).toFixed(2));
+
+    const invNum = 'INV-' + Date.now().toString().slice(-6);
+    const dueDate = new Date(periodTo); dueDate.setDate(dueDate.getDate()+7);
+
+    return {
+      id: invNum, customer: customer.id, customerName: customer.company,
+      contact: customer.contact, phone: customer.phone,
+      hire: hire.id,
+      truck: truck?.rego||'', trailer: trailer?.rego||'',
+      period: `${periodFrom} to ${periodTo}`,
+      date: new Date().toISOString().slice(0,10),
+      due: dueDate.toISOString().slice(0,10),
+      invType, days, weeks: parseFloat(weeks.toFixed(2)),
+      weeklyRate: weeklyTruck, weeklyTrailer,
+      periodKm, mileageRate, rucRate, maxMileage,
+      baseLabel, baseRate: parseFloat(baseRate.toFixed(2)),
+      trailerCharge: parseFloat(trailerCharge.toFixed(2)),
+      mileage: mileageCharge, ruc: rucCharge,
+      subtotal: parseFloat(subtotal.toFixed(2)), gst, total,
+      navmanSource: weeklyKm > 0 ? 'Navman (weekly avg)' : 'Manual — no Navman data',
+      status: 'draft',
+    };
+  };
+
+  const handleBuildPreview = () => {
+    const built = buildInvoice();
+    if (!built) { alert('Could not build invoice — check vehicle and hire data.'); return; }
+    setInv(built);
+    setStep(3);
+  };
+
+  const handlePushToXero = async () => {
+    if (!xeroConfig?.accessToken) { alert('Connect Xero first in Settings → Integrations'); return; }
+    if (!window.confirm(`Push invoice ${inv.id} for ${inv.customerName} (${fmtCur(inv.total)} incl GST) to Xero as Draft?`)) return;
+    setPushing(true); setPushResult(null);
+    try {
+      // Find/create Xero contact
+      const contactsRes = await fetch(
+        'https://xero-proxy.ssrentalsnz.workers.dev/xero-api/Contacts?where=Name%3D%3D%22'+encodeURIComponent(inv.customerName)+'%22',
+        {headers:{Authorization:'Bearer '+xeroConfig.accessToken,'Xero-Tenant-Id':xeroConfig.tenantId}}
+      );
+      const contactsData = await contactsRes.json();
+      const contactId = contactsData?.Contacts?.[0]?.ContactID || null;
+
+      const lineItems = [
+        {Description: inv.baseLabel + ' — ' + inv.truck + (inv.trailer?' + '+inv.trailer:''), Quantity:1, UnitAmount: inv.baseRate, AccountCode:'200', TaxType:'OUTPUT2'},
+      ];
+      if (inv.trailerCharge>0) lineItems.push({Description:'Trailer Hire', Quantity:1, UnitAmount:inv.trailerCharge, AccountCode:'200', TaxType:'OUTPUT2'});
+      if (inv.mileage>0) lineItems.push({Description:`Mileage Charges — ${inv.periodKm.toLocaleString()} km @ $${inv.mileageRate}/km`, Quantity:inv.periodKm, UnitAmount:inv.mileageRate, AccountCode:'200', TaxType:'OUTPUT2'});
+      if (inv.ruc>0) lineItems.push({Description:`RUC Charges — ${inv.periodKm.toLocaleString()} km @ $${inv.rucRate}/km`, Quantity:inv.periodKm, UnitAmount:inv.rucRate, AccountCode:'200', TaxType:'OUTPUT2'});
+
+      const xeroInvoice = {
+        Type: 'ACCREC', Status: 'DRAFT',
+        Contact: contactId ? {ContactID: contactId} : {Name: inv.customerName},
+        Date: inv.date, DueDate: inv.due,
+        LineAmountTypes: 'EXCLUSIVE',
+        Reference: inv.id,
+        LineItems: lineItems,
+      };
+
+      const res = await fetch('https://xero-proxy.ssrentalsnz.workers.dev/xero-api/Invoices', {
+        method: 'POST',
+        headers: {Authorization:'Bearer '+xeroConfig.accessToken,'Xero-Tenant-Id':xeroConfig.tenantId,'Content-Type':'application/json'},
+        body: JSON.stringify({Invoices:[xeroInvoice]})
+      });
+      const data = await res.json();
+      const created = data?.Invoices?.[0];
+      if (created?.InvoiceID) {
+        // Save to audit log
+        const log = JSON.parse(localStorage.getItem('ss_rentals_inv_audit')||'[]');
+        log.unshift({...inv, xero_id: created.InvoiceID, xero_number: created.InvoiceNumber, pushedAt: new Date().toISOString()});
+        localStorage.setItem('ss_rentals_inv_audit', JSON.stringify(log));
+        setPushResult({ok:true, msg:`✅ Invoice ${created.InvoiceNumber||inv.id} created in Xero as Draft. Total: ${fmtCur(inv.total)} incl GST.`, xeroId: created.InvoiceID});
+        setStep(4);
+      } else {
+        setPushResult({ok:false, msg:'Xero error: '+(data?.Elements?.[0]?.ValidationErrors?.[0]?.Message||JSON.stringify(data).slice(0,200))});
+      }
+    } catch(e) { setPushResult({ok:false, msg:'Error: '+e.message}); }
+    setPushing(false);
+  };
+
+  const stepStyle = (n) => ({
+    width:28,height:28,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',
+    fontSize:12,fontWeight:700,flexShrink:0,
+    background:step>n?'#6A1B9A':step===n?'#6A1B9A':'var(--bg3)',
+    color:step>=n?'#fff':'var(--text3)',
+  });
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:680,maxHeight:'90vh',overflowY:'auto'}}>
+        <div className="modal-header">
+          <span className="modal-title"><Icon name="invoice" size={18}/> Generate Invoice</span>
+          <button className="icon-btn" onClick={onClose}><Icon name="close" size={18}/></button>
+        </div>
+        <div className="modal-body">
+
+          {/* Step indicator */}
+          <div style={{display:'flex',alignItems:'center',gap:0,marginBottom:24}}>
+            {[{n:1,l:'Vehicle'},{n:2,l:'Period'},{n:3,l:'Review'},{n:4,l:'Done'}].map((s,i,arr)=>(
+              <React.Fragment key={s.n}>
+                <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+                  <div style={stepStyle(s.n)}>{step>s.n?'✓':s.n}</div>
+                  <span style={{fontSize:10,color:step>=s.n?'#6A1B9A':'var(--text3)',fontWeight:step===s.n?700:400}}>{s.l}</span>
+                </div>
+                {i<arr.length-1&&<div style={{flex:1,height:2,background:step>s.n?'#6A1B9A':'var(--border)',margin:'0 4px',marginBottom:16}}/>}
+              </React.Fragment>
+            ))}
+          </div>
+
+          {/* Step 1 — Select Vehicle */}
+          {step===1&&(
+            <div>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:16}}>Select Vehicle & Invoice Type</div>
+              <div className="form-group" style={{marginBottom:16}}>
+                <label className="form-label">Vehicle on Hire</label>
+                <select className="form-control" value={selVehicle} onChange={e=>setSelVehicle(e.target.value)}>
+                  <option value="">— Select vehicle —</option>
+                  {vehicles.map(v=>{
+                    const c = v.hireObj ? getAllCustomers().find(cu=>cu.id===(v.hireObj.customer)) : null;
+                    return <option key={v.id} value={v.id}>{v.rego} — {v.make} {v.model} {c?'('+c.company+')':''}</option>;
+                  })}
+                </select>
+              </div>
+
+              {selectedVehicle&&customer&&(
+                <div style={{padding:'12px 14px',background:'rgba(106,27,154,0.07)',border:'1px solid rgba(106,27,154,0.2)',borderRadius:8,marginBottom:16,fontSize:12}}>
+                  <div style={{fontWeight:700,fontSize:13,marginBottom:8,color:'#6A1B9A'}}>Auto-retrieved from hire record</div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+                    {[
+                      ['Customer', customer.company],
+                      ['Contact', customer.contact||'—'],
+                      ['Truck', truck?.rego+' '+truck?.make+' '+truck?.model||'—'],
+                      ['Trailer', trailer?.rego||'None'],
+                      ['Weekly Rate', fmtCur(hire.weekly_truck||customer.weekly_truck||0)],
+                      ['Mileage Rate', '$'+(hire.mileage_rate||customer.mileage_rate||0)+'/km'],
+                      ['RUC Rate', '$'+(hire.ruc_rate||customer.ruc_rate||0)+'/km'],
+                      ['Navman KM/wk', (truck?.weekly_km||0).toLocaleString()+' km'],
+                    ].map(([l,v])=>(
+                      <div key={l} style={{background:'var(--bg3)',padding:'6px 10px',borderRadius:6}}>
+                        <div style={{fontSize:10,color:'var(--text3)'}}>{l}</div>
+                        <div style={{fontWeight:700,fontSize:12}}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {!truck?.weekly_km&&<div style={{marginTop:8,padding:'6px 10px',background:'rgba(255,111,0,0.1)',borderRadius:6,fontSize:11,color:'#FF6F00'}}>⚠️ No Navman KM data available — mileage charges will be $0. Update truck weekly_km from Navman page first.</div>}
+                </div>
+              )}
+
+              <div className="form-group" style={{marginBottom:0}}>
+                <label className="form-label">Invoice Type</label>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
+                  {[['daily','📅 Daily'],['weekly','📆 Weekly'],['monthly','🗓 Monthly']].map(([v,l])=>(
+                    <button key={v} onClick={()=>setInvType(v)} style={{
+                      padding:'12px 8px',border:'2px solid',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:700,
+                      borderColor:invType===v?'#6A1B9A':'var(--border)',
+                      background:invType===v?'rgba(106,27,154,0.08)':'var(--card)',
+                      color:invType===v?'#6A1B9A':'var(--text2)',
+                    }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{display:'flex',justifyContent:'flex-end',marginTop:20}}>
+                <button className="btn btn-primary" disabled={!selVehicle||!customer} onClick={()=>setStep(2)}>Next: Set Period →</button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2 — Period */}
+          {step===2&&(
+            <div>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:16}}>Set Invoice Period</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:16}}>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label className="form-label">Period From</label>
+                  <input className="form-control" type="date" value={periodFrom} onChange={e=>setPeriodFrom(e.target.value)}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label className="form-label">Period To</label>
+                  <input className="form-control" type="date" value={periodTo} onChange={e=>setPeriodTo(e.target.value)}/>
+                </div>
+              </div>
+              <div style={{padding:'10px 14px',background:'var(--bg3)',borderRadius:8,fontSize:12,marginBottom:16}}>
+                <strong>Duration:</strong> {getPeriodDays()} days ({(getPeriodDays()/7).toFixed(1)} weeks) &nbsp;·&nbsp;
+                <strong>Navman KM:</strong> {Math.round((truck?.weekly_km||0)*(getPeriodDays()/7)).toLocaleString()} km estimated
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',marginTop:20}}>
+                <button className="btn btn-ghost" onClick={()=>setStep(1)}>← Back</button>
+                <button className="btn btn-primary" onClick={handleBuildPreview}>Next: Preview Invoice →</button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3 — Review */}
+          {step===3&&inv&&(
+            <div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+                <div style={{fontWeight:700,fontSize:14}}>Invoice Preview — {inv.id}</div>
+                <span className="badge badge-gray">Draft</span>
+              </div>
+
+              {/* Header */}
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+                <div style={{padding:'12px 14px',background:'var(--bg3)',borderRadius:8}}>
+                  <div style={{fontSize:10,color:'var(--text3)',marginBottom:4,textTransform:'uppercase',fontWeight:700}}>Bill To</div>
+                  <div style={{fontWeight:700}}>{inv.customerName}</div>
+                  <div style={{fontSize:12,color:'var(--text2)'}}>{inv.contact}</div>
+                  <div style={{fontSize:12,color:'var(--text2)'}}>{inv.phone}</div>
+                </div>
+                <div style={{padding:'12px 14px',background:'var(--bg3)',borderRadius:8}}>
+                  <div style={{fontSize:10,color:'var(--text3)',marginBottom:4,textTransform:'uppercase',fontWeight:700}}>Invoice Details</div>
+                  <div style={{fontSize:12}}><strong>Period:</strong> {inv.period}</div>
+                  <div style={{fontSize:12}}><strong>Issue Date:</strong> {fmt(inv.date)}</div>
+                  <div style={{fontSize:12}}><strong>Due Date:</strong> {fmt(inv.due)} (7 days)</div>
+                  <div style={{fontSize:12}}><strong>Vehicle:</strong> {inv.truck}{inv.trailer?' + '+inv.trailer:''}</div>
+                </div>
+              </div>
+
+              {/* Line items */}
+              <div className="table-wrap" style={{marginBottom:12}}>
+                <table>
+                  <thead><tr><th>Description</th><th style={{textAlign:'right'}}>Qty</th><th style={{textAlign:'right'}}>Rate</th><th style={{textAlign:'right'}}>Amount</th></tr></thead>
+                  <tbody>
+                    <tr>
+                      <td>{inv.baseLabel}</td>
+                      <td style={{textAlign:'right'}}>1</td>
+                      <td style={{textAlign:'right'}}>{fmtCur(inv.baseRate)}</td>
+                      <td style={{textAlign:'right',fontWeight:700}}>{fmtCur(inv.baseRate)}</td>
+                    </tr>
+                    {inv.trailerCharge>0&&<tr>
+                      <td>Trailer Hire — {inv.trailer}</td>
+                      <td style={{textAlign:'right'}}>1</td>
+                      <td style={{textAlign:'right'}}>{fmtCur(inv.trailerCharge)}</td>
+                      <td style={{textAlign:'right',fontWeight:700}}>{fmtCur(inv.trailerCharge)}</td>
+                    </tr>}
+                    {inv.mileage>0&&<tr>
+                      <td style={{fontSize:12}}>Mileage Charges — {inv.periodKm.toLocaleString()} km @ ${inv.mileageRate}/km <span style={{fontSize:11,color:'var(--text3)'}}>({inv.navmanSource})</span></td>
+                      <td style={{textAlign:'right'}}>{inv.periodKm.toLocaleString()}</td>
+                      <td style={{textAlign:'right'}}>${inv.mileageRate}</td>
+                      <td style={{textAlign:'right',fontWeight:700}}>{fmtCur(inv.mileage)}</td>
+                    </tr>}
+                    {inv.ruc>0&&<tr>
+                      <td style={{fontSize:12}}>RUC Charges — {inv.periodKm.toLocaleString()} km @ ${inv.rucRate}/km</td>
+                      <td style={{textAlign:'right'}}>{inv.periodKm.toLocaleString()}</td>
+                      <td style={{textAlign:'right'}}>${inv.rucRate}</td>
+                      <td style={{textAlign:'right',fontWeight:700}}>{fmtCur(inv.ruc)}</td>
+                    </tr>}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Totals */}
+              <div style={{display:'flex',justifyContent:'flex-end',marginBottom:16}}>
+                <div style={{minWidth:220}}>
+                  {[['Subtotal (excl. GST)',fmtCur(inv.subtotal)],['GST (15%)',fmtCur(inv.gst)]].map(([l,v])=>(
+                    <div key={l} style={{display:'flex',justifyContent:'space-between',padding:'5px 0',fontSize:13,color:'var(--text2)',borderBottom:'1px solid var(--border)'}}><span>{l}</span><span>{v}</span></div>
+                  ))}
+                  <div style={{display:'flex',justifyContent:'space-between',padding:'10px 0',fontSize:17,fontWeight:800}}><span>Total (NZD)</span><span style={{color:'#6A1B9A'}}>{fmtCur(inv.total)}</span></div>
+                </div>
+              </div>
+
+              {/* Audit note */}
+              <div style={{padding:'8px 12px',background:'var(--bg3)',borderRadius:6,fontSize:11,color:'var(--text3)',marginBottom:16}}>
+                📊 KM data source: <strong>{inv.navmanSource}</strong> · {inv.periodKm.toLocaleString()} km over {inv.days} days · Mileage: ${inv.mileageRate}/km · RUC: ${inv.rucRate}/km
+              </div>
+
+              {pushResult&&<div style={{padding:'10px 14px',background:pushResult.ok?'rgba(39,174,96,0.1)':'rgba(211,47,47,0.1)',border:`1px solid ${pushResult.ok?'rgba(39,174,96,0.3)':'rgba(211,47,47,0.3)'}`,borderRadius:8,fontSize:13,fontWeight:600,color:pushResult.ok?'#27AE60':'#d32f2f',marginBottom:12}}>{pushResult.msg}</div>}
+
+              <div style={{display:'flex',justifyContent:'space-between',gap:10}}>
+                <button className="btn btn-ghost" onClick={()=>setStep(2)}>← Back</button>
+                <div style={{display:'flex',gap:10}}>
+                  <button className="btn btn-ghost" onClick={()=>{
+                    // Download PDF preview
+                    const html = buildInvoicePrintHTML(inv);
+                    const win = window.open('','_blank');
+                    if(win){win.document.write(html);win.document.close();win.onload=()=>{win.document.title=inv.id;setTimeout(()=>win.print(),300);};}
+                  }}>
+                    <Icon name="download" size={14}/> Download PDF
+                  </button>
+                  <button className="btn btn-primary" onClick={handlePushToXero} disabled={pushing}
+                    style={{background:'#00B8D9',borderColor:'#009ab8'}}>
+                    <Icon name="xero" size={14}/> {pushing?'Pushing to Xero…':'Push to Xero (Draft)'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4 — Done */}
+          {step===4&&pushResult?.ok&&(
+            <div style={{textAlign:'center',padding:'24px 0'}}>
+              <div style={{fontSize:48,marginBottom:16}}>✅</div>
+              <div style={{fontWeight:700,fontSize:18,marginBottom:8}}>Invoice Created in Xero!</div>
+              <div style={{fontSize:13,color:'var(--text2)',marginBottom:4}}>{pushResult.msg}</div>
+              <div style={{fontSize:12,color:'var(--text3)',marginBottom:24}}>The invoice is saved as Draft in Xero. Review and approve it there before sending to the customer.</div>
+              <div style={{display:'flex',gap:10,justifyContent:'center'}}>
+                <button className="btn btn-ghost" onClick={()=>{setStep(1);setInv(null);setPushResult(null);setSelVehicle('');}}>
+                  Generate Another Invoice
+                </button>
+                <button className="btn btn-primary" onClick={onClose}>Done</button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const buildInvoicePrintHTML = (inv) => `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm;color:#1a1a2e}
+.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;border-bottom:3px solid #1a1a2e;padding-bottom:14px}
+h1{font-size:16pt;margin:0;font-weight:800}
+.sub{font-size:10pt;color:#666;margin-top:4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.box{border:1px solid #ddd;border-radius:6px;padding:12px 14px;background:#f9f9f9}
+.box h3{margin:0 0 8px;font-size:10pt;text-transform:uppercase;color:#666;border-bottom:1px solid #ddd;padding-bottom:6px}
+.box p{margin:3px 0;font-size:10pt}
+table{width:100%;border-collapse:collapse;margin-bottom:16px}
+th{background:#1a1a2e;color:#fff;padding:7px 10px;text-align:left;font-size:10pt}
+th:last-child,td:last-child{text-align:right}
+td{padding:7px 10px;border-bottom:1px solid #eee;font-size:10pt}
+.totals{float:right;min-width:220px}
+.total-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #eee;font-size:11pt;color:#555}
+.grand{display:flex;justify-content:space-between;padding:8px 0;font-size:15pt;font-weight:800}
+.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:9pt;font-weight:700;background:#eef;color:#1a1a2e;border:1px solid #ccd}
+@media print{@page{size:A4;margin:1.5cm}}
+</style></head><body>
+<div class="header">
+  <div><h1>SS Rentals Ltd</h1><div class="sub">Auckland, New Zealand · GST Registered</div></div>
+  <div style="text-align:right"><div style="font-size:18pt;font-weight:800;color:#1a1a2e">${inv.id}</div><div class="sub">Issue Date: ${inv.date}</div><div class="sub">Due: ${inv.due}</div><div style="margin-top:6px"><span class="badge">DRAFT</span></div></div>
+</div>
+<div class="grid2">
+  <div class="box"><h3>Bill To</h3><p><strong>${inv.customerName}</strong></p><p>${inv.contact||''}</p><p>${inv.phone||''}</p></div>
+  <div class="box"><h3>Invoice Details</h3><p><strong>Period:</strong> ${inv.period}</p><p><strong>Vehicle:</strong> ${inv.truck}${inv.trailer?' + '+inv.trailer:''}</p><p><strong>Payment Terms:</strong> 7 days</p></div>
+</div>
+<table>
+<thead><tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr></thead>
+<tbody>
+<tr><td>${inv.baseLabel}</td><td>1</td><td>${inv.baseRate.toLocaleString('en-NZ',{style:'currency',currency:'NZD'})}</td><td>${inv.baseRate.toLocaleString('en-NZ',{style:'currency',currency:'NZD'})}</td></tr>
+${inv.trailerCharge>0?'<tr><td>Trailer Hire — '+inv.trailer+'</td><td>1</td><td>'+inv.trailerCharge.toLocaleString('en-NZ',{style:'currency',currency:'NZD'})+'</td><td>'+inv.trailerCharge.toLocaleString('en-NZ',{style:'currency',currency:'NZD'})+'</td></tr>':''}
+${inv.mileage>0?'<tr><td>Mileage Charges — '+inv.periodKm.toLocaleString()+' km @ $'+inv.mileageRate+'/km</td><td>'+inv.periodKm+'</td><td>$'+inv.mileageRate+'</td><td>'+inv.mileage.toLocaleString('en-NZ',{style:'currency',currency:'NZD'})+'</td></tr>':''}
+${inv.ruc>0?'<tr><td>RUC Charges — '+inv.periodKm.toLocaleString()+' km @ $'+inv.rucRate+'/km</td><td>'+inv.periodKm+'</td><td>$'+inv.rucRate+'</td><td>'+inv.ruc.toLocaleString('en-NZ',{style:'currency',currency:'NZD'})+'</td></tr>':''}
+</tbody></table>
+<div class="totals">
+  <div class="total-row"><span>Subtotal (excl. GST)</span><span>${inv.subtotal.toLocaleString('en-NZ',{style:'currency',currency:'NZD'})}</span></div>
+  <div class="total-row"><span>GST (15%)</span><span>${inv.gst.toLocaleString('en-NZ',{style:'currency',currency:'NZD'})}</span></div>
+  <div class="grand"><span>Total (NZD)</span><span>${inv.total.toLocaleString('en-NZ',{style:'currency',currency:'NZD'})}</span></div>
+</div>
+<div style="clear:both;margin-top:32px;font-size:9pt;color:#888;border-top:1px solid #eee;padding-top:8px">
+  SS Rentals Ltd · Bank: ASB · Account: 12-3456-7890123-00 · Reference: ${inv.id}<br>
+  KM data: ${inv.navmanSource} · ${inv.periodKm.toLocaleString()} km over ${inv.days} days
+</div>
+</body></html>`;
+
 
 /* ─── MAINTENANCE PAGE ────────────────────────────── */
 const MaintenancePage = () => {
@@ -7276,7 +7683,7 @@ const App = () => {
     fleet:<FleetPage theme={theme}/>,
     customers:<CustomersPage refreshKey={dataRefreshKey} sheetsConfig={sheetsConfig}/>,
     hires:<HiresPage refreshKey={dataRefreshKey}/>,
-    invoicing:<InvoicingPage/>,
+    invoicing:<InvoicingPage xeroConfig={xeroConfig}/>,
     maintenance:<MaintenancePage/>,
     reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig}/>,
     communications:<CommunicationsPage/>,
