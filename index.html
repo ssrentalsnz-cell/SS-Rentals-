@@ -3243,7 +3243,7 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
   };
 
   const handlePushToXero = async () => {
-    if (!xeroConfig?.clientId) { alert('Connect Xero first in Settings → Integrations.'); return; }
+    if (!xeroConfig?.accessToken && !xeroConfig?.refreshToken) { alert('Connect Xero first in Settings → Integrations.'); return; }
     if (!window.confirm('Push invoice '+inv.id+' for '+inv.customerName+' ('+fmtCur(inv.total)+' incl GST) to Xero as Draft?')) return;
     setPushing(true); setPushResult(null);
     try {
