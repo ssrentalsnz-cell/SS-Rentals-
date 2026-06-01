@@ -3266,14 +3266,21 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
         try { cfg.tenantId = await getXeroTenantId(cfg.accessToken); saveXeroConfig(cfg); } catch(e) {}
       }
       // Call Xero API directly (supports browser CORS) with proxy fallback
-      const xeroDirect = 'https://api.xero.com/api.xro/2.0';
-      const xeroViaProxy = XERO_PROXY + '/xero-api/api.xro/2.0';
-      const authHeaders = { Authorization:'Bearer '+cfg.accessToken, 'Xero-tenant-id':cfg.tenantId||xeroConfig.tenantId, 'Content-Type':'application/json' };
+      const tenantId = cfg.tenantId || xeroConfig?.tenantId || '';
+      const authHeaders = {
+        Authorization: 'Bearer '+cfg.accessToken,
+        'Xero-Tenant-Id': tenantId,
+        'Xero-tenant-id': tenantId,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      };
 
-      // Helper: try direct first, fall back to proxy
+      // Use proxy for all Xero API calls (handles CORS + auth headers)
       const xeroFetch = async (path, opts={}) => {
-        let res = await fetch(xeroDirect+path, {...opts, headers:{...authHeaders,...(opts.headers||{})}}).catch(()=>null);
-        if (!res || !res.ok) res = await fetch(xeroViaProxy+path, {...opts, headers:{...authHeaders,...(opts.headers||{})}}).catch(()=>null);
+        const res = await fetch(XERO_PROXY+'/xero-api/'+path.replace(/^\//,''), {
+          ...opts,
+          headers: authHeaders,
+        }).catch(()=>null);
         return res;
       };
 
