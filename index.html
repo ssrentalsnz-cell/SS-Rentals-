@@ -3245,12 +3245,20 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
       const contactsData = await contactsRes.json();
       const contactId = contactsData?.Contacts?.[0]?.ContactID || null;
 
+      // Use overridden values if set
+      const pBaseRate = parseFloat(inv.baseRateOverride??inv.baseRate)||0;
+      const pTrailer  = parseFloat(inv.trailerOverride??inv.trailerCharge)||0;
+      const pKm       = parseInt(inv.kmOverride??inv.periodKm)||0;
+      const pMR       = parseFloat(inv.mileageRateOverride??inv.mileageRate)||0;
+      const pRR       = parseFloat(inv.rucRateOverride??inv.rucRate)||0;
+      const pExtra    = parseFloat(inv.extraCharge)||0;
       const lineItems = [
-        {Description: inv.baseLabel + ' — ' + inv.truck + (inv.trailer?' + '+inv.trailer:''), Quantity:1, UnitAmount: inv.baseRate, AccountCode:'200', TaxType:'OUTPUT2'},
+        {Description: inv.baseLabel + ' — ' + inv.truck + (inv.trailer?' + '+inv.trailer:''), Quantity:1, UnitAmount: pBaseRate, AccountCode:'200', TaxType:'OUTPUT2'},
       ];
-      if (inv.trailerCharge>0) lineItems.push({Description:'Trailer Hire', Quantity:1, UnitAmount:inv.trailerCharge, AccountCode:'200', TaxType:'OUTPUT2'});
-      if (inv.mileage>0) lineItems.push({Description:`Mileage Charges — ${inv.periodKm.toLocaleString()} km @ $${inv.mileageRate}/km`, Quantity:inv.periodKm, UnitAmount:inv.mileageRate, AccountCode:'200', TaxType:'OUTPUT2'});
-      if (inv.ruc>0) lineItems.push({Description:`RUC Charges — ${inv.periodKm.toLocaleString()} km @ $${inv.rucRate}/km`, Quantity:inv.periodKm, UnitAmount:inv.rucRate, AccountCode:'200', TaxType:'OUTPUT2'});
+      if (pTrailer>0) lineItems.push({Description:'Trailer Hire — '+inv.trailer, Quantity:1, UnitAmount:pTrailer, AccountCode:'200', TaxType:'OUTPUT2'});
+      if (pKm>0&&pMR>0) lineItems.push({Description:'Mileage Charges — '+pKm.toLocaleString()+' km @ $'+pMR+'/km', Quantity:pKm, UnitAmount:pMR, AccountCode:'200', TaxType:'OUTPUT2'});
+      if (pKm>0&&pRR>0) lineItems.push({Description:'RUC Charges — '+pKm.toLocaleString()+' km @ $'+pRR+'/km', Quantity:pKm, UnitAmount:pRR, AccountCode:'200', TaxType:'OUTPUT2'});
+      if (pExtra!==0) lineItems.push({Description:'Additional Charges', Quantity:1, UnitAmount:pExtra, AccountCode:'200', TaxType:'OUTPUT2'});
 
       const xeroInvoice = {
         Type: 'ACCREC', Status: 'DRAFT',
@@ -3395,77 +3403,159 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
             </div>
           )}
 
-          {/* Step 3 — Review */}
-          {step===3&&inv&&(
+          {/* Step 3 — Editable Review with live recalc */}
+          {step===3&&inv&&(()=>{
+            // Live recalculation from editable inv fields
+            const days = Math.max(1, Math.round((new Date(inv.periodTo||inv.period.split(' to ')[1]) - new Date(inv.periodFrom||inv.period.split(' to ')[0]))/(1000*60*60*24)));
+            const weeks = days/7;
+            const br = parseFloat(inv.baseRateOverride??inv.baseRate)||0;
+            const tc = parseFloat(inv.trailerOverride??inv.trailerCharge)||0;
+            const km = parseInt(inv.kmOverride??inv.periodKm)||0;
+            const mr = parseFloat(inv.mileageRateOverride??inv.mileageRate)||0;
+            const rr = parseFloat(inv.rucRateOverride??inv.rucRate)||0;
+            const extra = parseFloat(inv.extraCharge)||0;
+            const mileageAmt = parseFloat((km*mr).toFixed(2));
+            const rucAmt = parseFloat((km*rr).toFixed(2));
+            const subtotal = parseFloat((br+tc+mileageAmt+rucAmt+extra).toFixed(2));
+            const gst = parseFloat((subtotal*0.15).toFixed(2));
+            const total = parseFloat((subtotal+gst).toFixed(2));
+            const si = (k,v) => setInv(p=>({...p,[k]:v}));
+            const inputSty = {fontSize:12,padding:'4px 8px',textAlign:'right',width:'100%',border:'1px solid rgba(106,27,154,0.3)',borderRadius:5,background:'rgba(106,27,154,0.04)',color:'var(--text)'};
+            return (
             <div>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
-                <div style={{fontWeight:700,fontSize:14}}>Invoice Preview — {inv.id}</div>
-                <span className="badge badge-gray">Draft</span>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                <div style={{fontWeight:700,fontSize:14}}>Review & Edit — {inv.id}</div>
+                <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  <span style={{fontSize:11,color:'var(--text3)'}}>✏️ All fields editable — totals update live</span>
+                  <span className="badge badge-gray">Draft</span>
+                </div>
               </div>
 
-              {/* Header */}
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+              {/* Customer + dates */}
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
                 <div style={{padding:'12px 14px',background:'var(--bg3)',borderRadius:8}}>
                   <div style={{fontSize:10,color:'var(--text3)',marginBottom:4,textTransform:'uppercase',fontWeight:700}}>Bill To</div>
                   <div style={{fontWeight:700}}>{inv.customerName}</div>
-                  <div style={{fontSize:12,color:'var(--text2)'}}>{inv.contact}</div>
-                  <div style={{fontSize:12,color:'var(--text2)'}}>{inv.phone}</div>
+                  <div style={{fontSize:12,color:'var(--text2)'}}>{inv.contact} · {inv.phone}</div>
+                  <div style={{fontSize:12,color:'var(--text2)',marginTop:4}}>{inv.truck}{inv.trailer?' + '+inv.trailer:''}</div>
                 </div>
                 <div style={{padding:'12px 14px',background:'var(--bg3)',borderRadius:8}}>
-                  <div style={{fontSize:10,color:'var(--text3)',marginBottom:4,textTransform:'uppercase',fontWeight:700}}>Invoice Details</div>
-                  <div style={{fontSize:12}}><strong>Period:</strong> {inv.period}</div>
-                  <div style={{fontSize:12}}><strong>Issue Date:</strong> {fmt(inv.date)}</div>
-                  <div style={{fontSize:12}}><strong>Due Date:</strong> {fmt(inv.due)} (7 days)</div>
-                  <div style={{fontSize:12}}><strong>Vehicle:</strong> {inv.truck}{inv.trailer?' + '+inv.trailer:''}</div>
+                  <div style={{fontSize:10,color:'var(--text3)',marginBottom:6,textTransform:'uppercase',fontWeight:700}}>Invoice Period</div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+                    <div>
+                      <div style={{fontSize:10,color:'var(--text3)',marginBottom:2}}>From</div>
+                      <input type="date" value={inv.periodFrom||inv.period.split(' to ')[0]} onChange={e=>si('periodFrom',e.target.value)} style={{...inputSty,textAlign:'left'}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,color:'var(--text3)',marginBottom:2}}>To</div>
+                      <input type="date" value={inv.periodTo||inv.period.split(' to ')[1]} onChange={e=>si('periodTo',e.target.value)} style={{...inputSty,textAlign:'left'}}/>
+                    </div>
+                  </div>
+                  <div style={{fontSize:11,color:'#6A1B9A',marginTop:4,fontWeight:600}}>{days} days · {weeks.toFixed(1)} weeks</div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginTop:6}}>
+                    <div>
+                      <div style={{fontSize:10,color:'var(--text3)',marginBottom:2}}>Issue Date</div>
+                      <input type="date" value={inv.date} onChange={e=>si('date',e.target.value)} style={{...inputSty,textAlign:'left'}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,color:'var(--text3)',marginBottom:2}}>Due Date</div>
+                      <input type="date" value={inv.due} onChange={e=>si('due',e.target.value)} style={{...inputSty,textAlign:'left'}}/>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Line items */}
-              <div className="table-wrap" style={{marginBottom:12}}>
-                <table>
-                  <thead><tr><th>Description</th><th style={{textAlign:'right'}}>Qty</th><th style={{textAlign:'right'}}>Rate</th><th style={{textAlign:'right'}}>Amount</th></tr></thead>
-                  <tbody>
-                    <tr>
-                      <td>{inv.baseLabel}</td>
-                      <td style={{textAlign:'right'}}>1</td>
-                      <td style={{textAlign:'right'}}>{fmtCur(inv.baseRate)}</td>
-                      <td style={{textAlign:'right',fontWeight:700}}>{fmtCur(inv.baseRate)}</td>
-                    </tr>
-                    {inv.trailerCharge>0&&<tr>
-                      <td>Trailer Hire — {inv.trailer}</td>
-                      <td style={{textAlign:'right'}}>1</td>
-                      <td style={{textAlign:'right'}}>{fmtCur(inv.trailerCharge)}</td>
-                      <td style={{textAlign:'right',fontWeight:700}}>{fmtCur(inv.trailerCharge)}</td>
-                    </tr>}
-                    {inv.mileage>0&&<tr>
-                      <td style={{fontSize:12}}>Mileage Charges — {inv.periodKm.toLocaleString()} km @ ${inv.mileageRate}/km <span style={{fontSize:11,color:'var(--text3)'}}>({inv.navmanSource})</span></td>
-                      <td style={{textAlign:'right'}}>{inv.periodKm.toLocaleString()}</td>
-                      <td style={{textAlign:'right'}}>${inv.mileageRate}</td>
-                      <td style={{textAlign:'right',fontWeight:700}}>{fmtCur(inv.mileage)}</td>
-                    </tr>}
-                    {inv.ruc>0&&<tr>
-                      <td style={{fontSize:12}}>RUC Charges — {inv.periodKm.toLocaleString()} km @ ${inv.rucRate}/km</td>
-                      <td style={{textAlign:'right'}}>{inv.periodKm.toLocaleString()}</td>
-                      <td style={{textAlign:'right'}}>${inv.rucRate}</td>
-                      <td style={{textAlign:'right',fontWeight:700}}>{fmtCur(inv.ruc)}</td>
-                    </tr>}
-                  </tbody>
-                </table>
+              {/* Editable line items */}
+              <div style={{border:'1px solid var(--border)',borderRadius:8,overflow:'hidden',marginBottom:12}}>
+                <div style={{background:'#6A1B9A',color:'#fff',display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',gap:0}}>
+                  {['Description','Quantity / KM','Rate (editable)','Amount'].map(h=>(
+                    <div key={h} style={{padding:'8px 10px',fontSize:11,fontWeight:700}}>{h}</div>
+                  ))}
+                </div>
+
+                {/* Hire rate row */}
+                <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',borderBottom:'1px solid var(--border)',alignItems:'center'}}>
+                  <div style={{padding:'8px 10px'}}>
+                    <div style={{fontSize:12,fontWeight:600}}>{inv.baseLabel}</div>
+                    <div style={{fontSize:10,color:'var(--text3)'}}>Hire charge for period</div>
+                  </div>
+                  <div style={{padding:'4px 8px',fontSize:12,textAlign:'right'}}>1</div>
+                  <div style={{padding:'4px 8px'}}>
+                    <input type="text" inputMode="decimal" value={inv.baseRateOverride??br} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';else e.target.select();}} onChange={e=>si('baseRateOverride',e.target.value)} onBlur={e=>si('baseRateOverride',parseFloat(e.target.value)||0)} style={inputSty}/>
+                  </div>
+                  <div style={{padding:'4px 10px',fontWeight:700,textAlign:'right'}}>{fmtCur(br)}</div>
+                </div>
+
+                {/* Trailer row */}
+                <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',borderBottom:'1px solid var(--border)',alignItems:'center'}}>
+                  <div style={{padding:'8px 10px'}}>
+                    <div style={{fontSize:12,fontWeight:600}}>Trailer Hire — {inv.trailer||'None'}</div>
+                    <div style={{fontSize:10,color:'var(--text3)'}}>Set to 0 if not applicable</div>
+                  </div>
+                  <div style={{padding:'4px 8px',fontSize:12,textAlign:'right'}}>1</div>
+                  <div style={{padding:'4px 8px'}}>
+                    <input type="text" inputMode="decimal" value={inv.trailerOverride??tc} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';else e.target.select();}} onChange={e=>si('trailerOverride',e.target.value)} onBlur={e=>si('trailerOverride',parseFloat(e.target.value)||0)} style={inputSty}/>
+                  </div>
+                  <div style={{padding:'4px 10px',fontWeight:700,textAlign:'right'}}>{fmtCur(tc)}</div>
+                </div>
+
+                {/* Mileage row */}
+                <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',borderBottom:'1px solid var(--border)',alignItems:'center',background:'rgba(106,27,154,0.02)'}}>
+                  <div style={{padding:'8px 10px'}}>
+                    <div style={{fontSize:12,fontWeight:600}}>Mileage Charges</div>
+                    <div style={{fontSize:10,color:'var(--text3)'}}>{inv.navmanSource}</div>
+                  </div>
+                  <div style={{padding:'4px 8px'}}>
+                    <input type="text" inputMode="numeric" value={inv.kmOverride??km} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';else e.target.select();}} onChange={e=>si('kmOverride',e.target.value)} onBlur={e=>si('kmOverride',parseInt(e.target.value)||0)} style={inputSty} placeholder="km"/>
+                    <div style={{fontSize:9,color:'var(--text3)',marginTop:2}}>km travelled</div>
+                  </div>
+                  <div style={{padding:'4px 8px'}}>
+                    <input type="text" inputMode="decimal" value={inv.mileageRateOverride??mr} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';else e.target.select();}} onChange={e=>si('mileageRateOverride',e.target.value)} onBlur={e=>si('mileageRateOverride',parseFloat(e.target.value)||0)} style={inputSty} placeholder="$/km"/>
+                    <div style={{fontSize:9,color:'var(--text3)',marginTop:2}}>$/km</div>
+                  </div>
+                  <div style={{padding:'4px 10px',fontWeight:700,textAlign:'right'}}>{fmtCur(mileageAmt)}</div>
+                </div>
+
+                {/* RUC row */}
+                <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',borderBottom:'1px solid var(--border)',alignItems:'center',background:'rgba(106,27,154,0.02)'}}>
+                  <div style={{padding:'8px 10px'}}>
+                    <div style={{fontSize:12,fontWeight:600}}>RUC Charges</div>
+                    <div style={{fontSize:10,color:'var(--text3)'}}>Road User Charges</div>
+                  </div>
+                  <div style={{padding:'4px 8px',fontSize:12,textAlign:'right',color:'var(--text3)'}}>{km.toLocaleString()} km</div>
+                  <div style={{padding:'4px 8px'}}>
+                    <input type="text" inputMode="decimal" value={inv.rucRateOverride??rr} onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';else e.target.select();}} onChange={e=>si('rucRateOverride',e.target.value)} onBlur={e=>si('rucRateOverride',parseFloat(e.target.value)||0)} style={inputSty} placeholder="$/km"/>
+                    <div style={{fontSize:9,color:'var(--text3)',marginTop:2}}>$/km</div>
+                  </div>
+                  <div style={{padding:'4px 10px',fontWeight:700,textAlign:'right'}}>{fmtCur(rucAmt)}</div>
+                </div>
+
+                {/* Additional charges */}
+                <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',alignItems:'center'}}>
+                  <div style={{padding:'8px 10px'}}>
+                    <div style={{fontSize:12,fontWeight:600}}>Additional Charges / Credits</div>
+                    <div style={{fontSize:10,color:'var(--text3)'}}>Use negative for credit/discount</div>
+                  </div>
+                  <div style={{padding:'4px 8px',fontSize:12,textAlign:'right'}}>1</div>
+                  <div style={{padding:'4px 8px'}}>
+                    <input type="text" inputMode="decimal" value={inv.extraCharge||''} onFocus={e=>e.target.select()} onChange={e=>si('extraCharge',e.target.value)} onBlur={e=>si('extraCharge',parseFloat(e.target.value)||0)} style={inputSty} placeholder="0.00"/>
+                  </div>
+                  <div style={{padding:'4px 10px',fontWeight:700,textAlign:'right',color:extra<0?'#27AE60':extra>0?'var(--text)':'var(--text3)'}}>{extra!==0?fmtCur(extra):'—'}</div>
+                </div>
               </div>
 
               {/* Totals */}
-              <div style={{display:'flex',justifyContent:'flex-end',marginBottom:16}}>
-                <div style={{minWidth:220}}>
-                  {[['Subtotal (excl. GST)',fmtCur(inv.subtotal)],['GST (15%)',fmtCur(inv.gst)]].map(([l,v])=>(
-                    <div key={l} style={{display:'flex',justifyContent:'space-between',padding:'5px 0',fontSize:13,color:'var(--text2)',borderBottom:'1px solid var(--border)'}}><span>{l}</span><span>{v}</span></div>
+              <div style={{display:'flex',justifyContent:'flex-end',marginBottom:12}}>
+                <div style={{minWidth:240,borderRadius:8,overflow:'hidden',border:'1px solid var(--border)'}}>
+                  {[['Subtotal (excl. GST)',fmtCur(subtotal)],['GST 15%',fmtCur(gst)]].map(([l,v])=>(
+                    <div key={l} style={{display:'flex',justifyContent:'space-between',padding:'8px 12px',borderBottom:'1px solid var(--border)',fontSize:13,color:'var(--text2)'}}><span>{l}</span><span>{v}</span></div>
                   ))}
-                  <div style={{display:'flex',justifyContent:'space-between',padding:'10px 0',fontSize:17,fontWeight:800}}><span>Total (NZD)</span><span style={{color:'#6A1B9A'}}>{fmtCur(inv.total)}</span></div>
+                  <div style={{display:'flex',justifyContent:'space-between',padding:'12px',fontSize:16,fontWeight:800,background:'rgba(106,27,154,0.06)'}}><span>Total (NZD)</span><span style={{color:'#6A1B9A'}}>{fmtCur(total)}</span></div>
                 </div>
               </div>
 
-              {/* Audit note */}
-              <div style={{padding:'8px 12px',background:'var(--bg3)',borderRadius:6,fontSize:11,color:'var(--text3)',marginBottom:16}}>
-                📊 KM data source: <strong>{inv.navmanSource}</strong> · {inv.periodKm.toLocaleString()} km over {inv.days} days · Mileage: ${inv.mileageRate}/km · RUC: ${inv.rucRate}/km
+              <div style={{padding:'8px 12px',background:'var(--bg3)',borderRadius:6,fontSize:11,color:'var(--text3)',marginBottom:12}}>
+                📊 {inv.navmanSource} · {km.toLocaleString()} km · Mileage ${mr}/km · RUC ${rr}/km{inv.maxMileage?' · Max: '+inv.maxMileage:''}
               </div>
 
               {pushResult&&<div style={{padding:'10px 14px',background:pushResult.ok?'rgba(39,174,96,0.1)':'rgba(211,47,47,0.1)',border:`1px solid ${pushResult.ok?'rgba(39,174,96,0.3)':'rgba(211,47,47,0.3)'}`,borderRadius:8,fontSize:13,fontWeight:600,color:pushResult.ok?'#27AE60':'#d32f2f',marginBottom:12}}>{pushResult.msg}</div>}
@@ -3474,21 +3564,24 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
                 <button className="btn btn-ghost" onClick={()=>setStep(2)}>← Back</button>
                 <div style={{display:'flex',gap:10}}>
                   <button className="btn btn-ghost" onClick={()=>{
-                    // Download PDF preview
-                    const html = buildInvoicePrintHTML(inv);
+                    const finalInv = {...inv, baseRate:br, trailerCharge:tc, periodKm:km, mileageRate:mr, rucRate:rr, mileage:mileageAmt, ruc:rucAmt, subtotal, gst, total, extraCharge:extra, days};
+                    const html = buildInvoicePrintHTML(finalInv);
                     const win = window.open('','_blank');
-                    if(win){win.document.write(html);win.document.close();win.onload=()=>{win.document.title=inv.id;setTimeout(()=>win.print(),300);};}
+                    if(win){win.document.write(html);win.document.close();win.onload=()=>{win.document.title=finalInv.id;setTimeout(()=>win.print(),300);};}
                   }}>
                     <Icon name="download" size={14}/> Download PDF
                   </button>
-                  <button className="btn btn-primary" onClick={handlePushToXero} disabled={pushing}
-                    style={{background:'#00B8D9',borderColor:'#009ab8'}}>
-                    <Icon name="xero" size={14}/> {pushing?'Pushing to Xero…':'Push to Xero (Draft)'}
+                  <button className="btn btn-primary" onClick={()=>{
+                    setInv(p=>({...p, baseRate:br, trailerCharge:tc, periodKm:km, mileageRate:mr, rucRate:rr, mileage:mileageAmt, ruc:rucAmt, subtotal, gst, total, extraCharge:extra, days}));
+                    handlePushToXero();
+                  }} disabled={pushing} style={{background:'#00B8D9',borderColor:'#009ab8'}}>
+                    <Icon name="xero" size={14}/> {pushing?'Pushing to Xero…':'Approve & Push to Xero'}
                   </button>
                 </div>
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* Step 4 — Done */}
           {step===4&&pushResult?.ok&&(
