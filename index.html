@@ -3233,17 +3233,22 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
   };
 
   const handlePushToXero = async () => {
-    if (!xeroConfig?.accessToken) { alert('Connect Xero first in Settings → Integrations'); return; }
-    if (!window.confirm(`Push invoice ${inv.id} for ${inv.customerName} (${fmtCur(inv.total)} incl GST) to Xero as Draft?`)) return;
+    if (!xeroConfig?.accessToken) { alert('Connect Xero first in Settings → Integrations.'); return; }
+    if (!window.confirm('Push invoice '+inv.id+' for '+inv.customerName+' ('+fmtCur(inv.total)+' incl GST) to Xero as Draft?')) return;
     setPushing(true); setPushResult(null);
     try {
-      // Find/create Xero contact
-      const contactsRes = await fetch(
-        'https://xero-proxy.ssrentalsnz.workers.dev/xero-api/Contacts?where=Name%3D%3D%22'+encodeURIComponent(inv.customerName)+'%22',
-        {headers:{Authorization:'Bearer '+xeroConfig.accessToken,'Xero-Tenant-Id':xeroConfig.tenantId}}
-      );
-      const contactsData = await contactsRes.json();
-      const contactId = contactsData?.Contacts?.[0]?.ContactID || null;
+      // Use the same XERO_PROXY path format as the existing Xero sync
+      const xeroBase = XERO_PROXY + '/xero-api/api.xro/2.0';
+      const headers = { Authorization:'Bearer '+xeroConfig.accessToken, 'Xero-tenant-id':xeroConfig.tenantId, 'Content-Type':'application/json' };
+      // Find Xero contact by name
+      let contactId = null;
+      try {
+        const contactsRes = await fetch(xeroBase+'/Contacts?where=Name%3D%3D%22'+encodeURIComponent(inv.customerName)+'%22', {headers});
+        if (contactsRes.ok) {
+          const cd = await contactsRes.json();
+          contactId = cd?.Contacts?.[0]?.ContactID || null;
+        }
+      } catch(e) { console.warn('Contact lookup failed:', e.message); }
 
       // Use overridden values if set
       const pBaseRate = parseFloat(inv.baseRateOverride??inv.baseRate)||0;
@@ -3262,16 +3267,16 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
 
       const xeroInvoice = {
         Type: 'ACCREC', Status: 'DRAFT',
-        Contact: contactId ? {ContactID: contactId} : {Name: inv.customerName},
+        Contact: contactId ? {ContactID:contactId} : {Name:inv.customerName, EmailAddress:inv.contact||undefined},
         Date: inv.date, DueDate: inv.due,
         LineAmountTypes: 'EXCLUSIVE',
         Reference: inv.id,
         LineItems: lineItems,
       };
 
-      const res = await fetch('https://xero-proxy.ssrentalsnz.workers.dev/xero-api/Invoices', {
+      const res = await fetch(xeroBase+'/Invoices', {
         method: 'POST',
-        headers: {Authorization:'Bearer '+xeroConfig.accessToken,'Xero-Tenant-Id':xeroConfig.tenantId,'Content-Type':'application/json'},
+        headers,
         body: JSON.stringify({Invoices:[xeroInvoice]})
       });
       const data = await res.json();
