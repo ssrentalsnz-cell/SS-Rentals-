@@ -3247,22 +3247,23 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
     if (!window.confirm('Push invoice '+inv.id+' for '+inv.customerName+' ('+fmtCur(inv.total)+' incl GST) to Xero as Draft?')) return;
     setPushing(true); setPushResult(null);
     try {
-      // Refresh Xero token if expired
-      let cfg = xeroConfig;
-      if (!cfg.accessToken || !cfg.tokenExpiry || Date.now() > cfg.tokenExpiry - 60000) {
-        try {
-          if (cfg.refreshToken) {
-            const refreshed = await refreshXeroToken(cfg.refreshToken);
-            cfg = {...cfg, ...refreshed};
-            saveXeroConfig(cfg);
-          } else {
-            setPushResult({ok:false, msg:'Xero session expired. Go to Settings → Xero → Reconnect.'});
-            setPushing(false); return;
-          }
-        } catch(e) {
-          setPushResult({ok:false, msg:'Xero token refresh failed: '+e.message+'. Go to Settings → Reconnect Xero.'});
+      // Always refresh Xero token before pushing to ensure it's valid
+      let cfg = loadXeroConfig();
+      try {
+        if (cfg?.refreshToken) {
+          const refreshed = await refreshXeroToken(cfg.refreshToken);
+          cfg = {...cfg, ...refreshed};
+          saveXeroConfig(cfg);
+        } else {
+          setPushResult({ok:false, msg:'Xero session expired. Go to Settings → Xero → click Sync Now to reconnect.'});
           setPushing(false); return;
         }
+      } catch(e) {
+        setPushResult({ok:false, msg:'Xero token refresh failed: '+e.message+'. Go to Settings → Reconnect Xero.'});
+        setPushing(false); return;
+      }
+      if (!cfg?.tenantId) {
+        try { cfg.tenantId = await getXeroTenantId(cfg.accessToken); saveXeroConfig(cfg); } catch(e) {}
       }
       // Call Xero API directly (supports browser CORS) with proxy fallback
       const xeroDirect = 'https://api.xero.com/api.xro/2.0';
