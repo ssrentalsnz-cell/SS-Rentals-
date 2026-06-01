@@ -7826,7 +7826,7 @@ const App = () => {
     communications:<CommunicationsPage/>,
     documents:<DocumentsPage/>,
     navman:<NavmanPage/>,
-    settings:<SettingsPage sheetsConfig={sheetsConfig} syncState={syncState} onSheetsSetup={()=>setSheetsSetupOpen(true)} onManualSync={()=>doSync()} xeroConfig={xeroConfig} xeroSyncState={xeroSyncState} onXeroConnect={startXeroAuth} onXeroSync={doXeroSync} onXeroDisconnect={()=>{clearXeroConfig();setXeroConfig(null);}} onXeroDiag={async()=>{ try { const t=xeroConfig?.accessToken; if(!t){alert('Not connected');return;} const r=await fetch('https://xero-proxy.ssrentalsnz.workers.dev/xero-api/connections',{headers:{Authorization:'Bearer '+t}}); const d=await r.json(); alert('Connection OK! Orgs: '+JSON.stringify(d.map(x=>x.tenantName))); } catch(e){alert('Error: '+e.message);}}}/>,
+    settings:<SettingsPage sheetsConfig={sheetsConfig} syncState={syncState} onSheetsSetup={()=>setSheetsSetupOpen(true)} onManualSync={()=>doSync()} xeroConfig={xeroConfig} xeroSyncState={xeroSyncState} onXeroConnect={startXeroAuth} onXeroSync={doXeroSync} onXeroDisconnect={()=>{clearXeroConfig();setXeroConfig(null);}} onXeroDiag={async()=>{ try { const t=xeroConfig?.accessToken; if(!t){alert('Not connected');return;} const r=await fetch(XERO_PROXY+'/xero-api/connections',{headers:{Authorization:'Bearer '+t}}); const d=await r.json(); const orgs=Array.isArray(d)?d:(d?.data||d?.Organisations||[]); alert('Connection OK! Orgs: '+JSON.stringify(orgs.map(x=>x.tenantName||x.name||x))); } catch(e){alert('Error: '+e.message);}}}/>,
   };
 
   return (
