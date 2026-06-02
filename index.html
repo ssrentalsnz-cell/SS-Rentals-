@@ -3262,8 +3262,18 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
         setPushResult({ok:false, msg:'Xero token refresh failed: '+e.message+'. Go to Settings → Reconnect Xero.'});
         setPushing(false); return;
       }
-      if (!cfg?.tenantId) {
-        try { cfg.tenantId = await getXeroTenantId(cfg.accessToken); saveXeroConfig(cfg); } catch(e) {}
+      // Always get fresh tenant ID
+      try {
+        cfg.tenantId = await getXeroTenantId(cfg.accessToken);
+        saveXeroConfig(cfg);
+        console.log('[Xero] tenantId:', cfg.tenantId);
+      } catch(e) {
+        setPushResult({ok:false, msg:'Could not get Xero organisation ID: '+e.message});
+        setPushing(false); return;
+      }
+      if (!cfg.tenantId) {
+        setPushResult({ok:false, msg:'No Xero organisation found. Make sure you are connected to the correct Xero account.'});
+        setPushing(false); return;
       }
       // Call Xero API directly (supports browser CORS) with proxy fallback
       const tenantId = cfg.tenantId || xeroConfig?.tenantId || '';
@@ -3275,12 +3285,12 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
         Accept: 'application/json',
       };
 
-      // Use proxy for all Xero API calls (handles CORS + auth headers)
+      // Use proxy for all Xero API calls
       const xeroFetch = async (path, opts={}) => {
-        const res = await fetch(XERO_PROXY+'/xero-api/'+path.replace(/^\//,''), {
-          ...opts,
-          headers: authHeaders,
-        }).catch(()=>null);
+        const url = XERO_PROXY+'/xero-api/'+path.replace(/^\//,'');
+        console.log('[Xero] POST to:', url, 'tenantId:', tenantId, 'token:', cfg.accessToken?.slice(0,20)+'...');
+        const res = await fetch(url, { ...opts, headers: authHeaders }).catch(e=>{ console.error('[Xero] fetch error:', e); return null; });
+        if (res) { const clone = res.clone(); clone.text().then(t=>console.log('[Xero] Response', res.status, ':', t.slice(0,300))); }
         return res;
       };
 
@@ -7761,7 +7771,9 @@ const App = () => {
     if (code && state && state === savedState) {
       window.history.replaceState({}, '', window.location.pathname);
       exchangeXeroCode(code).then(tokens => {
-        const cfg = { ...tokens, tenantId: null };
+        let tenantId = null;
+        try { tenantId = await getXeroTenantId(tokens.accessToken); } catch(e) { console.warn('tenantId fetch failed:', e); }
+        const cfg = { ...tokens, tenantId };
         saveXeroConfig(cfg);
         setXeroConfig(cfg);
         setXeroSyncState(s=>({...s, error:null, configured:true}));
