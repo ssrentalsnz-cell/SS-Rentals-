@@ -771,9 +771,9 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
 
 
 /* ─── XERO INTEGRATION ENGINE ────────────────────── */
-const XERO_CLIENT_ID = '4FB523DA93F24256BBD50A07CA9E9C9A';
+const XERO_CLIENT_ID = '88e1049f-9fcd-4733-b30e-e0ec5a2ceaa8';
 const XERO_REDIRECT_URI = 'https://ssrentalsnz-cell.github.io/SS-Rentals-/';
-const XERO_SCOPES = 'openid profile email accounting.invoices.read accounting.contacts.read offline_access';
+const XERO_SCOPES = 'openid profile email accounting.invoices accounting.contacts accounting.settings.read offline_access';
 const XERO_CONFIG_KEY = 'ss_rentals_xero_config';
 // Cloudflare Worker proxy URL — handles token exchange to avoid CORS
 const XERO_PROXY = 'https://xero-proxy.ssrentalsnz.workers.dev';
@@ -3623,11 +3623,34 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
                   }}>
                     <Icon name="download" size={14}/> Download PDF
                   </button>
+                  <button className="btn btn-ghost" onClick={()=>{
+                    const finalInv = {...inv, baseRate:br, trailerCharge:tc, periodKm:km, mileageRate:mr, rucRate:rr, mileage:mileageAmt, ruc:rucAmt, subtotal, gst, total, extraCharge:extra, days};
+                    const txt = [
+                      'Invoice: '+finalInv.id,
+                      'Customer: '+finalInv.customerName,
+                      'Period: '+finalInv.period,
+                      'Vehicle: '+finalInv.truck+(finalInv.trailer?' + '+finalInv.trailer:''),
+                      '',
+                      finalInv.baseLabel+': '+fmtCur(br),
+                      tc>0?'Trailer Hire: '+fmtCur(tc):'',
+                      km>0&&mr>0?'Mileage ('+km.toLocaleString()+' km @ $'+mr+'): '+fmtCur(mileageAmt):'',
+                      km>0&&rr>0?'RUC ('+km.toLocaleString()+' km @ $'+rr+'): '+fmtCur(rucAmt):'',
+                      extra!==0?'Additional: '+fmtCur(extra):'',
+                      '',
+                      'Subtotal (excl GST): '+fmtCur(subtotal),
+                      'GST 15%: '+fmtCur(gst),
+                      'TOTAL: '+fmtCur(total),
+                    ].filter(Boolean).join('
+');
+                    navigator.clipboard.writeText(txt).then(()=>alert('Invoice details copied to clipboard — paste into Xero manually.'));
+                  }} title="Copy invoice details to paste into Xero">
+                    📋 Copy for Xero
+                  </button>
                   <button className="btn btn-primary" onClick={()=>{
                     setInv(p=>({...p, baseRate:br, trailerCharge:tc, periodKm:km, mileageRate:mr, rucRate:rr, mileage:mileageAmt, ruc:rucAmt, subtotal, gst, total, extraCharge:extra, days}));
                     handlePushToXero();
                   }} disabled={pushing} style={{background:'#00B8D9',borderColor:'#009ab8'}}>
-                    <Icon name="xero" size={14}/> {pushing?'Pushing to Xero…':'Approve & Push to Xero'}
+                    <Icon name="xero" size={14}/> {pushing?'Pushing to Xero…':'Push to Xero'}
                   </button>
                 </div>
               </div>
