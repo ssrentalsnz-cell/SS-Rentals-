@@ -7767,7 +7767,7 @@ const App = () => {
     localStorage.removeItem('xero_state_backup');
     if (code && state && state === savedState) {
       window.history.replaceState({}, '', window.location.pathname);
-      exchangeXeroCode(code).then(tokens => {
+      exchangeXeroCode(code).then(async tokens => {
         let tenantId = null;
         try { tenantId = await getXeroTenantId(tokens.accessToken); } catch(e) { console.warn('tenantId fetch failed:', e); }
         const cfg = { ...tokens, tenantId };
