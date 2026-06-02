@@ -3650,8 +3650,7 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
                       'Subtotal (excl GST): '+fmtCur(subtotal),
                       'GST 15%: '+fmtCur(gst),
                       'TOTAL: '+fmtCur(total),
-                    ].filter(Boolean).join('
-');
+                    ].filter(Boolean).join('\n');
                     navigator.clipboard.writeText(txt).then(()=>alert('Invoice details copied to clipboard — paste into Xero manually.'));
                   }} title="Copy invoice details to paste into Xero">
                     📋 Copy for Xero
