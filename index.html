@@ -3288,9 +3288,7 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
       // Use proxy for all Xero API calls
       const xeroFetch = async (path, opts={}) => {
         const url = XERO_PROXY+'/xero-api/'+path.replace(/^\//,'');
-        console.log('[Xero] POST to:', url, 'tenantId:', tenantId, 'token:', cfg.accessToken?.slice(0,20)+'...');
-        const res = await fetch(url, { ...opts, headers: authHeaders }).catch(e=>{ console.error('[Xero] fetch error:', e); return null; });
-        if (res) { const clone = res.clone(); clone.text().then(t=>console.log('[Xero] Response', res.status, ':', t.slice(0,300))); }
+        const res = await fetch(url, { ...opts, headers: authHeaders }).catch(()=>null);
         return res;
       };
 
