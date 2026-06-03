@@ -3286,10 +3286,19 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
         Accept: 'application/json',
       };
 
-      // Use proxy for all Xero API calls
+      // Use proxy for all Xero API calls  
       const xeroFetch = async (path, opts={}) => {
         const url = XERO_PROXY+'/xero-api/'+path.replace(/^\//,'');
-        const res = await fetch(url, { ...opts, headers: authHeaders }).catch(()=>null);
+        const fetchOpts = {
+          method: opts.method||'GET',
+          headers: authHeaders,
+        };
+        if (opts.body) fetchOpts.body = opts.body;
+        const res = await fetch(url, fetchOpts).catch(()=>null);
+        if (res) {
+          const txt = await res.clone().text();
+          console.log('[Xero]', fetchOpts.method, path.slice(0,30), '->', res.status, txt.slice(0,200));
+        }
         return res;
       };
 
@@ -7349,7 +7358,6 @@ const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xer
   ];
   const integrations=[
     {name:'Navman GPS',status:'connected',icon:'navman',desc:'Live tracking, mileage, RUC data',last:'24 May 2026 10:45 AM'},
-    {name:'Navman GPS',status:'connected',icon:'navman',desc:'Live tracking, mileage, RUC data',last:'24 May 2026 10:45 AM'},
     {name:'E-Road RUC',status:'disconnected',icon:'truck2',desc:'Automated RUC licence purchasing',last:'Never'},
     {name:'SendGrid Email',status:'connected',icon:'bell',desc:'Invoice delivery, automated reminders',last:'24 May 2026 08:00 AM'},
   ];
@@ -7813,13 +7821,27 @@ const App = () => {
     setSyncState(s=>({...s,configured:!!(sheetsConfig?.accessToken&&sheetsConfig?.spreadsheetId)}));
   },[sheetsConfig]);
 
-  const doSync = useCallback(async (cfg) => {
+  const doSync = useCallback(async (cfg, forceReconnect=false) => {
     if (syncInProgress.current) return;
     const config = cfg || sheetsConfig;
     if (!config?.clientId || !config?.spreadsheetId) return;
-    // Never auto-refresh token — that causes the Google login popup
-    if (!config.accessToken || !config.tokenExpiry || Date.now() > config.tokenExpiry - 60000) {
-      setSyncState(s=>({...s,error:'Session expired. Click Sync Now in Settings to reconnect.'}));
+    const tokenExpired = !config.accessToken || !config.tokenExpiry || Date.now() > config.tokenExpiry - 60000;
+    // If token expired and this is a manual sync, trigger reconnect popup
+    if (tokenExpired) {
+      if (forceReconnect) {
+        // Trigger Google sign-in to get fresh token
+        refreshSheetsToken(config.clientId, (refreshed) => {
+          if (refreshed?.accessToken) {
+            setSheetsConfig(refreshed);
+            doSync(refreshed, false);
+          } else {
+            // Silent refresh failed - open setup modal for full reconnect
+            setSyncState(s=>({...s,error:'Session expired — please click Reconfigure to reconnect Google Sheets.'}));
+          }
+        });
+        return;
+      }
+      setSyncState(s=>({...s,error:'Session expired. Click Sync Now to reconnect.'}));
       return;
     }
     syncInProgress.current = true;
@@ -7861,7 +7883,7 @@ const App = () => {
     communications:<CommunicationsPage/>,
     documents:<DocumentsPage/>,
     navman:<NavmanPage/>,
-    settings:<SettingsPage sheetsConfig={sheetsConfig} syncState={syncState} onSheetsSetup={()=>setSheetsSetupOpen(true)} onManualSync={()=>doSync()} xeroConfig={xeroConfig} xeroSyncState={xeroSyncState} onXeroConnect={startXeroAuth} onXeroSync={doXeroSync} onXeroDisconnect={()=>{clearXeroConfig();setXeroConfig(null);}} onXeroDiag={async()=>{ try { const t=xeroConfig?.accessToken; if(!t){alert('Not connected');return;} const r=await fetch(XERO_PROXY+'/xero-api/connections',{headers:{Authorization:'Bearer '+t}}); const d=await r.json(); const orgs=Array.isArray(d)?d:(d?.data||d?.Organisations||[]); alert('Connection OK! Orgs: '+JSON.stringify(orgs.map(x=>x.tenantName||x.name||x))); } catch(e){alert('Error: '+e.message);}}}/>,
+    settings:<SettingsPage sheetsConfig={sheetsConfig} syncState={syncState} onSheetsSetup={()=>setSheetsSetupOpen(true)} onManualSync={()=>doSync(null, true)} xeroConfig={xeroConfig} xeroSyncState={xeroSyncState} onXeroConnect={startXeroAuth} onXeroSync={doXeroSync} onXeroDisconnect={()=>{clearXeroConfig();setXeroConfig(null);}} onXeroDiag={async()=>{ try { const t=xeroConfig?.accessToken; if(!t){alert('Not connected');return;} const r=await fetch(XERO_PROXY+'/xero-api/connections',{headers:{Authorization:'Bearer '+t}}); const d=await r.json(); const orgs=Array.isArray(d)?d:(d?.data||d?.Organisations||[]); alert('Connection OK! Orgs: '+JSON.stringify(orgs.map(x=>x.tenantName||x.name||x))); } catch(e){alert('Error: '+e.message);}}}/>,
   };
 
   return (
@@ -7869,7 +7891,7 @@ const App = () => {
       <Sidebar page={page} setPage={setPage}/>
       <div className="main">
         <Header page={page} theme={theme} toggleTheme={()=>setTheme(t=>t==='dark'?'light':'dark')}
-          syncState={syncState} onManualSync={()=>doSync()} onOpenSetup={()=>setSheetsSetupOpen(true)}
+          syncState={syncState} onManualSync={()=>doSync(null, true)} onOpenSetup={()=>setSheetsSetupOpen(true)}
           xeroSyncState={xeroSyncState} onXeroSync={doXeroSync} onNewHire={()=>setShowNewHireWizard(true)}/>
         <div className="content">{pages[page]||<Dashboard theme={theme} setPage={setPage}/>}</div>
       </div>
