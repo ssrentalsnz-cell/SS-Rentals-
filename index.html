@@ -6560,6 +6560,25 @@ const generateAgreementHTML = (d) => {
   const title = d.docTitle || 'Truck and Trailer Agreement';
   const isLease = d.isLease === true; // only Lease if explicitly set
   const agreementWord = isLease ? 'Lease' : 'Rental';
+  const guaranteeSection = isLease
+    ? '<div class="page-break"></div>' +
+      '<h2>14. Personal Guarantee</h2>' +
+      '<div class="guarantee-box">' +
+      '<p><strong>PERSONAL GUARANTEE AND INDEMNITY</strong></p><br>' +
+      '<p>In consideration of SS Rentals entering into this Lease Agreement with the Hirer, I/we, the undersigned (&quot;Guarantor&quot;), <strong>unconditionally and irrevocably guarantee</strong> to SS Rentals the due and punctual performance by the Hirer of all of its obligations under this Agreement, including the payment of all Rental Charges, early termination payments, bond, fines, repair costs, and any other amounts owing.</p><br>' +
+      '<p><strong>14.1</strong> This guarantee is a <strong>continuing guarantee</strong> and will remain in force until all obligations under this Agreement have been fully discharged.</p>' +
+      '<p><strong>14.2</strong> The Guarantor liability is <strong>joint and several</strong> with the Hirer.</p>' +
+      '<p><strong>14.3</strong> This guarantee applies even if the Agreement is varied, extended, or modified.</p>' +
+      '<p><strong>14.4</strong> SS Rentals may enforce this guarantee without first proceeding against the Hirer.</p>' +
+      '<p><strong>14.5</strong> The Guarantor waives any right to require SS Rentals to pursue the Hirer first.</p><br>' +
+      '<p><strong>Guarantor Name:</strong> &nbsp; ' + (d.guarantorName||'_______________________________________') + '</p>' +
+      '<p><strong>Guarantor Signature:</strong> &nbsp; ____________________________________</p>' +
+      '<p><strong>Date:</strong> &nbsp; ______________________________________________</p>' +
+      '<p><strong>Address:</strong> &nbsp; ' + (d.guarantorAddress||'_____________________________________________') + '</p>' +
+      '<p><strong>Phone:</strong> &nbsp; ' + (d.guarantorPhone||'______________________________________________') + '</p>' +
+      '<p><strong>Relationship to Hirer:</strong> &nbsp; ____________________________________</p>' +
+      '</div>'
+    : '';
   return `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><style>
 body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm;color:#1a1a2e;line-height:1.6}
@@ -6658,27 +6677,7 @@ p{margin:5px 0}
 <p><strong>13.3</strong> This Agreement is governed by the laws of New Zealand.</p>
 <p><strong>13.4</strong> If any provision is found to be unenforceable, the remaining provisions continue in full force.</p>
 
-<div class="page-break"></div>
-
-<h2>14. Personal Guarantee</h2>
-<div class="guarantee-box">
-<p><strong>PERSONAL GUARANTEE AND INDEMNITY</strong></p>
-<br>
-<p>In consideration of SS Rentals entering into this ${agreementWord} Agreement with the Hirer, I/we, the undersigned ("Guarantor"), <strong>unconditionally and irrevocably guarantee</strong> to SS Rentals the due and punctual performance by the Hirer of all of its obligations under this Agreement, including the payment of all Rental Charges, early termination payments, bond, fines, repair costs, and any other amounts owing.</p>
-<br>
-<p><strong>14.1</strong> This guarantee is a <strong>continuing guarantee</strong> and will remain in force until all obligations under this Agreement have been fully discharged.</p>
-<p><strong>14.2</strong> The Guarantor's liability under this guarantee is <strong>joint and several</strong> with the Hirer.</p>
-<p><strong>14.3</strong> This guarantee applies even if the Agreement is varied, extended, or the Hirer's obligations are otherwise modified.</p>
-<p><strong>14.4</strong> SS Rentals may enforce this guarantee without first proceeding against the Hirer or any other security.</p>
-<p><strong>14.5</strong> The Guarantor waives any right to require SS Rentals to pursue the Hirer first before enforcing this guarantee.</p>
-<br>
-<p><strong>Guarantor Name:</strong> &nbsp; ${d.guarantorName||'_______________________________________'}</p>
-<p><strong>Guarantor Signature:</strong> &nbsp; ____________________________________</p>
-<p><strong>Date:</strong> &nbsp; ______________________________________________</p>
-<p><strong>Address:</strong> &nbsp; ${d.guarantorAddress||'_____________________________________________'}</p>
-<p><strong>Phone:</strong> &nbsp; ${d.guarantorPhone||'______________________________________________'}</p>
-<p><strong>Relationship to Hirer:</strong> &nbsp; ____________________________________</p>
-</div>
+${guaranteeSection}
 
 <br>
 <h2>Signatures</h2>
