@@ -3266,7 +3266,6 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
       try {
         cfg.tenantId = await getXeroTenantId(cfg.accessToken);
         saveXeroConfig(cfg);
-        console.log('[Xero] tenantId:', cfg.tenantId);
       } catch(e) {
         setPushResult({ok:false, msg:'Could not get Xero organisation ID: '+e.message});
         setPushing(false); return;
@@ -3275,6 +3274,8 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
         setPushResult({ok:false, msg:'No Xero organisation found. Make sure you are connected to the correct Xero account.'});
         setPushing(false); return;
       }
+      // Show debug info so user can verify
+      console.log('[Xero Push] tenantId:', cfg.tenantId, 'token starts:', cfg.accessToken?.slice(0,15));
       // Call Xero API directly (supports browser CORS) with proxy fallback
       const tenantId = cfg.tenantId || xeroConfig?.tenantId || '';
       const authHeaders = {
