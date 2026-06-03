@@ -3304,18 +3304,19 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
       const pRR       = parseFloat(inv.rucRateOverride??inv.rucRate)||0;
       const pExtra    = parseFloat(inv.extraCharge)||0;
       const lineItems = [
-        {Description: inv.baseLabel + ' — ' + inv.truck + (inv.trailer?' + '+inv.trailer:''), Quantity:1, UnitAmount: pBaseRate, AccountCode:'200', TaxType:'OUTPUT2'},
+        {Description: inv.baseLabel + ' — ' + inv.truck + (inv.trailer?' + '+inv.trailer:''), Quantity:1, UnitAmount: pBaseRate},
       ];
-      if (pTrailer>0) lineItems.push({Description:'Trailer Hire — '+inv.trailer, Quantity:1, UnitAmount:pTrailer, AccountCode:'200', TaxType:'OUTPUT2'});
-      if (pKm>0&&pMR>0) lineItems.push({Description:'Mileage Charges — '+pKm.toLocaleString()+' km @ $'+pMR+'/km', Quantity:pKm, UnitAmount:pMR, AccountCode:'200', TaxType:'OUTPUT2'});
-      if (pKm>0&&pRR>0) lineItems.push({Description:'RUC Charges — '+pKm.toLocaleString()+' km @ $'+pRR+'/km', Quantity:pKm, UnitAmount:pRR, AccountCode:'200', TaxType:'OUTPUT2'});
-      if (pExtra!==0) lineItems.push({Description:'Additional Charges', Quantity:1, UnitAmount:pExtra, AccountCode:'200', TaxType:'OUTPUT2'});
+      if (pTrailer>0) lineItems.push({Description:'Trailer Hire — '+inv.trailer, Quantity:1, UnitAmount:pTrailer});
+      if (pKm>0&&pMR>0) lineItems.push({Description:'Mileage Charges — '+pKm.toLocaleString()+' km @ $'+pMR+'/km', Quantity:pKm, UnitAmount:pMR});
+      if (pKm>0&&pRR>0) lineItems.push({Description:'RUC Charges — '+pKm.toLocaleString()+' km @ $'+pRR+'/km', Quantity:pKm, UnitAmount:pRR});
+      if (pExtra!==0) lineItems.push({Description:'Additional Charges', Quantity:1, UnitAmount:pExtra});
 
       const xeroInvoice = {
-        Type: 'ACCREC', Status: 'DRAFT',
-        Contact: contactId ? {ContactID:contactId} : {Name:inv.customerName, EmailAddress:inv.contact||undefined},
-        Date: inv.date, DueDate: inv.due,
-        LineAmountTypes: 'EXCLUSIVE',
+        Type: 'ACCREC',
+        Status: 'DRAFT',
+        Contact: {Name: inv.customerName},
+        Date: inv.date,
+        DueDate: inv.due,
         Reference: inv.id,
         LineItems: lineItems,
       };
