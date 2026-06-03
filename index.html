@@ -6713,13 +6713,15 @@ const DocumentsPage = () => {
   const [leaseStep, setLeaseStep] = React.useState(1);
   const [savedAgreements, setSavedAgreements] = React.useState(loadLeaseAgreements);
 
+  const [agreementKind, setAgreementKind] = React.useState('rental'); // 'rental' or 'lease'
+
   const emptyLease = () => ({
     companyName:'',contactName:'',contactPhone:'',contactEmail:'',address:'',
     guarantorName:'',guarantorAddress:'',guarantorPhone:'',
     truckRego:'',truckMake:'',truckModel:'',truckYear:'',truckVIN:'',truckColour:'White',truckCOF:'',truckRegoExp:'',
     trailerRego:'',trailerMake:'',trailerYear:'',trailerCOF:'',trailerRegoExp:'',
     startDate:'',endDate:'',weeklyRate:'',monthlyRate:'',mileageRate:'0.18',rucRate:'0.062',bond:'5000',maxMileage:'',
-    docType:'${title}',notes:'',
+    docType:'Truck and Trailer Rental Agreement',notes:'',
   });
   const [form, setForm] = React.useState(emptyLease);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
@@ -6733,6 +6735,7 @@ const DocumentsPage = () => {
 
   const buildDocData = () => ({
     hireId: 'LA-' + Date.now(),
+    isLease: agreementKind === 'lease',
     agreementDate: fmtDocDate(new Date().toISOString().slice(0,10)),
     hirerCompany: form.companyName,
     hirerContact: form.contactName,
@@ -6804,7 +6807,7 @@ const DocumentsPage = () => {
     <div>
       <div style={{display:'flex',borderBottom:'1px solid var(--border)',marginBottom:20,overflowX:'auto'}}>
         <button style={tabStyle('library')} onClick={()=>setTab('library')}>📁 Document Library</button>
-        <button style={tabStyle('lease-builder')} onClick={()=>setTab('lease-builder')}>📝 New ${agreementWord} Agreement</button>
+        <button style={tabStyle('lease-builder')} onClick={()=>setTab('lease-builder')}>📝 New Agreement</button>
         <button style={tabStyle('saved')} onClick={()=>setTab('saved')}>
           💾 Saved Agreements
           {savedAgreements.length>0&&<span style={{marginLeft:6,background:'#6A1B9A',color:'#fff',borderRadius:10,padding:'1px 7px',fontSize:10,verticalAlign:'middle'}}>{savedAgreements.length}</span>}
@@ -6898,13 +6901,35 @@ const DocumentsPage = () => {
           {leaseStep===2&&(
             <div className="card">
               <div className="card-header"><span className="card-title">Step 2 — Vehicle Details</span></div>
-              <div className="form-group" style={{marginBottom:16}}>
-                <label className="form-label">Agreement Type</label>
-                <select className="form-control" value={form.docType} onChange={e=>set('docType',e.target.value)}>
-                  <option>${title}</option>
-                  <option>Truck ${agreementWord} Agreement</option>
-                  <option>Trailer ${agreementWord} Agreement</option>
-                </select>
+              {/* Agreement Kind + Vehicle Type */}
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label className="form-label">Agreement Type</label>
+                  <div style={{display:'flex',gap:0,borderRadius:7,overflow:'hidden',border:'1.5px solid #6A1B9A'}}>
+                    {[['rental','📄 Rental Agreement'],['lease','📋 Lease Agreement']].map(([v,l])=>(
+                      <button key={v} onClick={()=>{
+                        setAgreementKind(v);
+                        const word = v==='lease'?'Lease':'Rental';
+                        const vType = form.docType.includes('Trailer')?'Trailer':form.docType.includes('Truck and')?' Truck and Trailer':'Truck';
+                        set('docType', vType+' '+word+' Agreement');
+                      }} style={{flex:1,padding:'8px 4px',border:'none',cursor:'pointer',fontSize:12,fontWeight:700,
+                        background:agreementKind===v?'#6A1B9A':'transparent',
+                        color:agreementKind===v?'#fff':'#6A1B9A'}}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                  {agreementKind==='rental'&&<div style={{fontSize:10,color:'#27AE60',marginTop:4}}>✅ No Personal Guarantee required</div>}
+                  {agreementKind==='lease'&&<div style={{fontSize:10,color:'#6A1B9A',marginTop:4}}>📋 Personal Guarantee included</div>}
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label className="form-label">Vehicle Type</label>
+                  <select className="form-control" value={form.docType} onChange={e=>{set('docType',e.target.value);}}>
+                    <option value={'Truck and Trailer '+(agreementKind==='lease'?'Lease':'Rental')+' Agreement'}>Truck and Trailer</option>
+                    <option value={'Truck '+(agreementKind==='lease'?'Lease':'Rental')+' Agreement'}>Truck Only</option>
+                    <option value={'Trailer '+(agreementKind==='lease'?'Lease':'Rental')+' Agreement'}>Trailer Only</option>
+                  </select>
+                </div>
               </div>
               <div style={{fontWeight:700,fontSize:11,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:10}}>Truck Details</div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
@@ -6927,7 +6952,7 @@ const DocumentsPage = () => {
                 {inputRow('truckCOF','COF Expiry (YYYY-MM-DD)')}
                 {inputRow('truckRegoExp','Rego Expiry (YYYY-MM-DD)')}
               </div>
-              {(form.docType==='${title}'||form.docType==='Trailer ${agreementWord} Agreement')&&(<>
+              {(form.docType.includes('Truck and Trailer')||form.docType.includes('Trailer'))&&(<>
                 <div style={{fontWeight:700,fontSize:11,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:10}}>Trailer Details</div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
                   <div className="form-group" style={{marginBottom:0}}>
@@ -7058,7 +7083,7 @@ const DocumentsPage = () => {
               <div style={{fontSize:40,marginBottom:12}}>📄</div>
               <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>No saved ${agreementWord.toLowerCase()} agreements yet</div>
               <div style={{fontSize:13,marginBottom:16}}>Create one using the "New ${agreementWord} Agreement" tab and click "Save to Documents".</div>
-              <button className="btn btn-primary" onClick={()=>setTab('lease-builder')}><Icon name="plus" size={14}/> Create New ${agreementWord} Agreement</button>
+              <button className="btn btn-primary" onClick={()=>setTab('lease-builder')}><Icon name="plus" size={14}/> Create New Agreement</button>
             </div>
           ) : (
             <div>
