@@ -3293,13 +3293,15 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
         return res;
       };
 
-      // Find Xero contact by name
+      // Find Xero contact by name - search by name
       let contactId = null;
       try {
-        const contactsRes = await xeroFetch('/Contacts?where=Name%3D%3D%22'+encodeURIComponent(inv.customerName)+'%22');
+        const searchName = encodeURIComponent(inv.customerName);
+        const contactsRes = await xeroFetch('Contacts?searchTerm='+searchName);
         if (contactsRes?.ok) {
           const cd = await contactsRes.json();
           contactId = cd?.Contacts?.[0]?.ContactID || null;
+          console.log('[Xero] Contact found:', contactId, 'for', inv.customerName);
         }
       } catch(e) { console.warn('Contact lookup failed:', e.message); }
 
