@@ -7605,10 +7605,10 @@ const SheetsSetupModal = ({open, onClose, onSave, initialConfig}) => {
       },
       error_callback: (err) => {
         setAuthing(false);
-        setStatus({ok:false, msg: err.type==='popup_closed' ? 'Popup was closed — please try again.' : `Error: ${err.type}`});
+        setStatus({ok:false, msg: err.type==='popup_closed' ? 'Sign-in window closed. Make sure pop-ups are allowed and try again. If it keeps closing, try signing into Google in another tab first.' : `Error: ${err.type}`});
       }
     });
-    client.requestAccessToken({prompt: initialConfig?.accessToken ? 'none' : 'consent'});
+    client.requestAccessToken({prompt: 'select_account'});
   };
 
   if (!open) return null;
