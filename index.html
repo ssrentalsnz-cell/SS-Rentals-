@@ -1626,20 +1626,205 @@ const DashboardPnl = () => {
 };
 
 
+/* ─── ADD / EDIT VEHICLE MODALS ──────────────────────── */
+const AddVehicleModal = ({onClose, onSaved}) => {
+  const [vehicleType, setVehicleType] = React.useState('truck');
+  const [form, setForm] = React.useState({
+    rego:'', make:'', model:'', year:new Date().getFullYear().toString(), type:'',
+    odometer:0, value:0, cof_expiry:'', rego_expiry:'', service_due_km:0,
+    next_service:'', insurance_expiry:'', ruc_balance:0, location:'Auckland — Yard',
+    status:'available', note:'',
+  });
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  const handleSave = () => {
+    if (!form.rego.trim()) { alert('Registration number is required'); return; }
+    const id = vehicleType==='truck' ? 'T'+Date.now().toString().slice(-4) : 'TR'+Date.now().toString().slice(-4);
+    const newV = {...form, id, vehicleType, _isNew:true,
+      odometer:parseInt(form.odometer)||0,
+      value:parseFloat(form.value)||0,
+      service_due_km:parseInt(form.service_due_km)||0,
+      ruc_balance:parseInt(form.ruc_balance)||0,
+      weekly_km:0, rev_ytd:0, maint_ytd:0, weekly_rate:0, hirer:null,
+    };
+    const existing = loadNewVehicles();
+    saveNewVehicles([...existing, newV]);
+    onSaved();
+  };
+  const inp = (label, key, type='text', placeholder='') => (
+    <div className="form-group" style={{marginBottom:0}}>
+      <label className="form-label">{label}</label>
+      <input className="form-control" type={type} placeholder={placeholder}
+        value={form[key]||''} onFocus={e=>{if(type==='number'&&parseFloat(e.target.value)===0)e.target.value='';else e.target.select();}}
+        onChange={e=>set(key, type==='number'?e.target.value:e.target.value)}
+        onBlur={e=>type==='number'&&set(key, parseFloat(e.target.value)||0)}
+        inputMode={type==='number'?'decimal':undefined}/>
+    </div>
+  );
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:560}}>
+        <div className="modal-header">
+          <span className="modal-title"><Icon name="fleet" size={18}/> Add New Vehicle</span>
+          <button className="icon-btn" onClick={onClose}><Icon name="close" size={18}/></button>
+        </div>
+        <div className="modal-body">
+          <div style={{display:'flex',gap:0,borderRadius:8,overflow:'hidden',border:'1.5px solid #6A1B9A',marginBottom:16}}>
+            {[['truck','🚛 Truck'],['trailer','🚚 Trailer']].map(([v,l])=>(
+              <button key={v} onClick={()=>setVehicleType(v)} style={{flex:1,padding:'10px',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,
+                background:vehicleType===v?'#6A1B9A':'transparent',color:vehicleType===v?'#fff':'#6A1B9A'}}>
+                {l}
+              </button>
+            ))}
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            {inp('Registration Number *','rego','')}
+            {inp('Make','make','')}
+            {inp('Model','model','')}
+            {inp('Year','year','')}
+            <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
+              <label className="form-label">Vehicle Type / Description</label>
+              <input className="form-control" value={form.type} onChange={e=>set('type',e.target.value)} placeholder={vehicleType==='truck'?'e.g. 8x4 Curtainside Truck':'e.g. 5-Axle Curtainsider'}/>
+            </div>
+            {inp('Odometer (km)','odometer','number')}
+            {inp('Vehicle Value ($)','value','number')}
+            {inp('COF Expiry','cof_expiry','date')}
+            {inp('Rego Expiry','rego_expiry','date')}
+            {inp('Insurance Expiry','insurance_expiry','date')}
+            {inp('Next Service Due (km)','service_due_km','number','e.g. 360000')}
+            {inp('Next Service Date','next_service','date')}
+            {vehicleType==='truck'&&inp('RUC Balance (km)','ruc_balance','number')}
+            <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
+              <label className="form-label">Location</label>
+              <input className="form-control" value={form.location} onChange={e=>set('location',e.target.value)}/>
+            </div>
+            <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
+              <label className="form-label">Notes</label>
+              <input className="form-control" value={form.note||''} onChange={e=>set('note',e.target.value)}/>
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave}><Icon name="check" size={14}/> Add Vehicle</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const EditVehicleModal = ({vehicle, onClose, onSaved}) => {
+  const [form, setForm] = React.useState({
+    rego: vehicle.rego||'',
+    make: vehicle.make||'',
+    model: vehicle.model||'',
+    year: vehicle.year||'',
+    type: vehicle.type||'',
+    odometer: vehicle.odometer||0,
+    value: vehicle.value||0,
+    cof_expiry: vehicle.cof_expiry||'',
+    rego_expiry: vehicle.rego_expiry||'',
+    insurance_expiry: vehicle.insurance_expiry||'',
+    service_due_km: vehicle.service_due_km||0,
+    next_service: vehicle.next_service||'',
+    ruc_balance: vehicle.ruc_balance||0,
+    location: vehicle.location||'',
+    note: vehicle.note||'',
+    status: vehicle.status||'available',
+  });
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  const handleSave = () => {
+    onSaved({...vehicle, ...form,
+      odometer:parseInt(form.odometer)||0,
+      value:parseFloat(form.value)||0,
+      service_due_km:parseInt(form.service_due_km)||0,
+      ruc_balance:parseInt(form.ruc_balance)||0,
+    });
+  };
+  const inp = (label, key, type='text', placeholder='', span=false) => (
+    <div className="form-group" style={{marginBottom:0, ...(span?{gridColumn:'span 2'}:{})}}>
+      <label className="form-label">{label}</label>
+      <input className="form-control" type={type} placeholder={placeholder}
+        value={form[key]||''} onFocus={e=>{if(type==='number'&&parseFloat(e.target.value)===0)e.target.value='';else e.target.select();}}
+        onChange={e=>set(key, e.target.value)}
+        onBlur={e=>type==='number'&&set(key, parseFloat(e.target.value)||0)}
+        inputMode={type==='number'?'decimal':undefined}/>
+    </div>
+  );
+  const isTruck = !vehicle.vehicleType || vehicle.vehicleType==='truck' || TRUCKS.some(t=>t.id===vehicle.id);
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:580}}>
+        <div className="modal-header">
+          <span className="modal-title"><Icon name="edit" size={18}/> Edit — {vehicle.rego} {vehicle.make} {vehicle.model}</span>
+          <button className="icon-btn" onClick={onClose}><Icon name="close" size={18}/></button>
+        </div>
+        <div className="modal-body">
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            {inp('Registration','rego')}
+            {inp('Make','make')}
+            {inp('Model','model')}
+            {inp('Year','year')}
+            {inp('Vehicle Type / Description','type','text','',true)}
+            <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
+              <div style={{padding:'10px 14px',background:'rgba(255,111,0,0.08)',border:'1px solid rgba(255,111,0,0.2)',borderRadius:8,fontSize:12,color:'#FF6F00',fontWeight:600}}>
+                📝 Editable fields below are saved and override the system defaults
+              </div>
+            </div>
+            {inp('Odometer (km)','odometer','number')}
+            {inp('Vehicle Value ($)','value','number')}
+            {inp('COF Expiry','cof_expiry','date')}
+            {inp('Rego Expiry','rego_expiry','date')}
+            {inp('Insurance Expiry','insurance_expiry','date')}
+            <div className="form-group" style={{marginBottom:0,border:'2px solid #6A1B9A',borderRadius:8,padding:'8px 10px'}}>
+              <label className="form-label" style={{color:'#6A1B9A',fontWeight:700}}>Next Service Due (km) ⭐</label>
+              <input className="form-control" type="text" inputMode="numeric"
+                value={form.service_due_km||''}
+                onFocus={e=>{if(!e.target.value||parseFloat(e.target.value)===0)e.target.value='';else e.target.select();}}
+                onChange={e=>set('service_due_km',e.target.value)}
+                onBlur={e=>set('service_due_km',parseInt(e.target.value)||0)}
+                placeholder="e.g. 360000"/>
+            </div>
+            {inp('Next Service Date','next_service','date')}
+            {isTruck&&inp('RUC Balance (km)','ruc_balance','number')}
+            <div className="form-group" style={{marginBottom:0,gridColumn:isTruck?undefined:'span 2'}}>
+              <label className="form-label">Status</label>
+              <select className="form-control" value={form.status} onChange={e=>set('status',e.target.value)}>
+                <option value="available">Available</option>
+                <option value="on_hire">On Hire</option>
+                <option value="maintenance">In Workshop</option>
+              </select>
+            </div>
+            {inp('Location','location','text','',true)}
+            {inp('Notes','note','text','',true)}
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave}><Icon name="check" size={14}/> Save Changes</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
 const FleetPage = ({theme}) => {
   const [tab,setTab]=useState('trucks');
   const [sel,setSel]=useState(null);
   const [search,setSearch]=useState('');
+  const [showAddVehicle,setShowAddVehicle]=useState(false);
+  const [editVehicle,setEditVehicle]=useState(null);
+  const [fleetRefresh,setFleetRefresh]=useState(0);
   const effectiveHires = getEffectiveHires().filter(h=>h.status==='active');
   const getVehicleStatus = (v) => {
     const onHire = effectiveHires.some(h=>h.truck===v.id||h.trailer===v.id);
     return onHire ? 'on_hire' : v.status==='on_hire' ? 'available' : v.status;
   };
-  const vehicles = tab==='trucks' ? TRUCKS : TRAILERS;
+  const vehicles = tab==='trucks' ? getEffectiveTrucks() : getEffectiveTrailers();
   const filtered = vehicles.filter(v=>
-    v.rego.toLowerCase().includes(search.toLowerCase())||
-    v.make.toLowerCase().includes(search.toLowerCase())||
-    v.model.toLowerCase().includes(search.toLowerCase())
+    (v.rego||'').toLowerCase().includes(search.toLowerCase())||
+    (v.make||'').toLowerCase().includes(search.toLowerCase())||
+    (v.model||'').toLowerCase().includes(search.toLowerCase())
   );
 
   const VehicleModal = ({v,onClose}) => {
@@ -1651,7 +1836,7 @@ const FleetPage = ({theme}) => {
     const hirer = CUSTOMERS.find(c=>c.id===v.hirer);
     return (
       <Modal open onClose={onClose} title={`${v.rego} — ${v.make} ${v.model} ${v.year}`} size="modal-lg"
-        footer={<><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-primary"><Icon name="edit" size={14}/> Edit Vehicle</button></>}>
+        footer={<><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-primary" onClick={()=>{onClose();setEditVehicle(v);}}><Icon name="edit" size={14}/> Edit Vehicle</button></>}>
         <div className="tabs">
           {['overview','compliance','financials','maintenance'].map(t=>(
             <button key={t} className={`tab ${vtab===t?'active':''}`} onClick={()=>setVtab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>
@@ -1662,7 +1847,8 @@ const FleetPage = ({theme}) => {
             <div className="grid" style={{gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:20}}>
               {[
                 ['Status',<span className={statusBadge(v.status)}>{statusLabel(v.status)}</span>],
-                ['Type',v.type],['Odometer',`${v.odometer.toLocaleString()} km`],['Vehicle Value',fmtCur(v.value)],
+                ['Type',v.type],['Odometer',`${(v.odometer||0).toLocaleString()} km`],['Vehicle Value',fmtCur(v.value||0)],
+                ['Next Service (KM)',v.service_due_km?`${v.service_due_km.toLocaleString()} km`:'—'],
                 ['Current Hirer',hirer?hirer.company:'—'],['Location',v.location],
                 ['Weekly KM',`${v.weekly_km.toLocaleString()} km`],['RUC Balance',`${v.ruc_balance.toLocaleString()} km`],
                 ['Hire Start',v.hire_start?fmt(v.hire_start):'—'],['Weekly Rate',v.weekly_rate?fmtCur(v.weekly_rate)+'/wk':'—'],
@@ -1735,12 +1921,20 @@ const FleetPage = ({theme}) => {
 
   return (
     <div>
+      {showAddVehicle&&<AddVehicleModal onClose={()=>setShowAddVehicle(false)} onSaved={()=>{setShowAddVehicle(false);setFleetRefresh(r=>r+1);}}/>}
+      {editVehicle&&<EditVehicleModal vehicle={editVehicle} onClose={()=>setEditVehicle(null)} onSaved={(updated)=>{
+        const ov=loadFleetOverrides(); ov[updated.id]={...ov[updated.id],...updated}; saveFleetOverrides(ov);
+        const nv=loadNewVehicles(); const ni=nv.findIndex(v=>v.id===updated.id);
+        if(ni>=0){nv[ni]={...nv[ni],...updated};saveNewVehicles(nv);}
+        setEditVehicle(null);setFleetRefresh(r=>r+1);
+      }}/>}
       <div className="flex items-center justify-between mb-4">
         <div className="tabs" style={{marginBottom:0}}>
-          <button className={`tab ${tab==='trucks'?'active':''}`} onClick={()=>setTab('trucks')}>Trucks ({TRUCKS.length})</button>
-          <button className={`tab ${tab==='trailers'?'active':''}`} onClick={()=>setTab('trailers')}>Trailers ({TRAILERS.length})</button>
+          <button className={`tab ${tab==='trucks'?'active':''}`} onClick={()=>setTab('trucks')}>Trucks ({getEffectiveTrucks().length})</button>
+          <button className={`tab ${tab==='trailers'?'active':''}`} onClick={()=>setTab('trailers')}>Trailers ({getEffectiveTrailers().length})</button>
         </div>
         <div className="flex gap-2">
+          <button className="btn btn-primary btn-sm" onClick={()=>setShowAddVehicle(true)}><Icon name="plus" size={13}/> Add Vehicle</button>
           <input style={{width:200}} placeholder="Search fleet…" value={search} onChange={e=>setSearch(e.target.value)}/>
           <button className="btn btn-primary"><Icon name="plus" size={14}/> Add Vehicle</button>
         </div>
@@ -1763,7 +1957,7 @@ const FleetPage = ({theme}) => {
 
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Rego</th><th>Make / Model</th><th>Year</th><th>Status</th><th>Odometer</th><th>COF Expiry</th><th>Rego Expiry</th><th>Current Hirer</th><th>Weekly Rate</th><th></th></tr></thead>
+          <thead><tr><th>Rego</th><th>Make / Model</th><th>Year</th><th>Status</th><th>Odometer</th><th>Next Svc KM</th><th>COF Expiry</th><th>Rego Expiry</th><th>Current Hirer</th><th>Weekly Rate</th><th></th></tr></thead>
           <tbody>
             {filtered.map(v=>{
               const cof=complianceStatus(v.cof_expiry);
@@ -1775,11 +1969,15 @@ const FleetPage = ({theme}) => {
                   <td>{v.year}</td>
                   <td><span className={statusBadge(getVehicleStatus(v))}>{statusLabel(getVehicleStatus(v))}</span></td>
                   <td>{v.odometer?(v.odometer.toLocaleString()+' km'):'—'}</td>
+                  <td style={{fontSize:12,color:'#6A1B9A',fontWeight:600}}>{v.service_due_km?v.service_due_km.toLocaleString()+' km':'—'}</td>
                   <td><span style={{color:cof==='red'?'var(--red-light)':cof==='orange'?'var(--orange)':'var(--green)',fontWeight:600,fontSize:12}}>{fmt(v.cof_expiry)}</span></td>
                   <td><span style={{color:reg==='red'?'var(--red-light)':reg==='orange'?'var(--orange)':'var(--green)',fontWeight:600,fontSize:12}}>{fmt(v.rego_expiry)}</span></td>
                   <td>{(()=>{const h=getEffectiveHires().find(h=>(h.truck===v.id||h.trailer===v.id)&&h.status==='active');return h?custName(h.customer):v.hirer?custName(v.hirer):'—';})()}</td>
                   <td>{(()=>{const h=getEffectiveHires().find(h=>(h.truck===v.id||h.trailer===v.id)&&h.status==='active');return h&&h.weekly_truck>0?fmtCur(h.weekly_truck)+'/wk':v.weekly_rate?fmtCur(v.weekly_rate)+'/wk':'—';})()}</td>
-                  <td><button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setSel(v)}}><Icon name="eye" size={13}/></button></td>
+                  <td style={{whiteSpace:'nowrap'}}>
+                    <button className="btn btn-ghost btn-sm" style={{marginRight:4}} onClick={e=>{e.stopPropagation();setSel(v)}}><Icon name="eye" size={13}/></button>
+                    <button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setEditVehicle(v);}} title="Edit vehicle">✏️</button>
+                  </td>
                 </tr>
               );
             })}
@@ -1801,6 +1999,22 @@ const saveCustOverride = (id, data) => {
   localStorage.setItem(CUST_OVERRIDES_KEY, JSON.stringify(all));
 };
 const CUST_NEW_KEY = 'ss_rentals_cust_new';
+const FLEET_OVERRIDE_KEY = 'ss_rentals_fleet_overrides';
+const FLEET_NEW_KEY = 'ss_rentals_fleet_new';
+const loadFleetOverrides = () => { try { return JSON.parse(localStorage.getItem(FLEET_OVERRIDE_KEY)||'{}'); } catch { return {}; } };
+const saveFleetOverrides = d => localStorage.setItem(FLEET_OVERRIDE_KEY, JSON.stringify(d));
+const loadNewVehicles = () => { try { return JSON.parse(localStorage.getItem(FLEET_NEW_KEY)||'[]'); } catch { return []; } };
+const saveNewVehicles = v => localStorage.setItem(FLEET_NEW_KEY, JSON.stringify(v));
+const getEffectiveTrucks = () => {
+  const overrides = loadFleetOverrides();
+  const newV = loadNewVehicles().filter(v=>v.vehicleType==='truck');
+  return [...TRUCKS.map(t=>({...t,...(overrides[t.id]||{})})), ...newV];
+};
+const getEffectiveTrailers = () => {
+  const overrides = loadFleetOverrides();
+  const newV = loadNewVehicles().filter(v=>v.vehicleType==='trailer');
+  return [...TRAILERS.map(t=>({...t,...(overrides[t.id]||{})})), ...newV];
+};
 const loadNewCustomers = () => { try { return JSON.parse(localStorage.getItem(CUST_NEW_KEY)||'[]'); } catch { return []; } };
 const saveNewCustomers = list => localStorage.setItem(CUST_NEW_KEY, JSON.stringify(list));
 // Clean up any blank/invalid entries from previous sync attempts
@@ -5361,23 +5575,23 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
                     ['insuranceVerified','🛡 Insurance verified','Confirm hirer has valid insurance'],
                     ['checklistDone','📋 Pre-handover checklist done','Complete vehicle condition report'],
                   ].map(([k,l,hint])=>(
-                    <label key={k} onClick={()=>set(k,!form[k])}
-                      style={{display:'flex',alignItems:'flex-start',gap:10,fontSize:13,textTransform:'none',
-                        marginBottom:0,cursor:'pointer',padding:'10px 12px',borderRadius:8,
+                    <button key={k} type="button" onClick={(e)=>{e.preventDefault();e.stopPropagation();setForm(prev=>({...prev,[k]:!prev[k]}));}}
+                      style={{display:'flex',alignItems:'flex-start',gap:10,fontSize:13,textAlign:'left',
+                        width:'100%',cursor:'pointer',padding:'10px 12px',borderRadius:8,
                         background:form[k]?'rgba(39,174,96,0.08)':'rgba(230,126,34,0.06)',
                         border:`1px solid ${form[k]?'rgba(39,174,96,0.3)':'rgba(230,126,34,0.3)'}`,
                         transition:'all 0.15s'}}>
                       <div style={{width:20,height:20,borderRadius:4,flexShrink:0,marginTop:1,
                         background:form[k]?'var(--green)':'transparent',
                         border:`2px solid ${form[k]?'var(--green)':'var(--orange)'}`,
-                        display:'flex',alignItems:'center',justifyContent:'center'}}>
+                        display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
                         {form[k]&&<Icon name="check" size={12} color="#fff"/>}
                       </div>
-                      <div>
+                      <div style={{pointerEvents:'none'}}>
                         <div style={{fontWeight:600,color:form[k]?'var(--text)':'var(--text2)'}}>{l}</div>
                         {!form[k]&&<div style={{fontSize:11,color:'var(--orange)',marginTop:2}}>{hint}</div>}
                       </div>
-                    </label>
+                    </button>
                   ))}
                 </div>
                 {(!form.bondPaid||!form.signed||!form.insuranceVerified||!form.checklistDone)&&(
