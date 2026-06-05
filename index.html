@@ -2291,7 +2291,6 @@ const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
         // Create new
         if (!vals.contact && vals.director) vals.contact = vals.director;
         createNewCustomer(vals);
-      } else {
         window.dispatchEvent(new CustomEvent('ss_customer_added'));
       }
       setCustRefresh(r=>r+1);
