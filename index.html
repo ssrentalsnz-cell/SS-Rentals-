@@ -1924,6 +1924,7 @@ const FleetPage = ({theme, sheetsConfig, doSync}) => {
       {showAddVehicle&&<AddVehicleModal onClose={()=>setShowAddVehicle(false)} onSaved={()=>{
         setShowAddVehicle(false);setFleetRefresh(r=>r+1);
         if(sheetsConfig?.accessToken&&sheetsConfig?.tokenExpiry>Date.now()) doSync(sheetsConfig);
+        window.dispatchEvent(new CustomEvent('ss_vehicle_changed'));
       }}/>}
       {editVehicle&&<EditVehicleModal vehicle={editVehicle} onClose={()=>setEditVehicle(null)} onSaved={(updated)=>{
         const ov=loadFleetOverrides(); ov[updated.id]={...ov[updated.id],...updated}; saveFleetOverrides(ov);
@@ -1932,6 +1933,7 @@ const FleetPage = ({theme, sheetsConfig, doSync}) => {
         setEditVehicle(null);setFleetRefresh(r=>r+1);
         // Trigger Sheets sync
         if(sheetsConfig?.accessToken&&sheetsConfig?.tokenExpiry>Date.now()) doSync(sheetsConfig);
+        window.dispatchEvent(new CustomEvent('ss_vehicle_changed'));
       }}/>}
       <div className="flex items-center justify-between mb-4">
         <div className="tabs" style={{marginBottom:0}}>
@@ -2069,6 +2071,8 @@ const createNewCustomer = (data) => {
   const list = loadNewCustomers();
   list.push(cust);
   saveNewCustomers(list);
+  // Fire event so the app can trigger a Sheets sync
+  window.dispatchEvent(new CustomEvent('ss_customer_added', {detail: cust}));
   return cust;
 };
 
@@ -2287,6 +2291,8 @@ const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
         // Create new
         if (!vals.contact && vals.director) vals.contact = vals.director;
         createNewCustomer(vals);
+      } else {
+        window.dispatchEvent(new CustomEvent('ss_customer_added'));
       }
       setCustRefresh(r=>r+1);
       onClose();
@@ -8101,6 +8107,20 @@ const App = () => {
       (err)=>{setSyncState(s=>({...s,syncing:false,error:err,syncMsg:'',syncPct:0}));syncInProgress.current=false;}
     );
   },[sheetsConfig]);
+
+  // Listen for customer/vehicle changes and sync to Sheets
+  useEffect(()=>{
+    const syncOnChange = () => {
+      const cfg = loadSheetsConfig();
+      if (cfg?.accessToken && cfg?.tokenExpiry > Date.now()) doSync(cfg);
+    };
+    window.addEventListener('ss_customer_added', syncOnChange);
+    window.addEventListener('ss_vehicle_changed', syncOnChange);
+    return () => {
+      window.removeEventListener('ss_customer_added', syncOnChange);
+      window.removeEventListener('ss_vehicle_changed', syncOnChange);
+    };
+  }, []);
 
   // 5-minute auto-sync — ONLY syncs when token is valid, NEVER triggers any popup
   useEffect(()=>{
