@@ -1808,7 +1808,7 @@ const EditVehicleModal = ({vehicle, onClose, onSaved}) => {
 };
 
 
-const FleetPage = ({theme}) => {
+const FleetPage = ({theme, sheetsConfig, doSync}) => {
   const [tab,setTab]=useState('trucks');
   const [sel,setSel]=useState(null);
   const [search,setSearch]=useState('');
@@ -1921,12 +1921,17 @@ const FleetPage = ({theme}) => {
 
   return (
     <div>
-      {showAddVehicle&&<AddVehicleModal onClose={()=>setShowAddVehicle(false)} onSaved={()=>{setShowAddVehicle(false);setFleetRefresh(r=>r+1);}}/>}
+      {showAddVehicle&&<AddVehicleModal onClose={()=>setShowAddVehicle(false)} onSaved={()=>{
+        setShowAddVehicle(false);setFleetRefresh(r=>r+1);
+        if(sheetsConfig?.accessToken&&sheetsConfig?.tokenExpiry>Date.now()) doSync(sheetsConfig);
+      }}/>}
       {editVehicle&&<EditVehicleModal vehicle={editVehicle} onClose={()=>setEditVehicle(null)} onSaved={(updated)=>{
         const ov=loadFleetOverrides(); ov[updated.id]={...ov[updated.id],...updated}; saveFleetOverrides(ov);
         const nv=loadNewVehicles(); const ni=nv.findIndex(v=>v.id===updated.id);
         if(ni>=0){nv[ni]={...nv[ni],...updated};saveNewVehicles(nv);}
         setEditVehicle(null);setFleetRefresh(r=>r+1);
+        // Trigger Sheets sync
+        if(sheetsConfig?.accessToken&&sheetsConfig?.tokenExpiry>Date.now()) doSync(sheetsConfig);
       }}/>}
       <div className="flex items-center justify-between mb-4">
         <div className="tabs" style={{marginBottom:0}}>
@@ -1936,7 +1941,7 @@ const FleetPage = ({theme}) => {
         <div className="flex gap-2">
           <button className="btn btn-primary btn-sm" onClick={()=>setShowAddVehicle(true)}><Icon name="plus" size={13}/> Add Vehicle</button>
           <input style={{width:200}} placeholder="Search fleet…" value={search} onChange={e=>setSearch(e.target.value)}/>
-          <button className="btn btn-primary"><Icon name="plus" size={14}/> Add Vehicle</button>
+
         </div>
       </div>
 
@@ -8117,7 +8122,7 @@ const App = () => {
 
   const pages={
     dashboard:<Dashboard theme={theme} setPage={setPage}/>,
-    fleet:<FleetPage theme={theme}/>,
+    fleet:<FleetPage theme={theme} sheetsConfig={sheetsConfig} doSync={doSync}/>,
     customers:<CustomersPage refreshKey={dataRefreshKey} sheetsConfig={sheetsConfig}/>,
     hires:<HiresPage refreshKey={dataRefreshKey}/>,
     invoicing:<InvoicingPage xeroConfig={xeroConfig}/>,
