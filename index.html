@@ -4988,6 +4988,14 @@ tr:nth-child(even){background:#f9f9f9}
 /* ─── NEW HIRE WIZARD ────────────────────────────── */
 const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
   const [step, setStep] = useState(1);
+  // Always load fresh customers including prospects and new additions
+  const [allHireCustomers, setAllHireCustomers] = useState(()=>getAllCustomers());
+  useEffect(()=>{
+    const refresh = () => setAllHireCustomers(getAllCustomers());
+    window.addEventListener('ss_customer_added', refresh);
+    window.addEventListener('storage', refresh);
+    return ()=>{ window.removeEventListener('ss_customer_added', refresh); window.removeEventListener('storage', refresh); };
+  },[]);
   const [form, setForm] = useState({
     customer: '', customCustomer: '', isNewCustomer: false,
     startDate: '', endDate: '', hireType: 'weekly',
@@ -5373,13 +5381,13 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
                     <label>Search & Select Customer</label>
                     <select value={form.customer} onChange={e=>handleCustomerSelect(e.target.value)}>
                       <option value="">Select customer…</option>
-                      {getAllCustomers().sort((a,b)=>a.company.localeCompare(b.company)).map(c=>(
-                        <option key={c.id} value={c.id}>{c.company}{c.director?' — '+c.director:''}{c.status!=='active'?' ('+c.status+')':''}</option>
+                      {allHireCustomers.filter(c=>c.status!=='blacklisted').sort((a,b)=>a.company.localeCompare(b.company)).map(c=>(
+                        <option key={c.id} value={c.id}>{c.company}{c.contact?' — '+c.contact:c.director?' — '+c.director:''}{c.status==='prospect'?' (Prospect)':c.status==='inactive'?' (Inactive)':''}</option>
                       ))}
                     </select>
                   </div>
                   {form.customer&&(()=>{
-                    const c = getAllCustomers().find(x=>x.id===form.customer);
+                    const c = allHireCustomers.find(x=>x.id===form.customer);
                     return c ? (
                       <div style={{padding:'12px 16px', background:'var(--bg3)', borderRadius:10, marginBottom:16}}>
                         <div style={{fontWeight:700, marginBottom:8, fontSize:14}}>{c.company}</div>
