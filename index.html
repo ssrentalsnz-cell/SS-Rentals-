@@ -6737,7 +6737,7 @@ ${d.trailerRego ? '<h2>2. TRAILER DESCRIPTION</h2><table><tr><td>Manufacturer</t
 <table><tr><td>Originating Premises</td><td>280a Peak Road, Cambridge</td></tr>
 <tr><td>Operating Location</td><td>New Zealand</td></tr></table>
 
-<h2>${d.trailerRego?'4':'3'}. TERM OF CONTRACT</h2>
+<h2>${d.trailerRego?'4':'3'}. TERM OF AGREEMENT</h2>
 <table><tr><td>Commencement Date</td><td>${d.startDate}</td></tr>
 <tr><td>Return Date</td><td>${d.endDate}</td></tr></table>
 
@@ -6825,81 +6825,98 @@ p{margin:5px 0}
   <p><strong>LESSEE:</strong> &nbsp; <strong>${d.hirerCompany}</strong> of New Zealand (<strong>"Hirer"</strong>)</p>
   <p><strong>CONTACT:</strong> &nbsp; ${d.hirerContact||'—'}</p>
 </div>
-<p>SS Rentals and the Hirer agree that SS Rentals will lease to the Hirer the vehicle(s) described in the Schedule attached hereto ("Schedule"), on the terms and conditions set out in this Agreement.</p>
+<p>SS Rentals and the Hirer agree that SS Rentals will make available to the Hirer the vehicle(s) described in the Schedule attached hereto ("Schedule"), on the terms and conditions set out in this ${agreementWord} Agreement.</p>
 
 <h2>1. Definitions</h2>
-<p><strong>"Agreement"</strong> means this ${agreementWord} Agreement including all Schedules.</p>
-<p><strong>"Commencement Date"</strong> means the date the Hirer takes possession of the vehicle(s).</p>
-<p><strong>"Lease Term"</strong> means the period from the Commencement Date to the Return Date as specified in the Schedule.</p>
-<p><strong>"Vehicle(s)"</strong> means the truck and/or trailer described in the Schedule.</p>
-<p><strong>"Rental Charges"</strong> means all fees, rates, RUC charges, mileage charges, and other amounts payable under this Agreement.</p>
+<p><strong>"Agreement"</strong> means this ${agreementWord} Agreement including all Schedules and attachments.</p>
+<p><strong>"Commencement Date"</strong> means the date the Hirer takes possession of the Vehicle(s) as specified in the Schedule.</p>
+<p><strong>"${agreementWord} Term"</strong> means the period from the Commencement Date to the Return Date as specified in the Schedule.</p>
+<p><strong>"Vehicle(s)"</strong> means the truck and/or trailer described in the Schedule, including all tyres, accessories, and equipment.</p>
+<p><strong>"Rental Charges"</strong> means all ${isLease ? 'lease' : 'rental'} fees, rates, RUC charges, mileage charges, and other amounts payable under this Agreement.</p>
+<p><strong>"SS Rentals"</strong> means SS Rentals Limited, its successors and assigns.</p>
+<p><strong>"Hirer"</strong> means the party named in the Schedule as the Hirer, including its employees, agents, and sub-contractors.</p>
 
-<h2>2. Lease of Vehicle</h2>
-<p><strong>2.1</strong> SS Rentals agrees to lease the Vehicle(s) to the Hirer for the Lease Term, subject to the terms of this Agreement.</p>
-<p><strong>2.2</strong> The Hirer acknowledges that title to the Vehicle(s) remains with SS Rentals at all times. This Agreement creates a security interest in favour of SS Rentals under the Personal Property Securities Act 1999 (PPSA).</p>
-<p><strong>2.3</strong> On request of SS Rentals, the Hirer shall promptly execute any documents required to ensure the security interest is perfected.</p>
-<p><strong>2.4</strong> The Hirer waives its rights under sections 114(1)(a), 116, 117, 119, 120(2), 121, 125, 129, 131, 132, 133, 134 and 148 of the PPSA.</p>
+<h2>2. ${isLease ? 'Lease' : 'Rental'} of Vehicle</h2>
+<p><strong>2.1</strong> SS Rentals agrees to make available the Vehicle(s) to the Hirer for the ${agreementWord} Term, subject to the terms of this Agreement. ${isLease ? 'This Agreement constitutes a lease of the Vehicle(s) only and does not convey any ownership interest.' : 'This Agreement constitutes a short-term rental arrangement only and does not convey any ownership interest.'}</p>
+<p><strong>2.2</strong> The Hirer acknowledges that <strong>title to the Vehicle(s) remains with SS Rentals at all times</strong>. Nothing in this Agreement shall be construed as transferring ownership of the Vehicle(s) to the Hirer. This Agreement creates a security interest in favour of SS Rentals under the Personal Property Securities Act 1999 (PPSA).</p>
+<p><strong>2.3</strong> On request of SS Rentals, the Hirer shall promptly execute any documents required to ensure SS Rentals' security interest is registered and perfected under the PPSA.</p>
+<p><strong>2.4</strong> The Hirer waives its rights under sections 114(1)(a), 116, 117, 119, 120(2), 121, 125, 129, 131, 132, 133, 134 and 148 of the PPSA to the fullest extent permitted by law.</p>
 
-<h2>3. Lease Term and Rental Charges</h2>
-<p><strong>3.1</strong> The Lease Term is set out in the Schedule. The Hirer agrees to pay the Rental Charges as specified in the Schedule.</p>
-<p><strong>Weekly Lease Rate:</strong> NZD $${d.weeklyRate} per week + GST${d.monthlyRate && d.monthlyRate !== "0.00" ? " &nbsp;|&nbsp; <strong>Monthly Lease Rate:</strong> NZD $"+d.monthlyRate+" per month + GST" : ""}</p>
-<p><strong>3.2</strong> Payments shall be deducted automatically from the Hirer's nominated account via direct debit following the issue of each invoice.</p>
+<h2>3. ${agreementWord} Term and Rental Charges</h2>
+<p><strong>3.1</strong> The ${agreementWord} Term is set out in the Schedule. The Hirer agrees to pay the Rental Charges as specified in the Schedule.</p>
+<p><strong>Weekly ${agreementWord} Rate:</strong> NZD $${d.weeklyRate} per week + GST${d.monthlyRate && d.monthlyRate !== "0.00" ? " &nbsp;|&nbsp; <strong>Monthly Rate:</strong> NZD $"+d.monthlyRate+" per month + GST" : ""}</p>
+<p><strong>3.2</strong> Payments shall be made in advance and deducted automatically from the Hirer's nominated account via direct debit following the issue of each invoice.</p>
 <p><strong>3.3</strong> A Direct Debit Dishonour Fee of 5% of the total invoice amount will be charged if any scheduled payment is declined or dishonoured.</p>
 <p><strong>3.4</strong> An additional charge of $0.50 + GST per kilometre applies for weekly usage exceeding 2,708 km.</p>
 <p><strong>3.5</strong> All Rental Charges are exclusive of GST unless otherwise stated. GST will be added at the prevailing rate.</p>
 
-<h2>4. Obligation to Pay Remaining Lease Term</h2>
-<p class="highlight"><strong>4.1 Critical Obligation:</strong> If the Hirer terminates this Agreement before the agreed Lease Term end date, for any reason whatsoever, the Hirer remains <strong>fully liable</strong> to pay the <strong>total remaining balance of the Rental Charges</strong> for the entire unexpired portion of the Lease Term.</p>
-<p><strong>4.2</strong> This obligation applies regardless of the reason for early termination, including but not limited to: voluntary termination, business closure, financial hardship, sale of the Hirer's business, or any other circumstance.</p>
+<h2>4. Obligation to Pay Remaining ${agreementWord} Term</h2>
+<p class="highlight"><strong>4.1 Critical Obligation:</strong> If the Hirer terminates this Agreement before the agreed ${agreementWord} Term end date, for any reason whatsoever, the Hirer remains <strong>fully liable</strong> to pay the <strong>total remaining balance of the Rental Charges</strong> for the entire unexpired portion of the ${agreementWord} Term.</p>
+<p><strong>4.2</strong> This obligation applies regardless of the reason for early termination, including but not limited to: voluntary termination, business closure, financial hardship, insolvency, sale of the Hirer's business, or any other circumstance.</p>
 <p><strong>4.3</strong> All remaining Rental Charges shall become immediately due and payable upon the date of early termination.</p>
-<p><strong>4.4</strong> SS Rentals reserves the right to recover all outstanding amounts plus any costs incurred in enforcing this clause, including legal fees and debt recovery costs.</p>
+<p><strong>4.4</strong> SS Rentals reserves the right to recover all outstanding amounts plus any costs incurred in enforcing this clause, including legal fees and debt recovery costs on a full indemnity basis.</p>
 
-<h2>5. Hirer's Obligations</h2>
-<p><strong>5.1</strong> The Hirer shall ensure the Vehicle(s) are operated only by qualified, licensed personnel in accordance with applicable laws and manufacturer's instructions.</p>
-<p><strong>5.2</strong> The Hirer shall insure the Vehicle(s) for full replacement value with SS Rentals noted as an interested party, and provide proof of insurance before the Commencement Date.</p>
-<p><strong>5.3</strong> The Hirer shall perform daily checks (tyres, lights, fluids) and report defects immediately to SS Rentals.</p>
-<p><strong>5.4</strong> The Hirer must purchase Road User Charges (RUC) as required during the Lease Term.</p>
-<p><strong>5.5</strong> The Hirer shall not assign, pledge, sublease, or part with possession of the Vehicle(s) without prior written consent from SS Rentals.</p>
-<p><strong>5.6</strong> The Hirer shall maintain the Vehicle(s) in a clean condition and return them in the same condition as at commencement, fair wear and tear excepted.</p>
-<p><strong>5.7</strong> The Vehicle(s) must be returned with the same level of Diesel and AdBlue as at commencement. Shortfalls will be recharged at cost plus a 15% surcharge.</p>
+<h2>5. Prohibition on Sub-${isLease ? 'Leasing' : 'Renting'}, Assignment, and Dealing with the Vehicle(s)</h2>
+<p><strong>5.1 No Sub-${isLease ? 'Lease' : 'Rental'} or Assignment:</strong> The Hirer must not, without the prior written consent of SS Rentals:</p>
+<p style="padding-left:20px"><strong>(a)</strong> sub-${isLease ? 'lease' : 'rent'}, hire out, lend, or otherwise part with possession of the Vehicle(s) to any third party;</p>
+<p style="padding-left:20px"><strong>(b)</strong> assign, novate, or transfer any of its rights or obligations under this Agreement to any other person or entity;</p>
+<p style="padding-left:20px"><strong>(c)</strong> allow any person other than an authorised operator to use or operate the Vehicle(s).</p>
+<p><strong>5.2 Prohibition on Dealings:</strong> The Hirer must not, without the prior written consent of SS Rentals:</p>
+<p style="padding-left:20px"><strong>(a)</strong> sell, dispose of, or purport to sell or transfer any interest in the Vehicle(s);</p>
+<p style="padding-left:20px"><strong>(b)</strong> grant, create, or allow to subsist any mortgage, charge, lien, pledge, encumbrance, or other security interest over the Vehicle(s) or any part thereof;</p>
+<p style="padding-left:20px"><strong>(c)</strong> register or allow to be registered any financing statement or financing change statement in respect of the Vehicle(s) under the PPSA without SS Rentals' prior written consent;</p>
+<p style="padding-left:20px"><strong>(d)</strong> enter into any hire purchase, chattel mortgage, or other arrangement that purports to give any third party any rights in the Vehicle(s).</p>
+<p><strong>5.3</strong> Any purported dealing in breach of clause 5.2 shall be void and of no effect. The Hirer shall indemnify SS Rentals against all loss, damage, costs, and expenses (including legal costs on a full indemnity basis) arising from any breach of this clause.</p>
+<p><strong>5.4</strong> SS Rentals' security interest in the Vehicle(s) has priority over all other interests, and any third party claiming through the Hirer shall take subject to SS Rentals' prior registered interest under the PPSA.</p>
 
-<h2>6. Maintenance and Repairs</h2>
-<p><strong>6.1</strong> SS Rentals will deliver the Vehicle(s) in good working condition, roadworthy, and compliant with all applicable regulatory standards.</p>
-<p><strong>6.2</strong> SS Rentals is responsible for scheduled maintenance unless otherwise agreed.</p>
-<p><strong>6.3</strong> The Hirer may carry out minor repairs not exceeding $100 without prior approval. All major repairs require prior written consent from SS Rentals.</p>
-<p><strong>6.4</strong> Repairs required due to the Hirer's negligence, misuse, overloading, or breach of law are the sole responsibility of the Hirer.</p>
-<p><strong>6.5</strong> Normal tyre wear is SS Rentals' responsibility. Puncture repairs and damage due to misuse are at the Hirer's cost.</p>
-<p><strong>6.6</strong> In the event of an accident, the Hirer must immediately notify SS Rentals and comply with all reporting and insurance procedures.</p>
+<h2>6. Hirer's Obligations</h2>
+<p><strong>6.1</strong> The Hirer shall ensure the Vehicle(s) are operated only by qualified, licensed personnel in accordance with applicable laws and manufacturer's instructions.</p>
+<p><strong>6.2</strong> The Hirer shall insure the Vehicle(s) for full replacement value with SS Rentals noted as an interested party, and provide proof of insurance before the Commencement Date.</p>
+<p><strong>6.3</strong> The Hirer shall perform daily checks (tyres, lights, fluids) and report defects immediately to SS Rentals.</p>
+<p><strong>6.4</strong> The Hirer must purchase Road User Charges (RUC) as required during the ${agreementWord} Term and keep all RUC documentation available for inspection.</p>
+<p><strong>6.5</strong> The Hirer shall maintain the Vehicle(s) in a clean condition and return them in the same condition as at commencement, fair wear and tear excepted.</p>
+<p><strong>6.6</strong> The Vehicle(s) must be returned with the same level of Diesel and AdBlue as at commencement. Shortfalls will be recharged at cost plus a 15% administration surcharge.</p>
+<p><strong>6.7</strong> The Hirer shall not make any modifications, alterations, or additions to the Vehicle(s) without the prior written consent of SS Rentals. Any approved modifications shall become the property of SS Rentals upon termination of this Agreement unless otherwise agreed in writing.</p>
 
-<h2>7. Insurance and Liability</h2>
-<p><strong>7.1</strong> The Vehicle(s) will be covered under SS Rentals' insurance policy during the Lease Term, subject to its terms, conditions, and exclusions.</p>
-<p><strong>7.2</strong> The Hirer is solely responsible for the payment of any applicable insurance excess or deductible.</p>
-<p><strong>7.3</strong> The Hirer shall indemnify and hold harmless SS Rentals from all claims, liabilities, losses, or expenses arising from the Hirer's operation or use of the Vehicle(s).</p>
-<p><strong>7.4</strong> In the case of any accident involving third parties, the Hirer shall promptly provide all required information to SS Rentals.</p>
+<h2>7. Maintenance and Repairs</h2>
+<p><strong>7.1</strong> SS Rentals will deliver the Vehicle(s) in good working condition, roadworthy, and compliant with all applicable regulatory standards.</p>
+<p><strong>7.2</strong> SS Rentals is responsible for scheduled maintenance unless otherwise agreed in writing.</p>
+<p><strong>7.3</strong> The Hirer may carry out minor repairs not exceeding $100 without prior approval. All major repairs require prior written consent from SS Rentals.</p>
+<p><strong>7.4</strong> Repairs required due to the Hirer's negligence, misuse, overloading, or breach of law are the sole responsibility of the Hirer.</p>
+<p><strong>7.5</strong> Normal tyre wear is SS Rentals' responsibility. Puncture repairs and damage due to misuse or negligence are at the Hirer's cost.</p>
+<p><strong>7.6</strong> In the event of an accident, the Hirer must immediately notify SS Rentals and comply with all reporting and insurance procedures.</p>
 
-<h2>8. Fines, Penalties, and Violations</h2>
-<p>The Hirer is solely responsible for all fines, penalties, and charges incurred during the Lease Term, including speeding infringements, overweight violations, parking fines, toll violations, and any other traffic or regulatory infractions arising from the Hirer's use of the Vehicle(s).</p>
+<h2>8. Insurance and Liability</h2>
+<p><strong>8.1</strong> The Vehicle(s) will be covered under SS Rentals' insurance policy during the ${agreementWord} Term, subject to its terms, conditions, and exclusions.</p>
+<p><strong>8.2</strong> The Hirer is solely responsible for the payment of any applicable insurance excess or deductible arising from any claim.</p>
+<p><strong>8.3</strong> The Hirer shall indemnify and hold harmless SS Rentals from all claims, liabilities, losses, or expenses (including legal costs) arising from the Hirer's operation or use of the Vehicle(s).</p>
+<p><strong>8.4</strong> In the case of any accident involving third parties, the Hirer shall promptly provide all required information to SS Rentals and shall not make any admission of liability without SS Rentals' prior written consent.</p>
 
-<h2>9. Bond</h2>
-<p>The Hirer shall pay a security bond of <strong>$${d.bond}</strong> prior to taking possession of the Vehicle(s). The bond shall be held by SS Rentals as security against damage, loss, unpaid fines, cleaning charges, or any other costs incurred under this Agreement. The bond shall be returned within 14 days of the end of the Lease Term, less any deductions.</p>
+<h2>9. Fines, Penalties, and Violations</h2>
+<p>The Hirer is solely responsible for all fines, penalties, and charges incurred during the ${agreementWord} Term, including speeding infringements, overweight violations, parking fines, toll violations, and any other traffic or regulatory infractions arising from the Hirer's use of the Vehicle(s). SS Rentals shall pass on any such fines received together with an administration fee of $50 + GST per infringement.</p>
 
-<h2>10. Termination by SS Rentals</h2>
-<p><strong>10.1</strong> SS Rentals may terminate this Agreement immediately if the Hirer breaches any material term, appears insolvent, or takes any action that prejudices SS Rentals' rights.</p>
-<p><strong>10.2</strong> Upon termination, all unpaid Rental Charges become immediately due and payable.</p>
-<p><strong>10.3</strong> The Hirer must return the Vehicle(s) immediately upon termination.</p>
-<p><strong>10.4</strong> Termination by SS Rentals does not affect any accrued rights or remedies.</p>
+<h2>10. Bond</h2>
+<p>The Hirer shall pay a security bond of <strong>$${d.bond}</strong> prior to taking possession of the Vehicle(s). The bond shall be held by SS Rentals as security against damage, loss, unpaid fines, cleaning charges, or any other costs incurred under this Agreement. The bond shall be returned within 14 days of the end of the ${agreementWord} Term, less any deductions. The bond does not limit the Hirer's liability under this Agreement.</p>
 
-<h2>11. Debt Recovery</h2>
-<p>If the Hirer fails to make any payment due under this Agreement and the debt is referred to a debt collection agency or legal representative, SS Rentals shall be entitled to recover all reasonable costs of recovery from the Hirer, including collection fees, legal costs, and court filing fees.</p>
+<h2>11. Termination by SS Rentals</h2>
+<p><strong>11.1</strong> SS Rentals may terminate this Agreement immediately upon written notice if the Hirer: (a) breaches any material term of this Agreement; (b) appears insolvent or enters receivership, liquidation, or voluntary administration; (c) takes any action that prejudices SS Rentals' title or security interest in the Vehicle(s); or (d) breaches the prohibition on sub-${isLease ? 'leasing' : 'renting'} or dealing in clause 5.</p>
+<p><strong>11.2</strong> Upon termination, all unpaid Rental Charges for the entire remaining ${agreementWord} Term become immediately due and payable.</p>
+<p><strong>11.3</strong> The Hirer must return the Vehicle(s) immediately upon termination, failing which SS Rentals may repossess the Vehicle(s) without further notice and at the Hirer's cost.</p>
+<p><strong>11.4</strong> Termination does not affect any accrued rights, remedies, or obligations of either party.</p>
 
-<h2>12. Dispute Resolution</h2>
-<p>In the event of a dispute, both parties agree to first attempt to resolve the matter by good faith negotiation. If unresolved within 14 days, the parties may refer the dispute to mediation before commencing legal proceedings.</p>
+<h2>12. Debt Recovery</h2>
+<p>If the Hirer fails to make any payment due under this Agreement and the debt is referred to a debt collection agency or legal representative, SS Rentals shall be entitled to recover all reasonable costs of recovery from the Hirer, including collection fees, legal costs on a full indemnity basis, and court filing fees.</p>
 
-<h2>13. General</h2>
-<p><strong>13.1</strong> This Agreement constitutes the entire agreement between the parties and supersedes all prior agreements and representations.</p>
-<p><strong>13.2</strong> Variations to this Agreement must be agreed in writing (including by email) by both parties.</p>
-<p><strong>13.3</strong> This Agreement is governed by the laws of New Zealand.</p>
-<p><strong>13.4</strong> If any provision is found to be unenforceable, the remaining provisions continue in full force.</p>
+<h2>13. Dispute Resolution</h2>
+<p>In the event of a dispute, both parties agree to first attempt to resolve the matter by good faith negotiation for a period of 14 days. If unresolved within that period, the parties may refer the dispute to mediation before commencing legal proceedings. Nothing in this clause prevents SS Rentals from seeking urgent injunctive or other equitable relief where necessary to protect its interest in the Vehicle(s).</p>
+
+<h2>14. General</h2>
+<p><strong>14.1</strong> This Agreement constitutes the entire agreement between the parties and supersedes all prior agreements, representations, and understandings relating to the ${isLease ? 'lease' : 'rental'} of the Vehicle(s).</p>
+<p><strong>14.2</strong> Variations to this Agreement must be agreed in writing (including by email) by both parties.</p>
+<p><strong>14.3</strong> This Agreement is governed by the laws of New Zealand. The parties submit to the non-exclusive jurisdiction of the New Zealand courts.</p>
+<p><strong>14.4</strong> If any provision of this Agreement is found to be void, invalid, or unenforceable, the remaining provisions continue in full force and effect.</p>
+<p><strong>14.5</strong> Failure by SS Rentals to enforce any term of this Agreement does not constitute a waiver of that term or any other term.</p>
+<p><strong>14.6</strong> Time is of the essence in respect of all payment obligations under this Agreement.</p>
 
 ${guaranteeSection}
 
@@ -6907,7 +6924,7 @@ ${guaranteeSection}
 <h2>Signatures</h2>
 <div class="sig-block">
   <div class="sig">
-    <p><strong>SIGNED for and on behalf of SS Rentals (Lessor):</strong></p>
+    <p><strong>SIGNED for and on behalf of SS Rentals:</strong></p>
     <br><br>
     <p>Signature: _______________________________</p>
     <p>Name: Sukhdeep Singh</p>
