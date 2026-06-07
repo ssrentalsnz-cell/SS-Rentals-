@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- v2026-06-08c -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -2393,7 +2394,7 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
   const [dateTo,setDateTo]=useState('');
   const fileRef = useRef();
 
-  const pnlData = bankTxns.length>0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL;
+  const pnlData = getEffectivePnl();
   const ytdMonths = pnlData.filter(m=>m.month.startsWith('2026'));
   const totalRev=ytdMonths.reduce((a,m)=>a+m.revenue,0);
   const totalExp=ytdMonths.reduce((a,m)=>a+m.expenses,0);
@@ -2631,12 +2632,10 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
       {/* P&L Tab */}
       {tab==='pl'&&(
         <div>
-          {bankTxns.length>0&&(
-            <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'rgba(39,174,96,0.08)',border:'1px solid rgba(39,174,96,0.25)',borderRadius:8,marginBottom:16,fontSize:12}}>
-              <Icon name="check" size={15} color="var(--green)"/>
-              <span>P&amp;L generated from <strong style={{color:'var(--green)'}}>{bankTxns.length} real bank transactions</strong> · Latest: {bankTxns[0]?.date?fmt(bankTxns[0].date):'—'} · <span style={{color:'var(--text3)'}}>Duplicates excluded · All figures verified</span></span>
-            </div>
-          )}
+          <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'rgba(39,174,96,0.08)',border:'1px solid rgba(39,174,96,0.25)',borderRadius:8,marginBottom:16,fontSize:12}}>
+            <Icon name="check" size={15} color="var(--green)"/>
+            <span>P&amp;L from <strong style={{color:'var(--green)'}}>{pnlData.length} months</strong> · Source: {loadPnlFromSheet()?'📊 SS Rentals Monthly Financials (Google Sheets)':'Estimated data — sync Google Sheets to update'}</span>
+          </div>
           <div className="grid grid-4 mb-4">
             {[
               {l:'Revenue YTD 2026',v:fmtCur(totalRev),c:'var(--green)'},
@@ -2650,12 +2649,12 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
               {l:'RUC Costs YTD',v:fmtCur(totalRUC)},
               {l:'Repairs & Maintenance',v:fmtCur(totalMaint)},
               {l:'Loan Repayments',v:fmtCur(totalLoans)},
-              {l:'Total Transactions',v:bankTxns.length>0?bankTxns.filter(t=>t.date.startsWith('2026')).length+' txns':'Hardcoded'},
+              {l:'Months of Data',v:pnlData.filter(m=>m.month.startsWith('2026')).length+' months'},
             ].map(k=>(<div key={k.l} className="card card-sm"><div className="kpi-label">{k.l}</div><div style={{fontSize:18,fontWeight:800,marginTop:4}}>{k.v}</div></div>))}
           </div>
           <div className="card mb-4">
             <div className="card-header">
-              <span className="card-title">Monthly P&L — {bankTxns.length>0?'From Real Bank Transactions':'Estimated'}</span>
+              <span className="card-title">Monthly P&L — From Google Sheets</span>
             </div>
             <div className="table-wrap" style={{border:'none',borderRadius:0,margin:'0 -20px'}}>
               <table>
