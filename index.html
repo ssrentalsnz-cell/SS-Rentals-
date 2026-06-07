@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-06-08c -->
+<!-- v2026-06-08d -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -44,9 +44,9 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sa
 .logo-sub{color:#9b7ab5;font-size:10px;font-weight:500;letter-spacing:.5px;text-transform:uppercase}
 .sidebar-section{padding:8px 10px 4px;margin-top:8px}
 .sidebar-section-label{color:var(--text3);font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;padding:0 8px;margin-bottom:4px}
-.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;color:var(--sidebar-text);font-size:13.5px;font-weight:500;transition:all .15s;margin-bottom:1px;text-decoration:none;border:none;background:none;width:100%;text-align:left}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;color:#6A1B9A;font-size:13.5px;font-weight:500;transition:all .15s;margin-bottom:1px;text-decoration:none;border:none;background:none;width:100%;text-align:left}
 .nav-item:hover{background:rgba(106,27,154,0.06);color:#6A1B9A}
-.nav-item.active{background:var(--sidebar-active);color:#FF6F00;border:none}
+.nav-item.active{background:rgba(255,111,0,0.10);color:#FF6F00;border:none;font-weight:700}
 .nav-item .nav-icon{width:18px;height:18px;flex-shrink:0;opacity:.8}
 .nav-item.active .nav-icon{opacity:1}
 .nav-badge{margin-left:auto;background:#FF6F00;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center}
@@ -1075,9 +1075,16 @@ const Dashboard = ({theme,setPage}) => {
   const avail = TRUCKS.filter(t=>t.status==='available').length;
   const maint = TRUCKS.filter(t=>t.status==='maintenance').length;
   const util = Math.round((onHire/TRUCKS.length)*100);
-  const weekRev = WEEKLY_REVENUE[WEEKLY_REVENUE.length-1].amount;
-  const monthRev = MONTHLY_REVENUE[MONTHLY_REVENUE.length-1].amount;
-  const monthNet = MONTHLY_REVENUE[MONTHLY_REVENUE.length-1].net;
+  const pnl = getEffectivePnl();
+  const latestPnl = pnl[pnl.length-1] || {};
+  const prevPnl = pnl[pnl.length-2] || {};
+  const weekRev = (latestPnl.revenue||0)/4.33; // approx weekly from monthly
+  const monthRev = latestPnl.revenue||MONTHLY_REVENUE[MONTHLY_REVENUE.length-1].amount;
+  const monthNet = latestPnl.net||MONTHLY_REVENUE[MONTHLY_REVENUE.length-1].net;
+  const ytdPnl = pnl.filter(m=>m.month.startsWith('2026'));
+  const ytdRev = ytdPnl.reduce((a,m)=>a+m.revenue,0);
+  const ytdExp = ytdPnl.reduce((a,m)=>a+m.expenses,0);
+  const ytdNet = ytdPnl.reduce((a,m)=>a+m.net,0);
   const outstanding = INVOICES.filter(i=>i.status!=='paid').reduce((a,b)=>a+b.total,0);
   const overdue = INVOICES.filter(i=>i.status==='overdue');
   const overdueAmt = overdue.reduce((a,b)=>a+b.total,0);
@@ -1095,8 +1102,8 @@ const Dashboard = ({theme,setPage}) => {
         {[
           {label:'Active Hires',value:onHire,sub:`${avail} available · ${maint} in workshop`,accent:'var(--blue)',trend:'↑ 1 from last week',up:true},
           {label:'Fleet Utilisation',value:`${util}%`,sub:`${TRUCKS.length} trucks · ${TRAILERS.length} trailers`,accent:'var(--green)',trend:'On target (>70%)',up:true},
-          {label:'Weekly Revenue',value:fmtCur(weekRev),sub:'Week ending 31 May 2026',accent:'var(--red)',trend:'↑ 10.3% vs last week',up:true},
-          {label:'Monthly Revenue',value:fmtCur(monthRev),sub:`May 2026 — Net ${fmtCur(monthNet)}`,accent:'#8E44AD',trend:'Best month since Oct 2025',up:true},
+          {label:'Monthly Revenue',value:fmtCur(monthRev),sub:(latestPnl.month||'').replace('-',' / ')+' — Net '+fmtCur(monthNet),accent:'var(--red)',trend:(prevPnl.revenue?((monthRev-prevPnl.revenue)/prevPnl.revenue*100).toFixed(1)+'% vs prev month':'Latest month'),up:monthRev>=(prevPnl.revenue||0)},
+          {label:'YTD Revenue 2026',value:fmtCur(ytdRev),sub:'Net profit: '+fmtCur(ytdNet),accent:'#8E44AD',trend:'Net margin: '+(ytdRev>0?(ytdNet/ytdRev*100).toFixed(1):'0')+'%',up:ytdNet>=0},
         ].map(k=>(
           <div key={k.label} className="kpi-card" style={{'--accent':k.accent}}>
             <div className="kpi-label">{k.label}</div>
@@ -1188,6 +1195,30 @@ const Dashboard = ({theme,setPage}) => {
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      {/* Monthly P&L from Google Sheets */}
+      <div className="card mb-4">
+        <div className="card-header">
+          <span className="card-title">Monthly P&L — {loadPnlFromSheet()?'📊 SS Rentals Monthly Financials':'Estimated'}</span>
+          <button className="btn btn-ghost btn-sm" onClick={()=>setPage('reports')}>Full Report</button>
+        </div>
+        <div className="table-wrap" style={{border:'none',borderRadius:0,margin:'0 -20px',maxHeight:320,overflowY:'auto'}}>
+          <table>
+            <thead><tr><th>Month</th><th>Revenue</th><th>Expenses</th><th>Net Profit</th><th>Margin</th></tr></thead>
+            <tbody>
+              {getEffectivePnl().slice(-12).reverse().map(m=>(
+                <tr key={m.month}>
+                  <td style={{fontWeight:600}}>{m.month}</td>
+                  <td style={{color:'var(--green)',fontWeight:700}}>{fmtCur(m.revenue)}</td>
+                  <td style={{color:'var(--orange)'}}>{fmtCur(m.expenses)}</td>
+                  <td style={{fontWeight:800,color:m.net>=0?'var(--green)':'var(--red-light)'}}>{fmtCur(m.net)}</td>
+                  <td style={{fontSize:12,color:'var(--text3)'}}>{m.revenue>0?(m.net/m.revenue*100).toFixed(1)+'%':'—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
