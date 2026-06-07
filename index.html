@@ -309,44 +309,33 @@ const parsePnlRows = (finRows) => {
   if (!finRows || finRows.length < 2) return [];
   const hdrs = finRows[0].map(h=>(h||'').toString().trim().toLowerCase());
   const ci = (...names) => { for (const n of names) { const i=hdrs.findIndex(h=>h.includes(n.toLowerCase())); if(i>=0)return i; } return -1; };
-  const monthI = ci('month','period','date');
-  const revI   = ci('revenue','income','total income','gross income','total revenue');
-  const expI   = ci('total expense','total exp','expenses','total cost','total expenses');
-  const netI   = ci('net profit','net','profit','net income','net p');
-  const insurI = ci('insurance');
-  const rucI   = ci('ruc','road user');
-  const navI   = ci('navman','gps');
-  const repI   = ci('repair','maintenance','workshop');
-  const flexI  = ci('flexi');
-  const heartI = ci('heartland','loan repay');
-  const otherI = ci('other');
+  const monthI=ci('month','period','date'), revI=ci('revenue','income','total income','gross income','total revenue');
+  const expI=ci('total expense','total exp','expenses','total cost','total expenses'), netI=ci('net profit','net','profit','net income','net p');
+  const insurI=ci('insurance'), rucI=ci('ruc','road user'), navI=ci('navman','gps');
+  const repI=ci('repair','maintenance','workshop'), flexI=ci('flexi'), heartI=ci('heartland','loan repay'), otherI=ci('other');
   if (monthI < 0 || revI < 0) return [];
-  const num = v => parseFloat((v||'').toString().replace(/[^0-9.\-]/g,''))||0;
-  const rows = finRows.slice(1).map(r => {
-    let month = (r[monthI]||'').toString().trim();
+  const num = v => parseFloat(String(v||'').replace(/[^0-9.-]/g,''))||0;
+  const toYM = s => {
+    s = String(s||'').trim();
+    if (/^\d{4}-\d{2}$/.test(s)) return s;
+    const parts2 = s.split(/[\/\-]/);
+    if (parts2.length===2) {
+      if (parts2[0].length===4) return parts2[0]+'-'+parts2[1].padStart(2,'0');
+      if (parts2[1].length===4) return parts2[1]+'-'+parts2[0].padStart(2,'0');
+    }
+    const d = new Date(s);
+    return isNaN(d) ? '' : d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  };
+  return finRows.slice(1).map(r => {
+    const month = toYM(r[monthI]);
     if (!month) return null;
-    // Normalise month to YYYY-MM
-    if (/^\d{4}-\d{2}$/.test(month)) {}
-    else if (/^\d{2}\/\d{4}$/.test(month)) { const [m,y]=month.split('/'); month=y+'-'+m.padStart(2,'0'); }
-    else if (/^\d{4}\/\d{2}$/.test(month)) { const [y,m]=month.split('/'); month=y+'-'+m.padStart(2,'0'); }
-    else if (/^\d{2}-\d{4}$/.test(month)) { const [m,y]=month.split('-'); month=y+'-'+m.padStart(2,'0'); }
-    else { const d=new Date(month); if(!isNaN(d)) month=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
-    if (!/^\d{4}-\d{2}$/.test(month)) return null;
-    const rev = num(r[revI]);
-    const exp = expI>=0 ? num(r[expI]) : 0;
-    const net = netI>=0 ? num(r[netI]) : rev-exp;
-    return { month, revenue:rev, expenses:exp, net,
-      insurance: insurI>=0?num(r[insurI]):0,
-      ruc: rucI>=0?num(r[rucI]):0,
-      navman_ruc: navI>=0?num(r[navI]):0,
-      repairs: repI>=0?num(r[repI]):0,
-      flexi: flexI>=0?num(r[flexI]):0,
-      heartland: heartI>=0?num(r[heartI]):0,
-      other: otherI>=0?num(r[otherI]):0,
-    };
-  }).filter(r=>r&&r.revenue>0);
-  rows.sort((a,b)=>a.month.localeCompare(b.month));
-  return rows;
+    const rev=num(r[revI]), exp=expI>=0?num(r[expI]):0, net=netI>=0?num(r[netI]):rev-exp;
+    return {month,revenue:rev,expenses:exp,net,
+      insurance:insurI>=0?num(r[insurI]):0, ruc:rucI>=0?num(r[rucI]):0,
+      navman_ruc:navI>=0?num(r[navI]):0, repairs:repI>=0?num(r[repI]):0,
+      flexi:flexI>=0?num(r[flexI]):0, heartland:heartI>=0?num(r[heartI]):0,
+      other:otherI>=0?num(r[otherI]):0};
+  }).filter(r=>r&&r.revenue>0).sort((a,b)=>a.month.localeCompare(b.month));
 };
 
 /* ─── HELPERS ─────────────────────────────────────── */
@@ -8680,12 +8669,7 @@ const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xer
                     <input style={{fontSize:11,padding:'3px 8px',border:'1px solid rgba(106,27,154,0.35)',borderRadius:5,background:'var(--bg)',width:260,fontFamily:'monospace'}}
                       defaultValue={loadFinSheetId()}
                       placeholder="Paste spreadsheet ID or full URL"
-                      onBlur={e=>{
-                        const val=e.target.value.trim();
-                        const m=val.match(/\/d\/([a-zA-Z0-9_-]+)/);
-                        const id=m?m[1]:val;
-                        if(id){saveFinSheetId(id);alert('Financial sheet ID saved. Click Sync Now to load data.');}
-                      }}/>
+                      onBlur={e=>{const val=e.target.value.trim();if(val){saveFinSheetId(val);alert('Saved. Click Sync Now to load data.');}}}/>
                     <span style={{fontSize:10,color:'var(--text3)'}}>SS Rentals Monthly Financials</span>
                   </div>
                 </div>
