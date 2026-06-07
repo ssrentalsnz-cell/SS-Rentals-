@@ -293,6 +293,62 @@ const PNL_DETAIL = [
 ];
 
 
+/* ─── P&L SHEET OVERRIDE ────────────────────────────── */
+const PNL_SHEET_KEY = 'ss_rentals_pnl_sheet';
+const FIN_SHEET_ID_KEY = 'ss_rentals_fin_sheet_id';
+const loadPnlFromSheet = () => { try { const d=JSON.parse(localStorage.getItem(PNL_SHEET_KEY)||'null'); return d&&d.length>0?d:null; } catch { return null; } };
+const savePnlToSheet = d => localStorage.setItem(PNL_SHEET_KEY, JSON.stringify(d));
+const loadFinSheetId = () => localStorage.getItem(FIN_SHEET_ID_KEY)||'1pDcnv6YMiSGapDJgKghKjcFveh4h9SZ-3ieiIP5sSFs';
+const saveFinSheetId = id => localStorage.setItem(FIN_SHEET_ID_KEY, id);
+if (!localStorage.getItem(FIN_SHEET_ID_KEY)) localStorage.setItem(FIN_SHEET_ID_KEY, '1pDcnv6YMiSGapDJgKghKjcFveh4h9SZ-3ieiIP5sSFs');
+// Effective P&L: sheet data takes priority over hardcoded PNL_DETAIL
+const getEffectivePnl = () => loadPnlFromSheet() || PNL_DETAIL;
+
+// Parse P&L rows from raw sheet data
+const parsePnlRows = (finRows) => {
+  if (!finRows || finRows.length < 2) return [];
+  const hdrs = finRows[0].map(h=>(h||'').toString().trim().toLowerCase());
+  const ci = (...names) => { for (const n of names) { const i=hdrs.findIndex(h=>h.includes(n.toLowerCase())); if(i>=0)return i; } return -1; };
+  const monthI = ci('month','period','date');
+  const revI   = ci('revenue','income','total income','gross income','total revenue');
+  const expI   = ci('total expense','total exp','expenses','total cost','total expenses');
+  const netI   = ci('net profit','net','profit','net income','net p');
+  const insurI = ci('insurance');
+  const rucI   = ci('ruc','road user');
+  const navI   = ci('navman','gps');
+  const repI   = ci('repair','maintenance','workshop');
+  const flexI  = ci('flexi');
+  const heartI = ci('heartland','loan repay');
+  const otherI = ci('other');
+  if (monthI < 0 || revI < 0) return [];
+  const num = v => parseFloat((v||'').toString().replace(/[^0-9.\-]/g,''))||0;
+  const rows = finRows.slice(1).map(r => {
+    let month = (r[monthI]||'').toString().trim();
+    if (!month) return null;
+    // Normalise month to YYYY-MM
+    if (/^\d{4}-\d{2}$/.test(month)) {}
+    else if (/^\d{2}\/\d{4}$/.test(month)) { const [m,y]=month.split('/'); month=y+'-'+m.padStart(2,'0'); }
+    else if (/^\d{4}\/\d{2}$/.test(month)) { const [y,m]=month.split('/'); month=y+'-'+m.padStart(2,'0'); }
+    else if (/^\d{2}-\d{4}$/.test(month)) { const [m,y]=month.split('-'); month=y+'-'+m.padStart(2,'0'); }
+    else { const d=new Date(month); if(!isNaN(d)) month=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+    if (!/^\d{4}-\d{2}$/.test(month)) return null;
+    const rev = num(r[revI]);
+    const exp = expI>=0 ? num(r[expI]) : 0;
+    const net = netI>=0 ? num(r[netI]) : rev-exp;
+    return { month, revenue:rev, expenses:exp, net,
+      insurance: insurI>=0?num(r[insurI]):0,
+      ruc: rucI>=0?num(r[rucI]):0,
+      navman_ruc: navI>=0?num(r[navI]):0,
+      repairs: repI>=0?num(r[repI]):0,
+      flexi: flexI>=0?num(r[flexI]):0,
+      heartland: heartI>=0?num(r[heartI]):0,
+      other: otherI>=0?num(r[otherI]):0,
+    };
+  }).filter(r=>r&&r.revenue>0);
+  rows.sort((a,b)=>a.month.localeCompare(b.month));
+  return rows;
+};
+
 /* ─── HELPERS ─────────────────────────────────────── */
 const custName = id => CUSTOMERS.find(c=>c.id===id)?.company || id;
 const truckRego = id => TRUCKS.find(t=>t.id===id)?.rego || TRAILERS.find(t=>t.id===id)?.rego || id;
@@ -405,7 +461,7 @@ const buildSheetRows = () => ({
   ],
   pnl: [
     ['Month','Revenue','Insurance','Navman/RUC','RUC','Other Expenses','Repairs','Flexi','Heartland','Total Expenses','Net Profit'],
-    ...PNL_DETAIL.map(r=>[r.month,r.revenue,r.insurance,r.navman_ruc,r.ruc,r.other,r.repairs,r.flexi,r.heartland,r.expenses,r.net]),
+    ...getEffectivePnl().map(r=>[r.month,r.revenue,r.insurance,r.navman_ruc,r.ruc,r.other,r.repairs,r.flexi,r.heartland,r.expenses,r.net]),
   ],
 });
 
@@ -740,6 +796,858 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
         }
       }
     } catch(e) { console.error('Sheet pull error:', e.message); }
+
+    // STEP 1b: Read financial P&L from SS Rentals Monthly Financials spreadsheet
+    try {
+      const finSheetId = loadFinSheetId() || '1pDcnv6YMiSGapDJgKghKjcFveh4h9SZ-3ieiIP5sSFs';
+      let finRows = null;
+      for (const tabName of ['Sheet1','Monthly Financials','Financials','P&L','Financial','Income & Expenses','Summary','Data']) {
+        try {
+          const rows = await readSheetTab(accessToken, finSheetId, tabName);
+          if (rows && rows.length > 1) { finRows = rows; break; }
+        } catch(e) {}
+      }
+      if (finRows && finRows.length > 1) {
+        const pnlRows = parsePnlRows(finRows);
+        if (pnlRows.length > 0) {
+          savePnlToSheet(pnlRows);
+          localStorage.removeItem('ss_rentals_bank_txns');
+          localStorage.removeItem('ss_rentals_bank_meta');
+          pullUpdates += pnlRows.length;
+          console.log('[Sync] Loaded', pnlRows.length, 'months P&L from SS Rentals Monthly Financials');
+        }
+      }
+    } catch(e) { console.error('P&L sheet read error:', e.message); }
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SS Rentals — Fleet Management Platform</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>if(typeof pdfjsLib!=='undefined')pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --red:#6A1B9A;--red-light:#FF6F00;--red-dark:#4A148C;
+  --green:#27AE60;--orange:#FF6F00;--blue:#6A1B9A;
+  --sidebar-w:240px;
+  /* SS Rentals Brand Theme — White/Purple/Orange */
+  --bg:#FFFFFF;--bg2:#F8F5FF;--bg3:#F0EBF8;--bg4:#E8E0F5;
+  --card:#FFFFFF;--card2:#F8F5FF;
+  --border:rgba(106,27,154,0.12);--border2:rgba(106,27,154,0.22);
+  --text:#1a0533;--text2:#5c3d7a;--text3:#9b7ab5;
+  --sidebar:#FFFFFF;--sidebar-text:#1a0533;--sidebar-active:rgba(106,27,154,0.08);
+  --shadow:0 2px 12px rgba(106,27,154,0.12);
+}
+body.light{
+  --bg:#F2F2F7;--bg2:#FFFFFF;--bg3:#E8E8ED;--bg4:#D8D8DC;
+  --card:#FFFFFF;--card2:#F5F5F5;
+  --border:rgba(0,0,0,0.08);--border2:rgba(0,0,0,0.14);
+  --text:#1A1A1A;--text2:#555;--text3:#999;
+  --sidebar:#1A1A1A;--sidebar-text:#C8C8C8;--sidebar-active:rgba(217,43,43,0.2);
+  --shadow:0 2px 12px rgba(0,0,0,0.1);
+}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
+#root{height:100%}
+.app{display:flex;height:100vh;overflow:hidden}
+/* SIDEBAR */
+.sidebar{width:var(--sidebar-w);background:#FFFFFF;display:flex;flex-direction:column;flex-shrink:0;border-right:1px solid rgba(106,27,154,0.15);overflow-y:auto;overflow-x:hidden}
+.sidebar-logo{padding:20px 18px 16px;border-bottom:1px solid rgba(106,27,154,0.12)}
+.logo-mark{display:flex;align-items:center;gap:10px}
+.logo-icon{width:55px;height:55px;background:#FFFFFF;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:#6A1B9A;flex-shrink:0}
+.logo-text{color:#1a0533;font-weight:700;font-size:15px;line-height:1.2}
+.logo-sub{color:#9b7ab5;font-size:10px;font-weight:500;letter-spacing:.5px;text-transform:uppercase}
+.sidebar-section{padding:8px 10px 4px;margin-top:8px}
+.sidebar-section-label{color:var(--text3);font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;padding:0 8px;margin-bottom:4px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;color:#6A1B9A;font-size:13.5px;font-weight:500;transition:all .15s;margin-bottom:1px;text-decoration:none;border:none;background:none;width:100%;text-align:left}
+.nav-item:hover{background:rgba(106,27,154,0.06);color:#4A148C}
+.nav-item.active{background:rgba(255,111,0,0.10);color:#FF6F00;border:1px solid rgba(255,111,0,0.25)}
+.nav-item .nav-icon{width:18px;height:18px;flex-shrink:0;opacity:.8}
+.nav-item.active .nav-icon{opacity:1}
+.nav-badge{margin-left:auto;background:#FF6F00;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center}
+.sidebar-footer{margin-top:auto;padding:12px 10px;border-top:1px solid rgba(255,255,255,0.06)}
+/* MAIN */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+/* HEADER */
+.header{background:var(--card);border-bottom:1px solid var(--border);padding:0 24px;height:58px;display:flex;align-items:center;gap:16px;flex-shrink:0}
+.header-title{font-size:17px;font-weight:700;flex:1}
+.header-sub{font-size:12px;color:var(--text2);font-weight:400}
+.header-actions{display:flex;align-items:center;gap:8px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .15s}
+.btn-primary{background:var(--red);color:#fff}
+.btn-primary:hover{background:var(--red-light)}
+.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border2)}
+.btn-ghost:hover{background:var(--bg3);color:var(--text)}
+.btn-sm{padding:5px 10px;font-size:12px}
+.icon-btn{width:34px;height:34px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);transition:all .15s}
+.icon-btn:hover{background:var(--bg4);color:var(--text)}
+/* CONTENT */
+.content{flex:1;overflow-y:auto;padding:24px;background:var(--bg)}
+/* CARDS */
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px}
+.card-sm{padding:16px}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.card-title{font-size:14px;font-weight:700;color:var(--text)}
+.card-sub{font-size:12px;color:var(--text2)}
+/* GRID */
+.grid{display:grid;gap:16px}
+.grid-4{grid-template-columns:repeat(4,1fr)}
+.grid-3{grid-template-columns:repeat(3,1fr)}
+.grid-2{grid-template-columns:repeat(2,1fr)}
+.grid-auto{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+/* KPI CARDS */
+.kpi-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 20px;position:relative;overflow:hidden}
+.kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent,var(--red))}
+.kpi-label{font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}
+.kpi-value{font-size:26px;font-weight:800;color:var(--text);line-height:1}
+.kpi-sub{font-size:12px;color:var(--text2);margin-top:6px}
+.kpi-trend{font-size:11px;font-weight:600;margin-top:4px}
+.kpi-trend.up{color:var(--green)}
+.kpi-trend.down{color:var(--red-light)}
+/* BADGES */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.badge-green{background:rgba(39,174,96,.15);color:#4ade80;border:1px solid rgba(39,174,96,.3)}
+.badge-red{background:rgba(217,43,43,.15);color:#ff6b6b;border:1px solid rgba(217,43,43,.3)}
+.badge-orange{background:rgba(230,126,34,.15);color:#ffa756;border:1px solid rgba(230,126,34,.3)}
+.badge-blue{background:rgba(41,128,185,.15);color:#5dade2;border:1px solid rgba(41,128,185,.3)}
+.badge-gray{background:var(--bg3);color:var(--text2);border:1px solid var(--border2)}
+/* TABLES */
+.table-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;background:var(--card)}
+th{background:var(--bg3);padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+td{padding:12px 14px;border-top:1px solid var(--border);font-size:13px;color:var(--text);vertical-align:middle}
+tr:hover td{background:var(--bg3)}
+.tr-link{cursor:pointer}
+/* ALERTS */
+.alert{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:9px;border-left:3px solid;margin-bottom:8px;font-size:13px}
+.alert-red{background:rgba(217,43,43,.1);border-color:var(--red);color:#ff8585}
+.alert-orange{background:rgba(230,126,34,.1);border-color:var(--orange);color:#ffc785}
+.alert-green{background:rgba(39,174,96,.1);border-color:var(--green);color:#6fcf97}
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(4px)}
+.modal{background:var(--card);border:1px solid var(--border2);border-radius:16px;width:90%;max-width:760px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)}
+.modal-lg{max-width:920px}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--border);flex-shrink:0}
+.modal-title{font-size:17px;font-weight:700}
+.modal-body{overflow-y:auto;padding:24px;flex:1}
+.modal-footer{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px;flex-shrink:0}
+/* TABS */
+.tabs{display:flex;gap:2px;background:var(--bg3);padding:3px;border-radius:9px;margin-bottom:20px}
+.tab{padding:7px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;color:var(--text2);transition:all .15s;border:none;background:none}
+.tab.active{background:var(--card);color:var(--text);box-shadow:var(--shadow)}
+/* FORM */
+.form-group{margin-bottom:16px}
+label{display:block;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px}
+input,select,textarea{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:9px 12px;color:var(--text);font-size:13px;outline:none;transition:border .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--red)}
+textarea{resize:vertical;min-height:80px}
+select option{background:var(--bg3)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.form-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+/* STATUS DOT */
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+.dot-green{background:var(--green)}
+.dot-red{background:var(--red)}
+.dot-orange{background:var(--orange)}
+.dot-gray{background:var(--text3)}
+/* MISC */
+.flex{display:flex}.flex-col{flex-direction:column}.items-center{align-items:center}.justify-between{justify-content:space-between}.gap-2{gap:8px}.gap-3{gap:12px}.gap-4{gap:16px}.gap-6{gap:24px}
+.text-right{text-align:right}.text-center{text-align:center}
+.fw-700{font-weight:700}.fw-600{font-weight:600}
+.text-sm{font-size:12px}.text-xs{font-size:11px}
+.text-red{color:var(--red-light)}.text-green{color:#4ade80}.text-orange{color:#ffa756}.text-muted{color:var(--text2)}
+.mb-2{margin-bottom:8px}.mb-3{margin-bottom:12px}.mb-4{margin-bottom:16px}.mb-6{margin-bottom:24px}
+.mt-4{margin-top:16px}.mt-6{margin-top:24px}
+.w-full{width:100%}
+.divider{height:1px;background:var(--border);margin:16px 0}
+.pill{display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.section-title{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px}
+/* CHART CONTAINER */
+.chart-wrap{position:relative;height:220px}
+.chart-wrap-sm{height:160px}
+/* PROGRESS BAR */
+.progress{height:6px;background:var(--bg4);border-radius:3px;overflow:hidden}
+.progress-bar{height:100%;border-radius:3px;transition:width .3s}
+/* COMPLIANCE METER */
+.compliance-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+.compliance-row:last-child{border-bottom:none}
+/* NOTIFICATION */
+.notif-dot{width:8px;height:8px;background:var(--red);border-radius:50%;position:absolute;top:4px;right:4px}
+/* AVATAR */
+.avatar{width:32px;height:32px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0}
+/* SCROLLBAR */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--border2)}
+/* RESPONSIVE */
+@media(max-width:768px){
+  .sidebar{width:60px}.logo-text,.sidebar-section-label,.nav-item span,.sidebar-footer{display:none}
+  .nav-item{justify-content:center;padding:10px}.grid-4{grid-template-columns:repeat(2,1fr)}.grid-3{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, createContext, useContext } = React;
+
+/* ─── THEME CONTEXT ───────────────────────────────── */
+const ThemeCtx = createContext();
+const useTheme = () => useContext(ThemeCtx);
+
+/* ─── MOCK DATA ───────────────────────────────────── */
+const today = new Date('2026-05-24');
+const fmt = d => new Date(d).toLocaleDateString('en-NZ',{day:'2-digit',month:'short',year:'numeric'});
+const fmtCur = v => '$' + Number(v).toLocaleString('en-NZ',{minimumFractionDigits:2,maximumFractionDigits:2});
+const daysDiff = d => Math.round((new Date(d)-today)/86400000);
+
+const TRUCKS = [
+  {id:'T001',rego:'MRU490',make:'Scania',model:'R620',year:2020,type:'8x4 Curtainside Truck (W-Mezz)',status:'on_hire',odometer:352400,value:175000,cof_expiry:'2026-08-13',rego_expiry:'2026-08-31',service_due_km:360000,next_service:'2026-07-15',insurance_expiry:'2027-01-01',ruc_balance:2100,hirer:'C004',hire_start:'2026-04-27',weekly_rate:2650.11,location:'Auckland — On Road',weekly_km:4500,rev_ytd:38200,maint_ytd:11641,downtime:4,instalment:2751.02},
+  {id:'T002',rego:'SSRENT',make:'Volvo',model:'FH 540',year:2019,type:'8x4 Curtainside Truck (Wtht-Mezz)',status:'available',odometer:384100,value:158000,cof_expiry:'2026-08-19',rego_expiry:'2026-08-11',service_due_km:390000,next_service:'2026-07-01',insurance_expiry:'2027-01-01',ruc_balance:1850,hirer:null,hire_start:null,weekly_rate:0,location:'Auckland — Yard',weekly_km:0,rev_ytd:31400,maint_ytd:10822,downtime:0,instalment:3826.10},
+  {id:'T003',rego:'RAP758',make:'Volvo',model:'FH 600',year:2017,type:'8x4 Curtainside Truck (Wtht-Mezz)',status:'on_hire',odometer:421800,value:138000,cof_expiry:'2026-11-13',rego_expiry:'2027-01-04',service_due_km:430000,next_service:'2026-08-01',insurance_expiry:'2027-01-01',ruc_balance:3200,hirer:'C008',hire_start:'2026-05-25',weekly_rate:1716.16,location:'Auckland — On Road',weekly_km:2200,rev_ytd:22800,maint_ytd:8073,downtime:6,instalment:4980.46},
+  {id:'T004',rego:'RFL73',make:'Volvo',model:'FH 600',year:2022,type:'8x4 Tractor Unit',status:'available',odometer:183600,value:218000,cof_expiry:'2026-10-14',rego_expiry:'2026-09-24',service_due_km:190000,next_service:'2026-09-01',insurance_expiry:'2027-01-01',ruc_balance:4100,hirer:null,hire_start:null,weekly_rate:0,location:'Auckland — Yard',weekly_km:0,rev_ytd:18600,maint_ytd:3100,downtime:18,instalment:2896.96},
+];
+const TRAILERS = [
+  {id:'TR001',rego:'2W450',make:'TMC',model:'5H 5-Axle Curtainsider (W-Mezz)',year:2015,status:'available',value:62000,cof_expiry:'2026-08-19',rego_expiry:'2026-09-17',hirer:null,hire_start:null,weekly_rate:0,location:'Auckland — Yard',note:'Paired with SSRENT. Instalment covered by SSRENT loan.'},
+  {id:'TR002',rego:'974J5',make:'Domett',model:'E2001 5-Axle Curtainsider (W-Mezz)',year:2017,status:'on_hire',value:70000,cof_expiry:'2026-11-08',rego_expiry:'2027-04-13',hirer:'C004',hire_start:'2026-04-27',weekly_rate:0,location:'Auckland — On Road',note:'Paired with RAP758. Instalment covered by RAP758 loan.'},
+  {id:'TR003',rego:'Q927C',make:'Fruehauf',model:'RBC 4-Axle Curtainsider (Wtht-Mezz)',year:1999,status:'available',value:24000,cof_expiry:'2026-09-14',rego_expiry:'2026-09-13',hirer:null,hire_start:null,weekly_rate:0,location:'Auckland — Yard',note:'Bought cash. No finance.'},
+];
+const CUSTOMERS = [
+  {id:'C001',company:'5 Rivers Transport',contact:'Navinderpal Sandhu',phone:'022 309 3166',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:546.91,weekly_trailer:0,mileage_rate:0.32,ruc_rate:0.66,outstanding:0,payment_terms:'7 days',joined:'2026-04-01',ytd_revenue:1093.82,credit_rating:'B',notes:'2 days in April only. MRU490 + 974J5. Per-day rate $546.91. RUC $0.66/km, Mileage $0.32/km.'},
+  {id:'C002',company:'ATB Enterprises',contact:'Gurpreet Dullat',phone:'021 030 1696',email:'',address:'Auckland, NZ',nzbn:'',status:'blacklisted',truck:null,trailer:null,weekly_truck:0,weekly_trailer:0,mileage_rate:0,ruc_rate:0,outstanding:0,payment_terms:'7 days',joined:'2025-01-01',ytd_revenue:0,credit_rating:'F',notes:'Did not hire. Charged cancellation charges. Unreliable customer — DO NOT RE-HIRE.'},
+  {id:'C003',company:'Baaz NZ Transport',contact:'Sarbjeet Singh',phone:'021 549 022',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:2300,weekly_trailer:0,mileage_rate:0.32,ruc_rate:0.65,outstanding:0,payment_terms:'7 days',joined:'2026-02-13',ytd_revenue:6900,credit_rating:'C',notes:'13/02/26 to 01/03/26. RAP758 + 974J5. $2,300/wk. Had dispute with Riki and parked truck without notice. Caution.'},
+  {id:'C004',company:'Chardikala Limited',contact:'Gurpinder Singh',phone:'027 510 0233',email:'',address:'Auckland, NZ',nzbn:'',status:'active',truck:'T001',trailer:'TR002',weekly_truck:2650.11,weekly_trailer:0,mileage_rate:0.21,ruc_rate:0.64,outstanding:5300.22,payment_terms:'7 days',joined:'2026-04-27',ytd_revenue:21201.00,credit_rating:'B',notes:'27/04/26 to current. MRU490 + 974J5. $2,650.11/wk. CAUTION: Travelling ~4,500 km/week — excessive. Monitor RUC charges very closely.'},
+  {id:'C005',company:'Convoy Truckline',contact:'Navjot Singh',phone:'021 022 06222',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:1676.99,weekly_trailer:0,mileage_rate:0.26,ruc_rate:0.41,outstanding:0,payment_terms:'7 days',joined:'2025-10-08',ytd_revenue:3353.98,credit_rating:'B+',notes:'8/10/25 to 26/10/25. SSRENT truck only. $1,676.99/wk.'},
+  {id:'C006',company:'Dhadda Transport',contact:'Gurpreet Singh',phone:'020 4088 3547',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:290,weekly_trailer:0,mileage_rate:0.30,ruc_rate:0.49,outstanding:0,payment_terms:'7 days',joined:'2025-11-01',ytd_revenue:870,credit_rating:'B',notes:'3 days in Nov 2025. Tractor unit RFL73 only. $290/day.'},
+  {id:'C007',company:'Dhillon Linehaul',contact:'Prabhjot Dhillon',phone:'',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:1344,weekly_trailer:0,mileage_rate:0.13,ruc_rate:0.18,outstanding:0,payment_terms:'7 days',joined:'2025-01-27',ytd_revenue:1344,credit_rating:'A',notes:'27/01/25 to 03/02/25. Trailer 2W450 only. $1,344/wk.'},
+  {id:'C008',company:'Empire Trucking',contact:'Pawanjeet Singh',phone:'027 826 7001',email:'',address:'Auckland, NZ',nzbn:'',status:'active',truck:'T003',trailer:null,weekly_truck:1716.16,weekly_trailer:0,mileage_rate:0.22,ruc_rate:0.45,outstanding:1716.16,payment_terms:'7 days',joined:'2026-05-25',ytd_revenue:1716.16,credit_rating:'A',notes:'25/05/26 to 31/05/26. RAP758 truck only. $1,716.16/wk. Short 1-week hire.'},
+  {id:'C009',company:'Jatana Bros',contact:'Gurpiar Singh',phone:'027 205 8117',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:2398.50,weekly_trailer:0,mileage_rate:0.33,ruc_rate:0.65,outstanding:0,payment_terms:'7 days',joined:'2025-10-21',ytd_revenue:19188,credit_rating:'B+',notes:'21/10/25 to 21/12/25. RAP758 + 974J5. $2,398.50/wk.'},
+  {id:'C010',company:'Kahlon Holding',contact:'Karan Kahlon',phone:'022 420 1913',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:1874.87,weekly_trailer:0,mileage_rate:0.22,ruc_rate:0.45,outstanding:0,payment_terms:'7 days',joined:'2026-04-20',ytd_revenue:1874.87,credit_rating:'A',notes:'20/04/26 to 26/04/26. MRU490 truck only. $1,874.87/wk. 1 week.'},
+  {id:'C011',company:'Pangly Transport',contact:'Jas',phone:'027 527 7022',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:1344,weekly_trailer:0,mileage_rate:0.23,ruc_rate:0.45,outstanding:0,payment_terms:'7 days',joined:'2026-03-16',ytd_revenue:10752,credit_rating:'B+',notes:'16/03/26 to 06/05/26. Tractor unit RFL73. $1,344/wk. Reliable payer.'},
+  {id:'C012',company:'PB48 Transport',contact:'Hardeep Singh',phone:'022 493 0013',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:1676.99,weekly_trailer:0,mileage_rate:0.26,ruc_rate:0.41,outstanding:0,payment_terms:'7 days',joined:'2025-12-01',ytd_revenue:1676.99,credit_rating:'A',notes:'01/12/25 to 07/12/25. SSRENT truck only. $1,676.99/wk. 1 week.'},
+  {id:'C013',company:'Reet Investment',contact:'Harpal Sinh',phone:'021 875 601',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:2416.58,weekly_trailer:0,mileage_rate:0.30,ruc_rate:0.65,outstanding:0,payment_terms:'7 days',joined:'2026-04-13',ytd_revenue:4833.16,credit_rating:'A',notes:'13/04/26 to 26/04/26. SSRENT + 2W450. $2,416.58/wk.'},
+  {id:'C014',company:'Royale Brothers',contact:'Harpal Singh',phone:'020 433 0005',email:'',address:'Auckland, NZ',nzbn:'',status:'blacklisted',truck:null,trailer:null,weekly_truck:2319.99,weekly_trailer:0,mileage_rate:0.32,ruc_rate:0.65,outstanding:0,payment_terms:'7 days',joined:'2025-01-16',ytd_revenue:87159,credit_rating:'F',notes:'16/01/25 to 12/04/26. MRU490 + 974J5. $2,319.99/wk. IN DISPUTE — BLACKLISTED. Do not re-hire under any circumstances.'},
+  {id:'C015',company:'S & S Transport',contact:'Stefin',phone:'021 293 1794',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:1300,weekly_trailer:0,mileage_rate:0.26,ruc_rate:0.48,outstanding:0,payment_terms:'7 days',joined:'2025-12-01',ytd_revenue:2600,credit_rating:'B+',notes:'01/12/25 to 14/12/25. Tractor unit RFL73. $1,300/wk.'},
+  {id:'C016',company:'S & Z Enterprise',contact:'Zuben',phone:'027 575 9774',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:1968.75,weekly_trailer:0,mileage_rate:0.16,ruc_rate:0.41,outstanding:0,payment_terms:'7 days',joined:'2025-09-01',ytd_revenue:23625,credit_rating:'A',notes:'01/09/25 to 21/12/25. MRU490 truck only. $1,968.75/wk. Long-term reliable customer.'},
+  {id:'C017',company:'Satpal & Taran',contact:'Karan',phone:'021 059 7275',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:1699.76,weekly_trailer:0,mileage_rate:0.26,ruc_rate:0.45,outstanding:0,payment_terms:'7 days',joined:'2026-02-23',ytd_revenue:6799.04,credit_rating:'A',notes:'23/02/26 to 05/04/26. SSRENT truck only. $1,699.76/wk.'},
+  {id:'C018',company:'Shah Transport',contact:'Sharanjit',phone:'021 022 70050',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:2646.99,weekly_trailer:0,mileage_rate:0.36,ruc_rate:0.65,outstanding:0,payment_terms:'7 days',joined:'2025-10-26',ytd_revenue:5293.98,credit_rating:'B',notes:'26/10/25 to 09/11/25. SSRENT + 2W450. $2,646.99/wk.'},
+  {id:'C019',company:'Singh Investment',contact:'Harman',phone:'',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:1676.99,weekly_trailer:0,mileage_rate:0.26,ruc_rate:0.48,outstanding:0,payment_terms:'7 days',joined:'2026-01-12',ytd_revenue:5030.97,credit_rating:'B+',notes:'12/01/26 to 08/02/26. SSRENT truck only. $1,676.99/wk.'},
+  {id:'C020',company:'SS Dhillon',contact:'Sukhjinder Singh',phone:'027 777 7470',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:2690.58,weekly_trailer:0,mileage_rate:0.30,ruc_rate:0.65,outstanding:0,payment_terms:'7 days',joined:'2026-05-04',ytd_revenue:2690.58,credit_rating:'A',notes:'04/05/26 to 10/05/26. SSRENT + 2W450. $2,690.58/wk. 1 week hire.'},
+  {id:'C021',company:'Sukh & Charan',contact:'Manpreet Singh',phone:'022 069 0029',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:2590.58,weekly_trailer:0,mileage_rate:0.30,ruc_rate:0.65,outstanding:0,payment_terms:'7 days',joined:'2026-05-11',ytd_revenue:5181.16,credit_rating:'A',notes:'11/05/26 to 24/05/26 (ended today). SSRENT + 2W450. $2,590.58/wk.'},
+  {id:'C022',company:'Team Freight Limited',contact:'Ajaydeep Singh',phone:'027 540 6084',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:2550.11,weekly_trailer:0,mileage_rate:0.25,ruc_rate:0.65,outstanding:0,payment_terms:'7 days',joined:'2026-03-16',ytd_revenue:17850.77,credit_rating:'A',notes:'16/03/26 to 21/05/26. RAP758 + Q927C. $2,550.11/wk. Reliable payer.'},
+  {id:'C023',company:'Vertex Haulage',contact:'Varinderjeet Singh',phone:'022 452 8071',email:'',address:'Auckland, NZ',nzbn:'',status:'inactive',truck:null,trailer:null,weekly_truck:2273.50,weekly_trailer:0,mileage_rate:0.26,ruc_rate:0.59,outstanding:0,payment_terms:'7 days',joined:'2025-07-25',ytd_revenue:16914.50,credit_rating:'A',notes:'25/07/25 to 28/09/25. SSRENT + 2W450. $2,273.50/wk. First SS Rentals customer — great history.'},
+];
+const HIRES = [
+  {id:'H001',customer:'C004',truck:'T001',trailer:'TR002',start:'2026-04-27',end:'2026-06-30',status:'active',weekly_truck:2650.11,weekly_trailer:0,mileage_rate:0.21,ruc_rate:0.64,bond:5000,bond_paid:true,invoiced_to:'2026-05-18',next_invoice:'2026-05-25',signed:true,insurance_verified:true,checklist_done:true,notes:'Chardikala travelling ~4,500km/week. Monitor RUC closely.'},
+  {id:'H002',customer:'C008',truck:'T003',trailer:null,start:'2026-05-25',end:'2026-05-31',status:'active',weekly_truck:1716.16,weekly_trailer:0,mileage_rate:0.22,ruc_rate:0.45,bond:2000,bond_paid:true,invoiced_to:'2026-05-25',next_invoice:'2026-06-01',signed:true,insurance_verified:true,checklist_done:true,notes:'Empire Trucking. RAP758 truck only. Short 1-week hire.'},
+  {id:'H003',customer:'C021',truck:'T002',trailer:'TR001',start:'2026-05-11',end:'2026-05-24',status:'completed',weekly_truck:2590.58,weekly_trailer:0,mileage_rate:0.30,ruc_rate:0.65,bond:4000,bond_paid:true,invoiced_to:'2026-05-24',next_invoice:null,signed:true,insurance_verified:true,checklist_done:true,notes:'Sukh & Charan. Ended today 24/05/26.'},
+  {id:'H004',customer:'C022',truck:'T003',trailer:'TR003',start:'2026-03-16',end:'2026-05-21',status:'completed',weekly_truck:2550.11,weekly_trailer:0,mileage_rate:0.25,ruc_rate:0.65,bond:4000,bond_paid:true,invoiced_to:'2026-05-21',next_invoice:null,signed:true,insurance_verified:true,checklist_done:true,notes:'Team Freight Limited. RAP758 + Q927C. Completed 21/05/26.'},
+  {id:'H005',customer:'C011',truck:'T004',trailer:null,start:'2026-03-16',end:'2026-05-06',status:'completed',weekly_truck:1344,weekly_trailer:0,mileage_rate:0.23,ruc_rate:0.45,bond:2000,bond_paid:true,invoiced_to:'2026-05-06',next_invoice:null,signed:true,insurance_verified:true,checklist_done:true,notes:'Pangly Transport. Tractor unit RFL73. Ended 06/05/26.'},
+  {id:'H006',customer:'C020',truck:'T002',trailer:'TR001',start:'2026-05-04',end:'2026-05-10',status:'completed',weekly_truck:2690.58,weekly_trailer:0,mileage_rate:0.30,ruc_rate:0.65,bond:4000,bond_paid:true,invoiced_to:'2026-05-10',next_invoice:null,signed:true,insurance_verified:true,checklist_done:true,notes:'SS Dhillon. SSRENT + 2W450. 1 week hire.'},
+  {id:'H007',customer:'C014',truck:'T001',trailer:'TR002',start:'2025-01-16',end:'2026-04-12',status:'completed',weekly_truck:2319.99,weekly_trailer:0,mileage_rate:0.32,ruc_rate:0.65,bond:5000,bond_paid:true,invoiced_to:'2026-04-12',next_invoice:null,signed:true,insurance_verified:false,checklist_done:true,notes:'Royale Brothers — IN DISPUTE / BLACKLISTED. Long-term hire ended in dispute.'},
+  {id:'H008',customer:'C013',truck:'T002',trailer:'TR001',start:'2026-04-13',end:'2026-04-26',status:'completed',weekly_truck:2416.58,weekly_trailer:0,mileage_rate:0.30,ruc_rate:0.65,bond:4000,bond_paid:true,invoiced_to:'2026-04-26',next_invoice:null,signed:true,insurance_verified:true,checklist_done:true,notes:'Reet Investment. SSRENT + 2W450.'},
+];
+const INVOICES = [
+  {id:'INV-0269',customer:'C008',hire:'H002',date:'2026-05-24',due:'2026-05-31',period:'25 May – 31 May 2026',truck_hire:1716.16,trailer_hire:0,mileage:484.00,ruc:495.00,damage:0,extras:0,total:2695.16,status:'draft',xero_id:null},
+  {id:'INV-0268',customer:'C004',hire:'H001',date:'2026-05-18',due:'2026-05-25',period:'18 May – 24 May 2026',truck_hire:2650.11,trailer_hire:0,mileage:1889.28,ruc:1824.48,damage:0,extras:0,total:6363.87,status:'overdue',xero_id:'INV-0268'},
+  {id:'INV-0267',customer:'C021',hire:'H003',date:'2026-05-18',due:'2026-05-25',period:'18 May – 24 May 2026',truck_hire:2590.58,trailer_hire:0,mileage:1181.70,ruc:1178.75,damage:0,extras:0,total:4951.03,status:'paid',xero_id:'INV-0267'},
+  {id:'INV-0266',customer:'C022',hire:'H004',date:'2026-05-11',due:'2026-05-18',period:'11 May – 17 May 2026',truck_hire:2550.11,trailer_hire:0,mileage:918.75,ruc:919.75,damage:0,extras:0,total:4388.61,status:'paid',xero_id:'INV-0266'},
+  {id:'INV-0265',customer:'C004',hire:'H001',date:'2026-05-11',due:'2026-05-18',period:'11 May – 17 May 2026',truck_hire:2650.11,trailer_hire:0,mileage:1889.28,ruc:1824.48,damage:0,extras:0,total:6363.87,status:'paid',xero_id:'INV-0265'},
+  {id:'INV-0264',customer:'C020',hire:'H006',date:'2026-05-04',due:'2026-05-11',period:'4 May – 10 May 2026',truck_hire:2690.58,trailer_hire:0,mileage:1140.00,ruc:1137.50,damage:0,extras:0,total:4968.08,status:'paid',xero_id:'INV-0264'},
+  {id:'INV-0263',customer:'C004',hire:'H001',date:'2026-05-04',due:'2026-05-11',period:'4 May – 10 May 2026',truck_hire:2650.11,trailer_hire:0,mileage:1889.28,ruc:1824.48,damage:0,extras:0,total:6363.87,status:'paid',xero_id:'INV-0263'},
+];
+const MAINTENANCE = [
+  {id:'M001',vehicle:'T001',rego:'MRU490',type:'Scania Plan Service',description:'Scheduled Scania maintenance plan service — oil, filters, inspection',date:'2026-04-15',cost:9800,status:'completed',workshop:'Scania NZ',parts:'Scania plan included',odometer:348000},
+  {id:'M002',vehicle:'T003',rego:'RAP758',type:'Workshop Repair',description:'Cambridge Diesel workshop repair — various',date:'2026-04-10',cost:8072.59,status:'completed',workshop:'Cambridge Diesel',parts:'Various',odometer:419200},
+  {id:'M003',vehicle:'T002',rego:'SSRENT',type:'Workshop Repair',description:'Cambridge Diesel workshop — March service and repair',date:'2026-03-20',cost:10822.46,status:'completed',workshop:'Cambridge Diesel',parts:'Various',odometer:381000},
+  {id:'M004',vehicle:'T001',rego:'MRU490',type:'Tyre Replacement',description:'Tyre replacement — drive axle',date:'2026-03-01',cost:1841.40,status:'completed',workshop:'Tyres Direct NZ',parts:'Tyres x4',odometer:344000},
+  {id:'M005',vehicle:'T002',rego:'SSRENT',type:'Tyre Replacement',description:'Tyre replacement — February',date:'2026-02-15',cost:4873.42,status:'completed',workshop:'Tyres Direct NZ',parts:'Tyres x6',odometer:378000},
+  {id:'M006',vehicle:'T001',rego:'MRU490',type:'Scania Plan Service',description:'Next scheduled Scania plan service due — book now',date:'2026-07-15',cost:0,status:'scheduled',workshop:'Scania NZ',parts:'',odometer:null},
+  {id:'M007',vehicle:'T002',rego:'SSRENT',type:'Service',description:'Next service due — check with Cambridge Diesel',date:'2026-07-01',cost:0,status:'scheduled',workshop:'Cambridge Diesel',parts:'',odometer:null},
+  {id:'M008',vehicle:'T003',rego:'RAP758',type:'COF Renewal',description:'COF renewal due November 2026 — book VTNZ',date:'2026-11-13',cost:0,status:'scheduled',workshop:'VTNZ',parts:'',odometer:null},
+  {id:'M009',vehicle:'T004',rego:'RFL73',type:'Service',description:'Service due before COF renewal in October',date:'2026-09-01',cost:0,status:'scheduled',workshop:'Cambridge Diesel',parts:'',odometer:null},
+];
+const DOCUMENTS = [
+  {id:'D001',name:'H001 Hire Agreement — Chardikala Limited',type:'Hire Agreement',customer:'C004',vehicle:'T001',date:'2026-04-27',size:'284KB',signed:true},
+  {id:'D002',name:'H002 Hire Agreement — Empire Trucking',type:'Hire Agreement',customer:'C008',vehicle:'T003',date:'2026-05-25',size:'268KB',signed:true},
+  {id:'D003',name:'H003 Hire Agreement — Sukh & Charan',type:'Hire Agreement',customer:'C021',vehicle:'T002',date:'2026-05-11',size:'271KB',signed:true},
+  {id:'D004',name:'MRU490 COF Certificate',type:'COF',customer:null,vehicle:'T001',date:'2025-08-13',size:'98KB',signed:false},
+  {id:'D005',name:'RAP758 COF Certificate',type:'COF',customer:null,vehicle:'T003',date:'2025-11-13',size:'102KB',signed:false},
+  {id:'D006',name:'SSRENT Rego 2026',type:'Registration',customer:null,vehicle:'T002',date:'2025-08-11',size:'76KB',signed:false},
+  {id:'D007',name:'H007 Hire Agreement — Royale Brothers (DISPUTED)',type:'Hire Agreement',customer:'C014',vehicle:'T001',date:'2025-01-16',size:'302KB',signed:true},
+  {id:'D008',name:'Team Freight Limited — H004 Hire Agreement',type:'Hire Agreement',customer:'C022',vehicle:'T003',date:'2026-03-16',size:'289KB',signed:true},
+];
+const WEEKLY_REVENUE = [
+  {week:'26 Apr',amount:13027},{week:'3 May',amount:16420},{week:'10 May',amount:15890},{week:'17 May',amount:17230},{week:'24 May',amount:9059},
+];
+const MONTHLY_REVENUE = [
+  {month:'Oct 25',amount:120157.54,expenses:87295.20,net:32862.34},
+  {month:'Nov 25',amount:49442.04,expenses:79681.69,net:-30239.65},
+  {month:'Dec 25',amount:50112.47,expenses:48408.01,net:1704.46},
+  {month:'Jan 26',amount:103079.30,expenses:100749.02,net:2330.28},
+  {month:'Feb 26',amount:51722.25,expenses:56695.21,net:-4972.96},
+  {month:'Mar 26',amount:55625.45,expenses:53684.07,net:1941.38},
+  {month:'Apr 26',amount:61428.24,expenses:66771.18,net:-5342.94},
+  {month:'May 26',amount:64345.42,expenses:49712.83,net:14632.59},
+];
+const PNL_DETAIL = [
+  {month:'2025-07',revenue:4611,insurance:792,navman_ruc:0,ruc:1916,other:642,repairs:0,flexi:0,heartland:0,advertising:0,gst:0,expenses:3350,net:1262},
+  {month:'2025-08',revenue:12672,insurance:792,navman_ruc:0,ruc:3833,other:2649,repairs:0,flexi:2751,heartland:0,advertising:167,gst:0,expenses:9924,net:2748},
+  {month:'2025-09',revenue:47849,insurance:2149,navman_ruc:0,ruc:13406,other:25440,repairs:2962,flexi:2751,heartland:0,advertising:471,gst:1130,expenses:48308,net:-458},
+  {month:'2025-10',revenue:120158,insurance:3290,navman_ruc:1323,ruc:24013,other:41616,repairs:9104,flexi:2751,heartland:2897,advertising:1404,gst:897,expenses:87295,net:32862},
+  {month:'2025-11',revenue:49442,insurance:1584,navman_ruc:4854,ruc:16523,other:36148,repairs:12568,flexi:2751,heartland:2897,advertising:162,gst:1598,expenses:79682,net:-30240},
+  {month:'2025-12',revenue:50112,insurance:1584,navman_ruc:2646,ruc:12765,other:17232,repairs:7681,flexi:2751,heartland:7877,advertising:672,gst:0,expenses:48408,net:1704},
+  {month:'2026-01',revenue:103079,insurance:1584,navman_ruc:3972,ruc:20536,other:54029,repairs:10825,flexi:2751,heartland:4345,advertising:909,gst:1798,expenses:100749,net:2330},
+  {month:'2026-02',revenue:51722,insurance:1584,navman_ruc:2205,ruc:9585,other:28048,repairs:9428,flexi:2751,heartland:2897,advertising:197,gst:0,expenses:56695,net:-4973},
+  {month:'2026-03',revenue:55625,insurance:1584,navman_ruc:2646,ruc:12765,other:22378,repairs:7316,flexi:2751,heartland:4345,advertising:899,gst:0,expenses:53684,net:1941},
+  {month:'2026-04',revenue:61428,insurance:1584,navman_ruc:3532,ruc:10233,other:35028,repairs:0,flexi:2751,heartland:11703,advertising:940,gst:1000,expenses:66771,net:-5343},
+  {month:'2026-05',revenue:64345,insurance:1576,navman_ruc:5004,ruc:9952,other:25477,repairs:5189,flexi:2751,heartland:0,advertising:86,gst:2110,expenses:52704,net:11642},
+];
+
+
+/* ─── P&L SHEET OVERRIDE ────────────────────────────── */
+const PNL_SHEET_KEY = 'ss_rentals_pnl_sheet';
+const FIN_SHEET_ID_KEY = 'ss_rentals_fin_sheet_id';
+const loadPnlFromSheet = () => { try { const d=JSON.parse(localStorage.getItem(PNL_SHEET_KEY)||'null'); return d&&d.length>0?d:null; } catch { return null; } };
+const savePnlToSheet = d => localStorage.setItem(PNL_SHEET_KEY, JSON.stringify(d));
+const loadFinSheetId = () => localStorage.getItem(FIN_SHEET_ID_KEY)||'1pDcnv6YMiSGapDJgKghKjcFveh4h9SZ-3ieiIP5sSFs';
+const saveFinSheetId = id => localStorage.setItem(FIN_SHEET_ID_KEY, id);
+if (!localStorage.getItem(FIN_SHEET_ID_KEY)) localStorage.setItem(FIN_SHEET_ID_KEY, '1pDcnv6YMiSGapDJgKghKjcFveh4h9SZ-3ieiIP5sSFs');
+// Effective P&L: sheet data takes priority over hardcoded PNL_DETAIL
+const getEffectivePnl = () => loadPnlFromSheet() || PNL_DETAIL;
+
+// Parse P&L rows from raw sheet data
+const parsePnlRows = (finRows) => {
+  if (!finRows || finRows.length < 2) return [];
+  const hdrs = finRows[0].map(h=>(h||'').toString().trim().toLowerCase());
+  const ci = (...names) => { for (const n of names) { const i=hdrs.findIndex(h=>h.includes(n.toLowerCase())); if(i>=0)return i; } return -1; };
+  const monthI = ci('month','period','date');
+  const revI   = ci('revenue','income','total income','gross income','total revenue');
+  const expI   = ci('total expense','total exp','expenses','total cost','total expenses');
+  const netI   = ci('net profit','net','profit','net income','net p');
+  const insurI = ci('insurance');
+  const rucI   = ci('ruc','road user');
+  const navI   = ci('navman','gps');
+  const repI   = ci('repair','maintenance','workshop');
+  const flexI  = ci('flexi');
+  const heartI = ci('heartland','loan repay');
+  const otherI = ci('other');
+  if (monthI < 0 || revI < 0) return [];
+  const num = v => parseFloat((v||'').toString().replace(/[^0-9.\-]/g,''))||0;
+  const rows = finRows.slice(1).map(r => {
+    let month = (r[monthI]||'').toString().trim();
+    if (!month) return null;
+    // Normalise month to YYYY-MM
+    if (/^\d{4}-\d{2}$/.test(month)) {}
+    else if (/^\d{2}\/\d{4}$/.test(month)) { const [m,y]=month.split('/'); month=y+'-'+m.padStart(2,'0'); }
+    else if (/^\d{4}\/\d{2}$/.test(month)) { const [y,m]=month.split('/'); month=y+'-'+m.padStart(2,'0'); }
+    else if (/^\d{2}-\d{4}$/.test(month)) { const [m,y]=month.split('-'); month=y+'-'+m.padStart(2,'0'); }
+    else { const d=new Date(month); if(!isNaN(d)) month=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+    if (!/^\d{4}-\d{2}$/.test(month)) return null;
+    const rev = num(r[revI]);
+    const exp = expI>=0 ? num(r[expI]) : 0;
+    const net = netI>=0 ? num(r[netI]) : rev-exp;
+    return { month, revenue:rev, expenses:exp, net,
+      insurance: insurI>=0?num(r[insurI]):0,
+      ruc: rucI>=0?num(r[rucI]):0,
+      navman_ruc: navI>=0?num(r[navI]):0,
+      repairs: repI>=0?num(r[repI]):0,
+      flexi: flexI>=0?num(r[flexI]):0,
+      heartland: heartI>=0?num(r[heartI]):0,
+      other: otherI>=0?num(r[otherI]):0,
+    };
+  }).filter(r=>r&&r.revenue>0);
+  rows.sort((a,b)=>a.month.localeCompare(b.month));
+  return rows;
+};
+
+/* ─── HELPERS ─────────────────────────────────────── */
+const custName = id => CUSTOMERS.find(c=>c.id===id)?.company || id;
+const truckRego = id => TRUCKS.find(t=>t.id===id)?.rego || TRAILERS.find(t=>t.id===id)?.rego || id;
+const complianceStatus = d => {
+  const d2 = daysDiff(d);
+  if(d2<0) return 'red';
+  if(d2<=14) return 'orange';
+  return 'green';
+};
+const statusLabel = s => ({on_hire:'On Hire',available:'Available',maintenance:'Maintenance',active:'Active',overdue:'Overdue',paid:'Paid',sent:'Sent',draft:'Draft',completed:'Completed',in_progress:'In Progress',scheduled:'Scheduled',blacklisted:'BLACKLISTED',inactive:'Inactive'}[s]||s);
+const statusBadge = s => {
+  const m={on_hire:'blue',available:'green',maintenance:'orange',active:'green',overdue:'red',paid:'green',sent:'blue',draft:'gray',completed:'green',in_progress:'orange',scheduled:'blue',blacklisted:'red',inactive:'gray'};
+  return `badge badge-${m[s]||'gray'}`;
+};
+
+/* ─── HIRE OVERRIDES STORE ───────────────────────── */
+const HIRE_OVERRIDES_KEY = 'ss_rentals_hire_overrides';
+const loadHireOverrides = () => { try { return JSON.parse(localStorage.getItem(HIRE_OVERRIDES_KEY)||'{}'); } catch { return {}; } };
+const saveHireOverride = (id, data) => {
+  const all = loadHireOverrides();
+  all[id] = {...(all[id]||{}), ...data};
+  localStorage.setItem(HIRE_OVERRIDES_KEY, JSON.stringify(all));
+};
+const getEffectiveHires = () => {
+  const overrides = loadHireOverrides();
+  return HIRES.map(h => overrides[h.id] ? {...h, ...overrides[h.id]} : {...h});
+};
+
+/* ─── GOOGLE SHEETS SYNC ENGINE ──────────────────── */
+const SHEETS_CONFIG_KEY = 'ss_rentals_sheets_config';
+
+const loadSheetsConfig = () => {
+  try { return JSON.parse(localStorage.getItem(SHEETS_CONFIG_KEY) || 'null'); } catch { return null; }
+};
+const saveSheetsConfig = cfg => localStorage.setItem(SHEETS_CONFIG_KEY, JSON.stringify(cfg));
+
+// Silently refresh Google access token when expired (no popup if already consented)
+const refreshSheetsToken = (clientId, callback) => {
+  if (!window.google?.accounts?.oauth2) { callback(null); return; }
+  try {
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: 'https://www.googleapis.com/auth/spreadsheets',
+      prompt: 'none',  // NEVER show popup — fail silently if session expired
+      hint: loadSheetsConfig()?.userEmail || '',
+      callback: (resp) => {
+        if (resp.error || !resp.access_token) { callback(null); return; }
+        const cfg = loadSheetsConfig();
+        if (!cfg) { callback(null); return; }
+        const updated = { ...cfg, accessToken: resp.access_token, tokenExpiry: Date.now() + (resp.expires_in||3600)*1000 };
+        saveSheetsConfig(updated);
+        callback(updated);
+      },
+      error_callback: (err) => {
+        // Silent failure — don't popup, just use existing token
+        console.log('[Sheets] Silent token refresh failed:', err?.type || err);
+        callback(null);
+      },
+    });
+    client.requestAccessToken();
+  } catch(e) {
+    console.log('[Sheets] Token client error:', e.message);
+    callback(null);
+  }
+};
+
+// Get a valid Sheets config — refreshes token silently if expired, never pops up
+const getValidSheetsConfig = (cfg, callback) => {
+  if (!cfg?.clientId || !cfg?.spreadsheetId) { callback(null); return; }
+  const fiveMin = 5 * 60 * 1000;
+  const needsRefresh = !cfg.accessToken || !cfg.tokenExpiry || Date.now() > cfg.tokenExpiry - fiveMin;
+  // If token still valid, use it immediately
+  if (!needsRefresh) { callback(cfg); return; }
+  // Try silent refresh — if it fails, still use the existing token (sync will fail gracefully)
+  refreshSheetsToken(cfg.clientId, (refreshed) => callback(refreshed || cfg));
+};
+
+const buildSheetRows = () => ({
+  fleet: [
+    ['Rego','Make','Model','Year','Type','Status','Odometer','COF Expiry','Rego Expiry','Hirer','Weekly Rate','RUC Balance','Location','Rev YTD','Maint YTD'],
+    ...TRUCKS.map(t=>[t.rego,t.make,t.model,t.year,t.type,t.status,t.odometer,t.cof_expiry,t.rego_expiry,
+      t.hirer?CUSTOMERS.find(c=>c.id===t.hirer)?.company||t.hirer:'',
+      t.weekly_rate,t.ruc_balance,t.location,t.rev_ytd,t.maint_ytd]),
+    ...TRAILERS.map(t=>[t.rego,t.make,t.model,t.year,t.model,'trailer:'+t.status,0,t.cof_expiry,t.rego_expiry,
+      t.hirer?CUSTOMERS.find(c=>c.id===t.hirer)?.company||t.hirer:'',
+      t.weekly_rate||0,0,t.location,0,0]),
+  ],
+  customers: [
+    ['ID','Company','Contact','Phone','Email','Status','Credit Rating','Outstanding','YTD Revenue','Weekly Rate','Payment Terms','Joined','Notes','Address'],
+    ...getAllCustomers().map(c=>[c.id,c.company,c.contact||'',c.phone||'',c.email||'',c.status||'active',c.credit_rating||'',
+      c.outstanding||0,c.ytd_revenue||0,(c.weekly_truck||0)+(c.weekly_trailer||0),c.payment_terms||'Weekly',c.joined||'',c.notes||'',c.address||'']),
+  ],
+  hires: [
+    ['Hire ID','Customer','Truck','Trailer','Start','End','Status','Weekly Rate','Mileage Rate','RUC Rate','Bond','Bond Paid','Signed','Insurance','Notes'],
+    ...HIRES.map(h=>[h.id,
+      CUSTOMERS.find(c=>c.id===h.customer)?.company||h.customer,
+      TRUCKS.find(t=>t.id===h.truck)?.rego||h.truck||'',
+      h.trailer?TRAILERS.find(t=>t.id===h.trailer)?.rego||h.trailer:'',
+      h.start,h.end,h.status,h.weekly_truck+h.weekly_trailer,h.mileage_rate,h.ruc_rate,h.bond,h.bond_paid?'Yes':'No',h.signed?'Yes':'No',h.insurance_verified?'Yes':'No',h.notes]),
+  ],
+  invoices: [
+    ['Invoice ID','Customer','Period','Date','Due Date','Truck Hire','Trailer Hire','Mileage','RUC','Damage','Extras','Total','Status','Xero ID'],
+    ...INVOICES.map(i=>[i.id,
+      CUSTOMERS.find(c=>c.id===i.customer)?.company||i.customer,
+      i.period,i.date,i.due,i.truck_hire,i.trailer_hire,i.mileage,i.ruc,i.damage,i.extras,i.total,i.status,i.xero_id||'']),
+  ],
+  maintenance: [
+    ['ID','Vehicle Rego','Type','Description','Date','Cost','Status','Workshop','Odometer'],
+    ...MAINTENANCE.map(m=>[m.id,m.rego,m.type,m.description,m.date,m.cost,m.status,m.workshop,m.odometer||'']),
+  ],
+  pnl: [
+    ['Month','Revenue','Insurance','Navman/RUC','RUC','Other Expenses','Repairs','Flexi','Heartland','Total Expenses','Net Profit'],
+    ...getEffectivePnl().map(r=>[r.month,r.revenue,r.insurance,r.navman_ruc,r.ruc,r.other,r.repairs,r.flexi,r.heartland,r.expenses,r.net]),
+  ],
+});
+
+const syncSheetTab = async (accessToken, spreadsheetId, sheetName, rows) => {
+  // Clear then write
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:clear`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+  });
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}?valueInputOption=RAW`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: rows }),
+  });
+  if (!res.ok) { const err = await res.json(); throw new Error(err.error?.message || 'Sheets write failed'); }
+};
+
+const ensureSheets = async (accessToken, spreadsheetId, neededSheets) => {
+  const meta = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const data = await meta.json();
+  const existing = (data.sheets || []).map(s => s.properties.title);
+  const toAdd = neededSheets.filter(n => !existing.includes(n));
+  if (toAdd.length === 0) return;
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: toAdd.map(t => ({ addSheet: { properties: { title: t } } })) }),
+  });
+};
+
+// Read a sheet tab back from Google Sheets
+const readSheetTab = async (accessToken, spreadsheetId, sheetName) => {
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.values || [];
+};
+
+// Pull hire changes from Google Sheets back into app data
+const pullHiresFromSheet = (rows) => {
+  if (!rows || rows.length < 2) return 0;
+  const headers = rows[0];
+  const idIdx = headers.indexOf('Hire ID');
+  const endIdx = headers.indexOf('End');
+  const statusIdx = headers.indexOf('Status');
+  const weeklyIdx = headers.indexOf('Weekly Rate');
+  const notesIdx = headers.indexOf('Notes');
+  if (idIdx === -1) return 0;
+  let updated = 0;
+  rows.slice(1).forEach(row => {
+    const id = row[idIdx];
+    const hire = HIRES.find(h => h.id === id);
+    if (!hire) return;
+    if (endIdx !== -1 && row[endIdx] && row[endIdx] !== hire.end) { hire.end = row[endIdx]; updated++; }
+    if (statusIdx !== -1 && row[statusIdx] && row[statusIdx] !== hire.status) { hire.status = row[statusIdx]; updated++; }
+    if (weeklyIdx !== -1 && row[weeklyIdx]) {
+      const rate = parseFloat(row[weeklyIdx]);
+      if (!isNaN(rate) && rate !== hire.weekly_truck + hire.weekly_trailer) { hire.weekly_truck = rate; updated++; }
+    }
+    if (notesIdx !== -1 && row[notesIdx] !== undefined) hire.notes = row[notesIdx];
+  });
+  return updated;
+};
+
+// Pull customer changes from Google Sheets
+const pullCustomersFromSheet = (rows) => {
+  if (!rows || rows.length < 2) return 0;
+  const headers = rows[0].map(h => (h||'').toString().trim().toLowerCase());
+  const ci = (...names) => { for (const n of names) { const i = headers.findIndex(h=>h===n.toLowerCase()||h.startsWith(n.toLowerCase())); if(i>=0) return i; } return -1; };
+  const compIdx = ci('company name','company');
+  const idIdx   = ci('id');
+  const contIdx = ci('contact person','contact');
+  const phoneIdx= ci('cellphone','phone','mobile');
+  const emailIdx= ci('email');
+  const statusIdx=ci('status');
+  const notesIdx= ci('notes');
+  const outIdx  = ci('outstanding');
+
+  if (compIdx === -1) return 0;
+
+  // Build set of all known company names and IDs from localStorage right now
+  const knownCusts = loadNewCustomers();
+  const knownIds = new Set([
+    ...CUSTOMERS.map(c => c.id),
+    ...knownCusts.map(c => c.id)
+  ]);
+  const knownNames = new Set([
+    ...CUSTOMERS.map(c => c.company.toLowerCase().trim()),
+    ...knownCusts.map(c => c.company.toLowerCase().trim())
+  ]);
+
+  let addedNew = 0;
+
+  rows.slice(1).forEach((row, i) => {
+    if (!row || row.every(c => !c)) return;
+    const company = (row[compIdx]||'').toString().trim();
+    if (!company) return;
+    const compLower = company.toLowerCase().trim();
+    const id = idIdx >= 0 ? (row[idIdx]||'').toString().trim() : '';
+
+    // Skip if already known by name OR by id
+    if (knownNames.has(compLower)) return;
+    if (id && knownIds.has(id)) return;
+
+    // New customer — add it
+    const newId = id || ('CS' + String(Date.now() + i).slice(-6));
+    const newCust = {
+      id: newId, company,
+      contact:  contIdx  >= 0 ? (row[contIdx]||'').toString().trim()  : '',
+      phone:    phoneIdx >= 0 ? (row[phoneIdx]||'').toString().trim()  : '',
+      email:    emailIdx >= 0 ? (row[emailIdx]||'').toString().trim()  : '',
+      status:   statusIdx >= 0 && row[statusIdx] ? row[statusIdx].toString().toLowerCase().trim() : 'prospect',
+      outstanding: outIdx >= 0 ? (parseFloat(row[outIdx])||0) : 0,
+      notes:    notesIdx >= 0 ? (row[notesIdx]||'').toString().trim() : '',
+      credit_rating:'B+', ytd_revenue:0, weekly_truck:0, weekly_trailer:0,
+      payment_terms:'Weekly', joined: new Date().toISOString().slice(0,10),
+      _fromSheet: true,
+    };
+    knownCusts.push(newCust);
+    knownNames.add(compLower);
+    knownIds.add(newId);
+    addedNew++;
+    console.log('[Sync] Added new customer from sheet:', company);
+  });
+
+  if (addedNew > 0) saveNewCustomers(knownCusts);
+  return addedNew;
+};
+
+
+// Parse NZ date formats like "27/04/26", "27/4/2026"
+const parseNZDate = (str) => {
+  if (!str) return null;
+  str = str.trim();
+  // Try dd/mm/yy or dd/mm/yyyy
+  const m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (!m) return null;
+  let [,d,mo,y] = m;
+  if (y.length===2) y = '20'+y;
+  return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
+};
+
+// Parse hire period string like "27/04/26 till 27/10/26" or "25/5/26 to 31/5/26"
+const parseHirePeriod = (str) => {
+  if (!str) return null;
+  str = str.trim();
+  // Split on "till", "to", "-", "–"
+  const parts = str.split(/\s+(?:till|to|–|-)\s+/i);
+  if (parts.length === 2) {
+    const start = parseNZDate(parts[0].trim());
+    const end = parseNZDate(parts[1].trim());
+    if (start && end) return { start, end };
+  }
+  return null;
+};
+
+// Pull hire data from Sheet1 (the original customer sheet with Hire period column)
+const pullHiresFromSheet1 = (rows, extLog) => {
+  if (!rows || rows.length < 2) return 0;
+  // Find header row (contains "Hire period")
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(5, rows.length); i++) {
+    if (rows[i].some(c => typeof c === 'string' && c.toLowerCase().includes('hire period'))) {
+      headerIdx = i; break;
+    }
+  }
+  if (headerIdx === -1) return 0;
+  const headers = rows[headerIdx].map(h => (h||'').toLowerCase().trim());
+  // Detect column indexes — with fallbacks matching actual sheet structure
+  // Sheet structure: A(blank), B(Company), C(Contact), D(Phone), E(Hire period), F(Description), G(Rego), H(Weekly charges)
+  let compIdx = headers.findIndex(h => h.includes('company')); if (compIdx === -1) compIdx = 1;
+  let periodIdx = headers.findIndex(h => h.includes('hire period')); if (periodIdx === -1) periodIdx = 4;
+  let regoIdx = headers.findIndex(h => h.includes('rego')); if (regoIdx === -1) regoIdx = 6;
+  let rateIdx = headers.findIndex(h => h.includes('weekly charge') || h.includes('weekly charges')); if (rateIdx === -1) rateIdx = 7;
+
+  let updated = 0;
+  rows.slice(headerIdx + 1).forEach(row => {
+    const company = (row[compIdx] || '').trim();
+    const periodStr = (row[periodIdx] || '').trim();
+    const regoStr = (row[regoIdx] || '').trim();
+    const rateStr = (row[rateIdx] || '').toString().trim();
+    if (!company || !periodStr || periodStr.toLowerCase().includes('didn') || periodStr.toLowerCase() === 'n/a') return;
+    // Skip entries where period is very old (more than 60 days ago) to avoid re-matching old hires
+    const testPeriod = parseHirePeriod(periodStr);
+    if (testPeriod) {
+      const endCheck = new Date(testPeriod.end + 'T23:59:59');
+      const sixtyDaysAgo = new Date(); sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+      if (endCheck < sixtyDaysAgo) return; // Skip very old hires
+    }
+
+    const period = parseHirePeriod(periodStr);
+    if (!period) return;
+
+    // Find matching customer — normalize & and spaces for comparison
+    const normalize = s => s.toLowerCase().replace(/\s+/g,' ').replace(/&/g,'and').trim();
+    const compNorm = normalize(company);
+    const cust = CUSTOMERS.find(c => {
+      const cNorm = normalize(c.company);
+      return cNorm === compNorm ||
+        cNorm.includes(compNorm) ||
+        compNorm.includes(cNorm) ||
+        cNorm.split(' ')[0] === compNorm.split(' ')[0];
+    });
+    if (!cust) return;
+
+    // Find best matching hire — most recent for this customer
+    const hire = HIRES.filter(h => h.customer === cust.id)
+      .sort((a,b) => new Date(b.start) - new Date(a.start))[0];
+    if (!hire) return;
+
+    // Always update end date and start date from sheet
+    let changed = false;
+    if (hire.end !== period.end) { hire.end = period.end; changed = true; }
+    if (hire.start !== period.start) { hire.start = period.start; changed = true; }
+
+    // Parse weekly rate
+    if (rateStr) {
+      const rateNum = parseFloat(rateStr.replace(/[^0-9.]/g,''));
+      if (!isNaN(rateNum) && rateNum > 0 && rateNum !== hire.weekly_truck) {
+        hire.weekly_truck = rateNum; changed = true;
+      }
+    }
+
+    // Save overrides to localStorage so they persist across renders
+    const truck = TRUCKS.find(t => t.id === hire.truck);
+    const endDate = new Date(period.end + 'T23:59:59');
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const newStatus = endDate >= todayStart ? 'active' : 'completed';
+    const override = { end: period.end, start: period.start, status: newStatus };
+    if (rateStr) {
+      // Handle formats: "$2590.58 per week", "2590.58", "$2,590.58/wk"
+      const cleaned = rateStr.replace(/[$,]/g,'').replace(/per week|per wk|\/wk|\/week/gi,'').trim();
+      const r = parseFloat(cleaned);
+      if (!isNaN(r) && r > 0) override.weekly_truck = r;
+    }
+    saveHireOverride(hire.id, override);
+    if (truck) {
+      if (newStatus === 'active') { truck.status = 'on_hire'; truck.hirer = cust.id; }
+      else if (truck.hirer === cust.id) { truck.status = 'available'; truck.hirer = null; }
+    }
+    updated++;
+  });
+  return updated;
+};
+
+const runFullSync = async (config, onProgress, onDone, onError) => {
+  try {
+    const { accessToken, spreadsheetId } = config;
+
+    // STEP 1: Pull changes FROM Sheets INTO app
+    onProgress('Reading changes from Sheets…', 0);
+    let pullUpdates = 0;
+    try {
+      // Read Sheet1 (original customer hire period tab)
+      const sheet1Rows = await readSheetTab(accessToken, spreadsheetId, 'Sheet1');
+      if (sheet1Rows) pullUpdates += pullHiresFromSheet1(sheet1Rows, []);
+      // Read Hire Management tab
+      const hireRows = await readSheetTab(accessToken, spreadsheetId, 'Hire Management');
+      if (hireRows) pullUpdates += pullHiresFromSheet(hireRows);
+      // Read Customers tab — import any new rows directly
+      // Read both Sheet1 (original) and Customers tab — use whichever has the data
+      const custRowsTab = await readSheetTab(accessToken, spreadsheetId, 'Customers');
+      const sheet1Rows2 = await readSheetTab(accessToken, spreadsheetId, 'Sheet1');
+      const custRows = (sheet1Rows2 && sheet1Rows2.length > (custRowsTab||[]).length) ? sheet1Rows2 : custRowsTab;
+      if (custRows && custRows.length > 1) {
+        const hdrs = custRows[0].map(h=>(h||'').toString().trim().toLowerCase());
+        const ci = (...names) => { for (const n of names) { const i = hdrs.findIndex(h=>h===n.toLowerCase()||h.startsWith(n.toLowerCase())); if(i>=0) return i; } return -1; };
+        const compI  = ci('company name','company');
+        const idI    = ci('id');
+        const contI  = ci('contact person','contact');
+        const phoneI = ci('cellphone','phone','mobile');
+        const emailI = ci('email');
+        const statusI= ci('status');
+        const notesI = ci('notes');
+        if (compI >= 0) {
+          // Get all currently known companies fresh from localStorage
+          const existing = loadNewCustomers();
+          const knownNames = new Set([
+            ...CUSTOMERS.map(c=>c.company.toLowerCase().trim()),
+            ...existing.map(c=>c.company.toLowerCase().trim())
+          ]);
+          const knownIds = new Set([
+            ...CUSTOMERS.map(c=>c.id),
+            ...existing.map(c=>c.id)
+          ]);
+          let newOnes = [];
+          custRows.slice(1).forEach((row,ri) => {
+            const company = compI>=0 ? (row[compI]||'').toString().trim() : '';
+            if (!company) return;
+            const id = idI>=0 ? (row[idI]||'').toString().trim() : '';
+            const compLower = company.toLowerCase().trim();
+            // Check if already exists with real data
+            const existingEntry = [...CUSTOMERS,...existing].find(c=>c.company.toLowerCase().trim()===compLower);
+            if (existingEntry && (existingEntry.phone||existingEntry.contact||existingEntry.email)) return;
+            // If exists but empty (broken entry from previous sync), remove it and re-add
+            if (existingEntry && !existingEntry.phone && !existingEntry.contact) {
+              const idx2 = existing.findIndex(c=>c.company.toLowerCase().trim()===compLower);
+              if (idx2 >= 0) existing.splice(idx2, 1);
+              knownNames.delete(compLower);
+            }
+            if (knownNames.has(compLower)) return;
+            if (id && knownIds.has(id)) return;
+            const newId = id || ('CS'+(Date.now()+ri).toString().slice(-6));
+            const rawCont = contI>=0?(row[contI]||'').toString().trim():'';
+            const rawPh = phoneI>=0?(row[phoneI]||'').toString().trim():'';
+            const phOk = /^[\d\s\+\-\(\)]{6,}$/.test(rawPh);
+            newOnes.push({
+              id: newId, company,
+              contact: (!phOk && rawPh) ? (rawCont+' '+rawPh).trim() : rawCont,
+              phone: phOk ? rawPh : '',
+              email: emailI>=0?(row[emailI]||'').toString().trim():'',
+              status: statusI>=0&&row[statusI]?row[statusI].toString().toLowerCase().trim():'prospect',
+              notes: notesI>=0?(row[notesI]||'').toString().trim():'',
+              credit_rating:'B+',ytd_revenue:0,weekly_truck:0,weekly_trailer:0,
+              outstanding:0,payment_terms:'Weekly',
+              joined:new Date().toISOString().slice(0,10),_fromSheet:true,
+              status: 'prospect',
+            });
+            knownNames.add(company.toLowerCase().trim());
+            knownIds.add(newId);
+          });
+          if (newOnes.length > 0) {
+            const updated = [...existing, ...newOnes];
+            saveNewCustomers(updated);
+            pullUpdates += newOnes.length;
+            console.log('[Sync] Added', newOnes.length, 'new customers:', newOnes.map(c=>c.company));
+          }
+        }
+      }
+    } catch(e) { console.error('Sheet pull error:', e.message); }
+
+    // STEP 1b: Read financial P&L data from sheet (priority over hardcoded data)
+    try {
+      // Try "Financial" or "P&L Detail" or "P&L" tab
+      let finRows = null;
+      for (const tabName of ['Financial','P&L Detail','P&L','Financials','Income & Expenses']) {
+        try { finRows = await readSheetTab(accessToken, spreadsheetId, tabName); if (finRows&&finRows.length>1) break; } catch(e) {}
+      }
+      if (finRows && finRows.length > 1) {
+        const hdrs = finRows[0].map(h=>(h||'').toString().trim().toLowerCase());
+        const ci = (...names) => { for (const n of names) { const i=hdrs.findIndex(h=>h.includes(n.toLowerCase())); if(i>=0)return i; } return -1; };
+        const monthI = ci('month','period','date');
+        const revI   = ci('revenue','income','total income','gross income');
+        const expI   = ci('total expense','total exp','expenses','total cost');
+        const netI   = ci('net profit','net','profit','net income');
+        const insurI = ci('insurance');
+        const rucI   = ci('ruc','road user');
+        const navI   = ci('navman','gps');
+        const repI   = ci('repair','maintenance','workshop');
+        const flexI  = ci('flexi');
+        const heartI = ci('heartland','loan');
+        const otherI = ci('other');
+
+        const pnlRows = parsePnlRows(finRows);
+          if (pnlRows.length > 0) {
+            savePnlToSheet(pnlRows);
+            localStorage.removeItem('ss_rentals_bank_txns');
+            localStorage.removeItem('ss_rentals_bank_meta');
+            pullUpdates += pnlRows.length;
+            console.log('[Sync] Loaded', pnlRows.length, 'months of P&L from sheet');
+          }
+      }
+    } catch(e) { console.error('P&L sheet read error:', e.message); }
 
     // STEP 2: Push all current app data TO Sheets
     const allRows = buildSheetRows();
@@ -1300,7 +2208,7 @@ const Dashboard = ({theme,setPage}) => {
   const [kpiModal, setKpiModal] = React.useState(null);
   const activeHires = getEffectiveHires().filter(h=>h.status==='active');
   const pendingInvoices = getInvoices().filter(i=>i.status!=='paid');
-  const latestPnl = PNL_DETAIL[PNL_DETAIL.length-1];
+  const latestPnl = getEffectivePnl()[getEffectivePnl().length-1];
 
   const KpiModal = ({id, onClose}) => {
     if (!id) return null;
@@ -1539,7 +2447,7 @@ const Dashboard = ({theme,setPage}) => {
 /* ─── FLEET PAGE ──────────────────────────────────── */
 /* ─── DASHBOARD P&L PANEL ─────────────────────────── */
 const DashboardPnl = () => {
-  const months = PNL_DETAIL.slice(-12);
+  const months = getEffectivePnl().slice(-12);
   const [selMonth, setSelMonth] = React.useState(months[months.length-1].month);
   const d = months.find(m=>m.month===selMonth) || months[months.length-1];
   const fmtMonth = m => { const [y,mo] = m.split('-'); return new Date(+y,+mo-1,1).toLocaleDateString('en-NZ',{month:'short',year:'2-digit'}); };
@@ -4440,7 +5348,7 @@ const CsvImportModal = ({open, onClose, parsed, onApprove}) => {
 };
 
 /* ─── REPORTS PAGE ────────────────────────────────── */
-const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
+const ReportsPage = ({theme, xeroConfig, sheetsConfig, refreshKey=0}) => {
   const [tab,setTab]=useState('pl');
   const [bankTxns,setBankTxns]=useState(()=>loadBankTxns());
   const [bankMeta,setBankMeta]=useState(()=>loadBankMeta());
@@ -4458,7 +5366,9 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
   const pdfRef     = useRef();
   const [importType, setImportType] = useState('');
 
-  const pnlData = bankTxns.length>0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL;
+  // Re-read P&L from storage whenever refreshKey changes
+  const [pnlData, setPnlData] = React.useState(()=>getEffectivePnl());
+  React.useEffect(()=>{ setPnlData(getEffectivePnl()); }, [refreshKey]);
   const ytdMonths = pnlData.filter(m=>m.month.startsWith('2026'));
   const totalRev=ytdMonths.reduce((a,m)=>a+m.revenue,0);
   const totalExp=ytdMonths.reduce((a,m)=>a+m.expenses,0);
@@ -7765,6 +8675,19 @@ const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xer
                 <div style={{fontSize:11,color:'var(--text3)'}}>
                   {syncState?.lastSync?`Last sync: ${syncState.lastSync.toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit',second:'2-digit'})} — ${syncState.lastSync.toLocaleDateString('en-NZ')}`:'Not yet synced'}
                   {sheetsConfig?.spreadsheetId&&<span style={{marginLeft:12}}>Spreadsheet: <code style={{fontSize:10,background:'var(--bg4)',padding:'1px 5px',borderRadius:3}}>{sheetsConfig.spreadsheetId.slice(0,20)}…</code></span>}
+                  <div style={{marginTop:8,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                    <span style={{fontSize:11,fontWeight:600,color:'#6A1B9A'}}>📊 Financial Sheet:</span>
+                    <input style={{fontSize:11,padding:'3px 8px',border:'1px solid rgba(106,27,154,0.35)',borderRadius:5,background:'var(--bg)',width:260,fontFamily:'monospace'}}
+                      defaultValue={loadFinSheetId()}
+                      placeholder="Paste spreadsheet ID or full URL"
+                      onBlur={e=>{
+                        const val=e.target.value.trim();
+                        const m=val.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                        const id=m?m[1]:val;
+                        if(id){saveFinSheetId(id);alert('Financial sheet ID saved. Click Sync Now to load data.');}
+                      }}/>
+                    <span style={{fontSize:10,color:'var(--text3)'}}>SS Rentals Monthly Financials</span>
+                  </div>
                 </div>
               </div>
               <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-end'}}>
@@ -8188,7 +9111,7 @@ const App = () => {
     hires:<HiresPage refreshKey={dataRefreshKey}/>,
     invoicing:<InvoicingPage xeroConfig={xeroConfig}/>,
     maintenance:<MaintenancePage/>,
-    reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig}/>,
+    reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig} refreshKey={dataRefreshKey}/>,
     communications:<CommunicationsPage/>,
     documents:<DocumentsPage/>,
     navman:<NavmanPage/>,
