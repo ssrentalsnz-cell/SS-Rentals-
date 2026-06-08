@@ -964,6 +964,7 @@ const NAV_BASE = [
   {id:'customers',label:'Customers',icon:'customers',section:'main'},
   {id:'hires',label:'Hire Management',icon:'hires',section:'main'},
   {id:'invoicing',label:'Invoicing',icon:'invoice',section:'finance'},
+  {id:'quotes',label:'Quotes',icon:'quote',section:'finance'},
   {id:'reports',label:'Financial Reports',icon:'reports',section:'finance'},
   {id:'maintenance',label:'Maintenance',icon:'maintenance',section:'operations'},
   {id:'navman',label:'Navman GPS',icon:'navman',section:'operations'},
@@ -1025,7 +1026,7 @@ const Sidebar = ({page,setPage}) => {
 };
 
 /* ─── HEADER ──────────────────────────────────────── */
-const TITLES = {dashboard:'Dashboard',fleet:'Fleet Management',customers:'Customers',hires:'Hire Management',invoicing:'Invoicing',reports:'Financial Reports',maintenance:'Maintenance',navman:'Navman GPS',documents:'Documents',settings:'Settings'};
+const TITLES = {dashboard:'Dashboard',fleet:'Fleet Management',customers:'Customers',hires:'Hire Management',invoicing:'Invoicing',quotes:'Quotes',reports:'Financial Reports',maintenance:'Maintenance',navman:'Navman GPS',documents:'Documents',settings:'Settings'};
 const Header = ({page,theme,toggleTheme,syncState,onManualSync,onOpenSetup,xeroSyncState,onXeroSync,onNewHire}) => {
   const overdueCount = INVOICES.filter(i=>i.status==='overdue').length;
   return (
@@ -1508,6 +1509,9 @@ const saveCustOverride = (id, data) => {
   localStorage.setItem(CUST_OVERRIDES_KEY, JSON.stringify(all));
 };
 const CUST_NEW_KEY = 'ss_rentals_cust_new';
+const QUOTES_KEY = 'ss_rentals_quotes';
+const loadQuotes = () => { try { return JSON.parse(localStorage.getItem(QUOTES_KEY)||'[]'); } catch { return []; } };
+const saveQuotes = q => localStorage.setItem(QUOTES_KEY, JSON.stringify(q));
 const loadNewCustomers = () => { try { return JSON.parse(localStorage.getItem(CUST_NEW_KEY)||'[]'); } catch { return []; } };
 const saveNewCustomers = list => localStorage.setItem(CUST_NEW_KEY, JSON.stringify(list));
 const getAllCustomers = () => {
@@ -4905,6 +4909,307 @@ const NavmanPage = () => {
 };
 
 /* ─── SETTINGS PAGE ───────────────────────────────── */
+/* ─── QUOTES PAGE ─────────────────────────────────── */
+const QuotesPage = ({setPage}) => {
+  const [quotes, setQuotes] = React.useState(()=>loadQuotes());
+  const [showForm, setShowForm] = React.useState(false);
+  const [editQ, setEditQ] = React.useState(null);
+  const [search, setSearch] = React.useState('');
+
+  const refresh = () => setQuotes(loadQuotes());
+
+  const filtered = quotes.filter(q=>
+    (q.customerName||'').toLowerCase().includes(search.toLowerCase()) ||
+    (q.id||'').toLowerCase().includes(search.toLowerCase())
+  );
+
+  const statusColor = s => s==='accepted'?'var(--green)':s==='declined'?'var(--red-light)':s==='sent'?'var(--blue)':'var(--orange)';
+  const statusBg = s => s==='accepted'?'rgba(39,174,96,0.1)':s==='declined'?'rgba(217,43,43,0.1)':s==='sent'?'rgba(41,128,185,0.1)':'rgba(255,111,0,0.1)';
+
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+        <div>
+          <h1 style={{fontSize:22,fontWeight:800,margin:0}}>Quotes</h1>
+          <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>{quotes.length} quote{quotes.length!==1?'s':''} total</div>
+        </div>
+        <div style={{display:'flex',gap:10}}>
+          <input className="form-control" style={{width:220}} placeholder="Search quotes..." value={search} onChange={e=>setSearch(e.target.value)}/>
+          <button className="btn btn-primary" onClick={()=>{setEditQ(null);setShowForm(true);}}>
+            + New Quote
+          </button>
+        </div>
+      </div>
+
+      {filtered.length===0?(
+        <div className="card" style={{textAlign:'center',padding:'48px 20px'}}>
+          <div style={{fontSize:40,marginBottom:12}}>📋</div>
+          <div style={{fontWeight:700,fontSize:16,marginBottom:6}}>No quotes yet</div>
+          <div style={{color:'var(--text3)',fontSize:13,marginBottom:20}}>Create your first quote to get started</div>
+          <button className="btn btn-primary" onClick={()=>{setEditQ(null);setShowForm(true);}}>+ New Quote</button>
+        </div>
+      ):(
+        <div className="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Quote #</th><th>Customer</th><th>Vehicle</th><th>Period</th>
+              <th style={{textAlign:'right'}}>Weekly Rate</th><th style={{textAlign:'right'}}>Est. Total</th>
+              <th>Status</th><th>Date</th><th></th>
+            </tr></thead>
+            <tbody>
+              {filtered.sort((a,b)=>b.id.localeCompare(a.id)).map(q=>{
+                const weeks = q.startDate&&q.endDate ? Math.ceil((new Date(q.endDate)-new Date(q.startDate))/(7*86400000)) : 0;
+                const total = ((parseFloat(q.weeklyTruck)||0)+(parseFloat(q.weeklyTrailer)||0))*Math.max(1,weeks);
+                return (
+                  <tr key={q.id} className="tr-link" onClick={()=>{setEditQ(q);setShowForm(true);}}>
+                    <td style={{fontWeight:700,color:'#6A1B9A'}}>{q.id}</td>
+                    <td style={{fontWeight:600}}>{q.customerName}</td>
+                    <td style={{fontSize:12}}>{q.truckRego||'TBD'}{q.trailerRego?' + '+q.trailerRego:''}</td>
+                    <td style={{fontSize:12}}>{q.startDate&&q.endDate?fmt(q.startDate)+' – '+fmt(q.endDate):q.startDate?'From '+fmt(q.startDate):'—'}</td>
+                    <td style={{textAlign:'right',fontWeight:700}}>{q.weeklyTruck?fmtCur(parseFloat(q.weeklyTruck)):'—'}</td>
+                    <td style={{textAlign:'right',fontWeight:800,color:'var(--green)'}}>{total>0?fmtCur(total):'—'}</td>
+                    <td><span style={{padding:'3px 10px',borderRadius:10,fontSize:11,fontWeight:700,background:statusBg(q.status),color:statusColor(q.status)}}>{(q.status||'draft').toUpperCase()}</span></td>
+                    <td style={{fontSize:12,color:'var(--text3)'}}>{fmt(q.createdAt)}</td>
+                    <td onClick={e=>e.stopPropagation()}>
+                      <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>{
+                        if(window.confirm('Delete quote '+q.id+'?')){
+                          const updated=loadQuotes().filter(x=>x.id!==q.id);
+                          saveQuotes(updated);refresh();
+                        }
+                      }}>🗑</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showForm&&<QuoteFormModal quote={editQ} onClose={()=>{setShowForm(false);refresh();}} setPage={setPage}/>}
+    </div>
+  );
+};
+
+const QuoteFormModal = ({quote, onClose, setPage}) => {
+  const isNew = !quote;
+  const nextId = () => { const qs=loadQuotes(); const nums=qs.map(q=>parseInt(q.id.replace('Q-',''))||0); return 'Q-'+String(Math.max(0,...nums)+1).padStart(4,'0'); };
+  const allCusts = getAllCustomers().filter(c=>c.status!=='blacklisted').sort((a,b)=>a.company.localeCompare(b.company));
+
+  const [form, setForm] = React.useState({
+    id: quote?.id||nextId(),
+    customerMode: quote?.customerId?'existing':'new',
+    customerId: quote?.customerId||'',
+    customerName: quote?.customerName||'',
+    contactName: quote?.contactName||'',
+    contactPhone: quote?.contactPhone||'',
+    truckRego: quote?.truckRego||'',
+    trailerRego: quote?.trailerRego||'',
+    startDate: quote?.startDate||'',
+    endDate: quote?.endDate||'',
+    weeklyTruck: quote?.weeklyTruck||'',
+    weeklyTrailer: quote?.weeklyTrailer||'',
+    mileageRate: quote?.mileageRate||'0.21',
+    rucRate: quote?.rucRate||'0.64',
+    bond: quote?.bond||'5000',
+    notes: quote?.notes||'',
+    status: quote?.status||'draft',
+    createdAt: quote?.createdAt||new Date().toISOString().slice(0,10),
+  });
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const weeks = form.startDate&&form.endDate ? Math.ceil((new Date(form.endDate)-new Date(form.startDate))/(7*86400000)) : 0;
+  const weeklyTotal = (parseFloat(form.weeklyTruck)||0)+(parseFloat(form.weeklyTrailer)||0);
+  const estTotal = weeklyTotal*Math.max(1,weeks);
+  const gst = parseFloat((estTotal*0.15).toFixed(2));
+  const totalInclGst = parseFloat((estTotal+gst).toFixed(2));
+
+  const handleSave = (status) => {
+    const finalStatus = status||form.status;
+    let custName = form.customerName;
+    let custId = form.customerId;
+    if (form.customerMode==='existing' && form.customerId) {
+      const c = getAllCustomers().find(x=>x.id===form.customerId);
+      if (c) { custName=c.company; custId=c.id; }
+    } else if (form.customerMode==='new' && form.customerName) {
+      const existing = getAllCustomers().find(c=>c.company.toLowerCase()===form.customerName.toLowerCase());
+      if (!existing) {
+        const newC = createNewCustomer({company:form.customerName,contact:form.contactName,phone:form.contactPhone,status:'prospect'});
+        custId = newC.id;
+      } else { custId = existing.id; }
+    }
+    const q = {...form, customerName:custName, customerId:custId, status:finalStatus};
+    const qs = loadQuotes();
+    const idx = qs.findIndex(x=>x.id===q.id);
+    if (idx>=0) qs[idx]=q; else qs.push(q);
+    saveQuotes(qs);
+    onClose();
+  };
+
+  const handleDownloadPDF = () => {
+    const custName = form.customerMode==='existing'
+      ? (getAllCustomers().find(c=>c.id===form.customerId)?.company||form.customerName)
+      : form.customerName;
+    const html = buildQuotePrintHTML({...form, customerName:custName, weeks, weeklyTotal, estTotal, gst, totalInclGst});
+    const win = window.open('','_blank');
+    if(win){win.document.write(html);win.document.close();win.onload=()=>{win.document.title=form.id;setTimeout(()=>win.print(),300);};}
+    handleSave('sent');
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:640,maxHeight:'92vh',overflowY:'auto'}}>
+        <div className="modal-header">
+          <span className="modal-title">📋 {isNew?'New Quote':'Edit Quote'} — {form.id}</span>
+          <button className="icon-btn" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+
+          {/* Customer */}
+          <div style={{marginBottom:16}}>
+            <label className="form-label">Customer</label>
+            <div style={{display:'flex',gap:8,marginBottom:8}}>
+              {[['existing','Existing Customer'],['new','New Customer']].map(([v,l])=>(
+                <button key={v} onClick={()=>set('customerMode',v)} style={{padding:'6px 14px',borderRadius:6,border:'1.5px solid',cursor:'pointer',fontSize:12,fontWeight:700,
+                  borderColor:form.customerMode===v?'#6A1B9A':'var(--border)',background:form.customerMode===v?'#6A1B9A':'var(--card)',color:form.customerMode===v?'#fff':'var(--text2)'}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            {form.customerMode==='existing'?(
+              <select className="form-control" value={form.customerId} onChange={e=>set('customerId',e.target.value)}>
+                <option value="">— Select customer —</option>
+                {allCusts.map(c=><option key={c.id} value={c.id}>{c.company}{c.status==='prospect'?' (Prospect)':''}</option>)}
+              </select>
+            ):(
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                <input className="form-control" placeholder="Company name *" value={form.customerName} onChange={e=>set('customerName',e.target.value)}/>
+                <input className="form-control" placeholder="Contact name" value={form.contactName} onChange={e=>set('contactName',e.target.value)}/>
+                <input className="form-control" placeholder="Phone" value={form.contactPhone} onChange={e=>set('contactPhone',e.target.value)} style={{gridColumn:'span 2'}}/>
+              </div>
+            )}
+          </div>
+
+          {/* Vehicle */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+            <div>
+              <label className="form-label">Truck</label>
+              <select className="form-control" value={form.truckRego} onChange={e=>set('truckRego',e.target.value)}>
+                <option value="">— Select truck —</option>
+                {TRUCKS.map(t=><option key={t.id} value={t.rego}>{t.rego} — {t.make} {t.model}</option>)}
+                <option value="TBD">TBD / Customer to confirm</option>
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Trailer (optional)</label>
+              <select className="form-control" value={form.trailerRego} onChange={e=>set('trailerRego',e.target.value)}>
+                <option value="">None</option>
+                {TRAILERS.map(t=><option key={t.id} value={t.rego}>{t.rego} — {t.make}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Dates */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+            <div><label className="form-label">Start Date</label><input className="form-control" type="date" value={form.startDate} onChange={e=>set('startDate',e.target.value)}/></div>
+            <div><label className="form-label">End Date</label><input className="form-control" type="date" value={form.endDate} onChange={e=>set('endDate',e.target.value)}/></div>
+          </div>
+          {weeks>0&&<div style={{fontSize:12,color:'#6A1B9A',fontWeight:600,marginTop:-8,marginBottom:12}}>Duration: {weeks} week{weeks!==1?'s':''}</div>}
+
+          {/* Rates */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:10,marginBottom:16}}>
+            {[['Weekly Truck Rate ($)','weeklyTruck'],['Weekly Trailer Rate ($)','weeklyTrailer'],['Mileage Rate ($/km)','mileageRate'],['RUC Rate ($/km)','rucRate']].map(([l,k])=>(
+              <div key={k}>
+                <label className="form-label" style={{fontSize:10}}>{l}</label>
+                <input className="form-control" type="text" inputMode="decimal" value={form[k]}
+                  onFocus={e=>{if(parseFloat(e.target.value)===0)e.target.value='';else e.target.select();}}
+                  onChange={e=>set(k,e.target.value)}/>
+              </div>
+            ))}
+          </div>
+
+          {/* Estimate */}
+          {weeklyTotal>0&&(
+            <div style={{padding:'12px 16px',background:'rgba(106,27,154,0.06)',border:'1px solid rgba(106,27,154,0.2)',borderRadius:8,marginBottom:16}}>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:8,color:'#6A1B9A'}}>Quote Estimate</div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
+                {[['Weekly Rate',fmtCur(weeklyTotal)],['Duration',weeks>0?weeks+' wks':'TBD'],['Subtotal excl GST',fmtCur(estTotal)],['Total incl GST',fmtCur(totalInclGst)]].map(([l,v])=>(
+                  <div key={l} style={{textAlign:'center'}}>
+                    <div style={{fontSize:10,color:'var(--text3)'}}>{l}</div>
+                    <div style={{fontWeight:800,fontSize:14,color:'#6A1B9A'}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Status + Notes */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:10,marginBottom:8}}>
+            <div>
+              <label className="form-label">Status</label>
+              <select className="form-control" value={form.status} onChange={e=>set('status',e.target.value)}>
+                {['draft','sent','accepted','declined'].map(s=><option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Notes</label>
+              <input className="form-control" value={form.notes} onChange={e=>set('notes',e.target.value)} placeholder="Any additional notes..."/>
+            </div>
+          </div>
+        </div>
+
+        <div className="modal-footer" style={{display:'flex',justifyContent:'space-between'}}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-ghost" onClick={handleDownloadPDF}>⬇ Download PDF</button>
+            <button className="btn btn-ghost" style={{borderColor:'#27AE60',color:'#27AE60'}} onClick={()=>handleSave('accepted')}>✓ Mark Accepted</button>
+            <button className="btn btn-primary" onClick={()=>handleSave()}>{isNew?'Save Quote':'Update Quote'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const buildQuotePrintHTML = (q) => `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${q.id}</title>
+<style>body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm;color:#1a1a2e}
+h1{font-size:18pt;margin:0}h2{font-size:13pt;border-bottom:2px solid #6A1B9A;padding-bottom:6px;color:#6A1B9A}
+.header{display:flex;justify-content:space-between;margin-bottom:24px;border-bottom:3px solid #1a1a2e;padding-bottom:14px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.box{border:1px solid #ddd;border-radius:6px;padding:12px 14px;background:#f9f9f9}
+.box p{margin:3px 0;font-size:10pt}.box h3{margin:0 0 8px;font-size:10pt;text-transform:uppercase;color:#666;border-bottom:1px solid #ddd;padding-bottom:5px}
+table{width:100%;border-collapse:collapse;margin-bottom:16px}
+th{background:#6A1B9A;color:#fff;padding:7px 10px;text-align:left;font-size:10pt}
+td{padding:7px 10px;border-bottom:1px solid #eee;font-size:10pt}
+.total{font-size:15pt;font-weight:800;color:#6A1B9A}
+@media print{@page{size:A4;margin:1.5cm}}</style></head><body>
+<div class="header"><div><h1>SS Rentals Ltd</h1><p style="color:#666;margin:4px 0">Auckland, New Zealand · GST Registered</p></div>
+<div style="text-align:right"><div style="font-size:20pt;font-weight:800;color:#6A1B9A">${q.id}</div>
+<p style="margin:2px 0;font-size:10pt">Date: ${q.createdAt}</p><p style="margin:2px 0;font-size:10pt;font-weight:700">QUOTE / ESTIMATE</p></div></div>
+<div class="grid2">
+<div class="box"><h3>Prepared For</h3><p><strong>${q.customerName}</strong></p>${q.contactName?'<p>'+q.contactName+'</p>':''}${q.contactPhone?'<p>'+q.contactPhone+'</p>':''}</div>
+<div class="box"><h3>Hire Details</h3>
+<p><strong>Vehicle:</strong> ${q.truckRego||'TBD'}${q.trailerRego?' + '+q.trailerRego:''}</p>
+<p><strong>Start Date:</strong> ${q.startDate||'To be confirmed'}</p>
+<p><strong>End Date:</strong> ${q.endDate||'To be confirmed'}</p>
+${q.weeks>0?'<p><strong>Duration:</strong> '+q.weeks+' weeks</p>':''}</div></div>
+<h2>Pricing</h2>
+<table><thead><tr><th>Item</th><th>Rate</th><th>Period</th><th style="text-align:right">Amount</th></tr></thead>
+<tbody>
+${q.weeklyTruck?'<tr><td>Truck Hire — '+q.truckRego+'</td><td>'+fmtCur2(parseFloat(q.weeklyTruck))+'/week</td><td>'+q.weeks+' weeks</td><td style="text-align:right">'+fmtCur2(parseFloat(q.weeklyTruck)*q.weeks)+'</td></tr>':''}
+${q.weeklyTrailer&&parseFloat(q.weeklyTrailer)>0?'<tr><td>Trailer Hire — '+q.trailerRego+'</td><td>'+fmtCur2(parseFloat(q.weeklyTrailer))+'/week</td><td>'+q.weeks+' weeks</td><td style="text-align:right">'+fmtCur2(parseFloat(q.weeklyTrailer)*q.weeks)+'</td></tr>':''}
+${parseFloat(q.mileageRate)>0?'<tr><td>Mileage Charges</td><td>$'+q.mileageRate+'/km</td><td>As incurred</td><td style="text-align:right">Variable</td></tr>':''}
+${parseFloat(q.rucRate)>0?'<tr><td>RUC Charges</td><td>$'+q.rucRate+'/km</td><td>As incurred</td><td style="text-align:right">Variable</td></tr>':''}
+<tr style="background:#f0f0f0"><td colspan="3"><strong>Subtotal (excl. GST)</strong></td><td style="text-align:right"><strong>'+fmtCur2(q.estTotal)+'</strong></td></tr>
+<tr style="background:#f0f0f0"><td colspan="3">GST (15%)</td><td style="text-align:right">'+fmtCur2(q.gst)+'</td></tr>
+<tr style="background:#6A1B9A;color:#fff"><td colspan="3"><strong>TOTAL (incl. GST)</strong></td><td style="text-align:right" class="total">'+fmtCur2(q.totalInclGst)+'</td></tr>
+</tbody></table>
+${q.notes?'<p style="font-size:10pt;color:#555"><strong>Notes:</strong> '+q.notes+'</p>':''}
+<p style="font-size:9pt;color:#888;margin-top:24px;border-top:1px solid #eee;padding-top:8px">This quote is valid for 30 days. Bond of $${q.bond||5000} required prior to vehicle collection. SS Rentals Ltd · ssrentalsnz@gmail.com · All amounts in NZD.</p>
+</body></html>`;
+const fmtCur2 = v => v.toLocaleString('en-NZ',{style:'currency',currency:'NZD'});
+
+
 const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xeroConfig, xeroSyncState, onXeroConnect, onXeroSync, onXeroDisconnect, onXeroDiag}) => {
   const [tab,setTab]=useState('users');
   const users=[
@@ -5395,6 +5700,7 @@ const App = () => {
     hires:<HiresPage refreshKey={dataRefreshKey}/>,
     invoicing:<InvoicingPage/>,
     maintenance:<MaintenancePage/>,
+    quotes:<QuotesPage setPage={setPage}/>,
     reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig}/>,
     communications:<CommunicationsPage/>,
     documents:<DocumentsPage/>,
