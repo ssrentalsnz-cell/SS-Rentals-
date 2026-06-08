@@ -7603,13 +7603,428 @@ const NavmanPage = () => {
 
 /* ─── SETTINGS PAGE ───────────────────────────────── */
 /* ─── QUOTES PAGE ─────────────────────────────────── */
+const QKEY = 'ss_rentals_quotes';
+const qLoad = () => { try { return JSON.parse(localStorage.getItem(QKEY)||'[]'); } catch(e) { return []; } };
+const qSave = (arr) => { try { localStorage.setItem(QKEY, JSON.stringify(arr)); } catch(e) {} };
+
 const QuotesPage = () => {
-  return (
-    <div className="card" style={{padding:40,textAlign:'center'}}>
-      <div style={{fontSize:20,fontWeight:800,marginBottom:8}}>Quotes</div>
-      <div style={{color:'var(--text2)'}}>Quotes page loading...</div>
-    </div>
-  );
+  const [step, setStep] = useState(0);
+  const [saved, setSaved] = useState(qLoad);
+  const [activeTpl, setActiveTpl] = useState(null);
+  const [f, setF] = useState(null);
+
+  const upd = (k, v) => setF(function(prev){ var n={}; for(var key in prev) n[key]=prev[key]; n[k]=v; return n; });
+
+  const mkForm = function(t) {
+    return {
+      qNum: 'Q-'+Date.now().toString().slice(-6),
+      qDate: new Date().toISOString().slice(0,10),
+      validDays: '14',
+      custMode: 'new',
+      existCust: '',
+      company: '', contact: '', phone: '', email: '', address: '',
+      vType: t ? (t.type||'truck_trailer') : 'truck_trailer',
+      truckDesc: t ? (t.truckDesc||'') : '',
+      trailerDesc: t ? (t.trailerDesc||'') : '',
+      duration: '', durationUnit: 'weeks',
+      startDate: '', endDate: '',
+      chargeType: t ? (t.chargeType||'weekly') : 'weekly',
+      daily: t ? (t.dailyRate||0) : 0,
+      weekly: t ? (t.weeklyRate||0) : 0,
+      monthly: t ? (t.monthlyRate||0) : 0,
+      ruc: t ? (t.rucRate||0) : 0,
+      mileage: t ? (t.mileageRate||0) : 0,
+      maxMiles: t ? (t.maxMileage||'') : '',
+      extraTerms: t ? (t.extraTerms||[]) : [],
+      notes: t ? (t.notes||'') : 'All prices are in NZD and exclude GST.\nRUC and mileage charges apply on top of hire rates.\nQuotes exclude GST, fuel, and insurance costs.',
+      tplId: t ? (t.id||'') : '',
+    };
+  };
+
+  const openTpl = function(t) { setActiveTpl(t); setF(mkForm(t)); setStep(1); };
+  const openSaved = function(rec) { setActiveTpl(null); setF(mkForm(null)); setF(rec.form); setStep(1); };
+
+  const doSave = function() {
+    if (!f || !f.company) { alert('Please enter a company name.'); return; }
+    var existing = getAllCustomers().find(function(c){ return c.company.toLowerCase().trim()===f.company.toLowerCase().trim(); });
+    if (f.custMode==='new' && !existing) {
+      createNewCustomer({company:f.company,contact:f.contact||'',phone:f.phone||'',email:f.email||'',address:f.address||'',status:'prospect'});
+    }
+    var rec = {id:'Q-'+Date.now(), savedAt:new Date().toISOString(), form:f};
+    var updated = [rec].concat(saved);
+    setSaved(updated); qSave(updated);
+    alert('Quote saved!');
+  };
+
+  const doDelete = function(id) {
+    if (!window.confirm('Delete this quote?')) return;
+    var updated = saved.filter(function(q){ return q.id!==id; });
+    setSaved(updated); qSave(updated);
+  };
+
+  const doPDF = function() {
+    if (!f) return;
+    var isLease = f.chargeType==='monthly' && !parseFloat(f.weekly);
+    var vLabel = f.vType==='truck_only' ? 'Truck Only' : f.vType==='trailer_only' ? 'Trailer Only' : 'Truck + Trailer';
+    var rows = '';
+    if (parseFloat(f.daily)>0)   rows += '<tr><td>Daily Hire Rate</td><td>$'+parseFloat(f.daily).toLocaleString('en-NZ',{minimumFractionDigits:2})+'</td></tr>';
+    if (parseFloat(f.weekly)>0)  rows += '<tr><td>Weekly Hire Rate</td><td>$'+parseFloat(f.weekly).toLocaleString('en-NZ',{minimumFractionDigits:2})+'</td></tr>';
+    if (parseFloat(f.monthly)>0) rows += '<tr><td>Monthly Hire Rate</td><td>$'+parseFloat(f.monthly).toLocaleString('en-NZ',{minimumFractionDigits:2})+'</td></tr>';
+    if (parseFloat(f.ruc)>0)     rows += '<tr><td>RUC Charges</td><td>'+f.ruc+' cents per km</td></tr>';
+    if (parseFloat(f.mileage)>0) rows += '<tr><td>Mileage Charges</td><td>'+f.mileage+' cents per km</td></tr>';
+    if (f.maxMiles)              rows += '<tr><td>Maximum Mileage</td><td>'+f.maxMiles+'</td></tr>';
+    var extraRows = '';
+    var et = f.extraTerms||[];
+    for (var i=0;i<et.length;i++) {
+      if (et[i].label) extraRows += '<tr><td>'+et[i].label+'</td><td>$'+parseFloat(et[i].monthly||0).toLocaleString('en-NZ',{minimumFractionDigits:2})+' per month</td></tr>';
+    }
+    var notes = (f.notes||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    var fname = 'Quote_'+f.qNum+'_'+(f.company||'Draft').replace(/\s+/g,'_');
+    var issueDate = new Date(f.qDate).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'});
+    var css = 'body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm;color:#1a1a2e;line-height:1.6}';
+    css += '.hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;border-bottom:3px solid #FF6F00;padding-bottom:14px}';
+    css += '.ttl h1{font-size:18pt;font-weight:bold;color:#FF6F00;margin:0;text-align:right}';
+    css += '.sub{font-size:11pt;color:#555;text-align:right;margin-top:4px}';
+    css += '.g2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}';
+    css += '.box{border:1px solid #ddd;border-radius:6px;padding:14px 16px;background:#f9f9f9}';
+    css += '.box h3{margin:0 0 8px;font-size:11pt;text-transform:uppercase;color:#6A1B9A;font-weight:700;border-bottom:1px solid #ddd;padding-bottom:6px}';
+    css += '.box p{margin:3px 0;font-size:10.5pt}';
+    css += 'h2{font-size:12pt;font-weight:bold;color:#6A1B9A;text-transform:uppercase;border-bottom:1.5px solid #FF6F00;padding-bottom:4px;margin-top:20px;margin-bottom:10px}';
+    css += 'table{width:100%;border-collapse:collapse;margin-bottom:14px}';
+    css += 'td{border:1px solid #ddd;padding:8px 12px;font-size:10.5pt;vertical-align:top}';
+    css += 'td:first-child{background:#f0f4f8;font-weight:600;width:45%}';
+    css += 'td:last-child{font-weight:700;color:#1a1a2e}';
+    css += '.notes{background:#f9f9f9;border:1px solid #ddd;border-radius:6px;padding:14px 16px;font-size:10pt;white-space:pre-wrap;line-height:1.7}';
+    css += '.sig{border-top:2px solid #6A1B9A;padding-top:10px;font-size:10.5pt;margin-top:32px}';
+    css += '@media print{body{margin:1.5cm}@page{size:A4;margin:1.5cm}}';
+    var body = '<div class="hdr"><div style="font-size:22pt;font-weight:900;color:#6A1B9A">SS<span style="color:#FF6F00">R</span></div>';
+    body += '<div class="ttl"><h1>SS Rentals \u2013 '+(isLease?'Lease':'Rental')+' Quotation</h1>';
+    body += '<div class="sub">Quote No: '+f.qNum+' | Date: '+issueDate+'</div></div></div>';
+    body += '<div class="g2">';
+    body += '<div class="box"><h3>Prepared For</h3><p><strong>'+(f.company||'&#8212;')+'</strong></p><p>Attn: '+(f.contact||'&#8212;')+'</p>';
+    if (f.phone) body += '<p>Phone: '+f.phone+'</p>';
+    if (f.email) body += '<p>Email: '+f.email+'</p>';
+    body += '</div>';
+    body += '<div class="box"><h3>Hire Details</h3><p><strong>Type:</strong> '+vLabel+'</p>';
+    if (f.duration) body += '<p><strong>Duration:</strong> '+f.duration+' '+f.durationUnit+'</p>';
+    if (f.startDate) body += '<p><strong>Start:</strong> '+new Date(f.startDate).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'})+'</p>';
+    if (f.validDays) body += '<p><strong>Valid:</strong> '+f.validDays+' days from issue</p>';
+    body += '</div></div>';
+    if (f.truckDesc||f.trailerDesc) {
+      body += '<h2>Vehicle Details</h2><table>';
+      if (f.truckDesc)   body += '<tr><td>Truck</td><td>'+f.truckDesc+'</td></tr>';
+      if (f.trailerDesc) body += '<tr><td>Trailer</td><td>'+f.trailerDesc+'</td></tr>';
+      body += '</table>';
+    }
+    body += '<h2>'+(isLease?'Lease Charges':'Hire Charges')+'</h2><table>'+rows+'</table>';
+    if (extraRows) body += '<h2>Alternative Lease Terms</h2><table>'+extraRows+'</table>';
+    body += '<h2>Notes &amp; Conditions</h2><div class="notes">'+notes+'</div>';
+    body += '<div class="sig"><p><strong>To accept this quotation, sign below:</strong></p><br>';
+    body += '<p>Name: _________________________ &nbsp;&nbsp; Signature: _________________________</p>';
+    body += '<p>Date: _________________________ &nbsp;&nbsp; Position: _________________________</p></div>';
+    body += '<div style="margin-top:24px;font-size:9.5pt;color:#888;border-top:1px solid #eee;padding-top:10px;text-align:center">SS Rentals | 280a Peak Road, Cambridge, New Zealand | All amounts in NZD, excl. GST</div>';
+    var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>'+body+'</body></html>';
+    var pr = html.replace('</head>','<scr'+'ipt>window.onload=function(){document.title="'+fname+'";setTimeout(window.print,400)};<'+'/scr'+'ipt></head>');
+    var w = window.open('','_blank');
+    if (!w) { alert('Allow pop-ups for this site.'); return; }
+    w.document.write(pr); w.document.close();
+  };
+
+  /* Step 0 – template picker */
+  if (step === 0) {
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div style={{fontSize:20,fontWeight:800}}>Quotes</div>
+            <div style={{fontSize:12,color:'var(--text2)',marginTop:2}}>
+              {saved.length} saved {saved.length===1?'quote':'quotes'} — pick a template to start
+            </div>
+          </div>
+        </div>
+
+        <div style={{fontWeight:700,fontSize:11,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.7px',marginBottom:12}}>Templates</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(250px,1fr))',gap:12,marginBottom:28}}>
+          {QUOTE_TEMPLATES.map(function(t){
+            var icon = t.type==='trailer_only' ? '\uD83D\uDD17' : '\uD83D\uDE9B';
+            var rateLabel = t.weeklyRate>0 ? ('$'+t.weeklyRate.toLocaleString()+'/wk') : t.monthlyRate>0 ? ('$'+t.monthlyRate.toLocaleString()+'/mo') : '';
+            return (
+              <div key={t.id}
+                onClick={function(){ openTpl(t); }}
+                style={{background:'var(--card)',border:'1.5px solid var(--border)',borderRadius:12,padding:'16px 18px',cursor:'pointer',transition:'box-shadow .15s'}}
+                onMouseEnter={function(e){ e.currentTarget.style.boxShadow='0 4px 16px rgba(106,27,154,.15)'; e.currentTarget.style.borderColor='#6A1B9A'; }}
+                onMouseLeave={function(e){ e.currentTarget.style.boxShadow='none'; e.currentTarget.style.borderColor='var(--border)'; }}>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+                  <div style={{width:36,height:36,borderRadius:8,background:'rgba(106,27,154,.12)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>{icon}</div>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:13}}>{t.name}</div>
+                    <div style={{fontSize:11,color:'var(--text3)'}}>{t.chargeType==='weekly'?'Weekly':'Monthly'}</div>
+                  </div>
+                </div>
+                {rateLabel && <span className="badge badge-blue">{rateLabel}</span>}
+                {t.rucRate>0 && <span className="badge badge-gray" style={{marginLeft:6}}>{t.rucRate}c/km RUC</span>}
+                <div style={{marginTop:10,fontSize:12,color:'#6A1B9A',fontWeight:600,textAlign:'right'}}>Use template →</div>
+              </div>
+            );
+          })}
+          <div
+            onClick={function(){ openTpl(null); }}
+            style={{background:'var(--bg3)',border:'1.5px dashed var(--border2)',borderRadius:12,padding:'16px 18px',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:120}}
+            onMouseEnter={function(e){ e.currentTarget.style.borderColor='#6A1B9A'; }}
+            onMouseLeave={function(e){ e.currentTarget.style.borderColor='var(--border2)'; }}>
+            <div style={{fontSize:28,marginBottom:6,color:'var(--text3)'}}>+</div>
+            <div style={{fontWeight:700,fontSize:13,color:'var(--text2)'}}>Blank Quote</div>
+          </div>
+        </div>
+
+        {saved.length > 0 && (
+          <div>
+            <div style={{fontWeight:700,fontSize:11,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.7px',marginBottom:12}}>
+              Saved Quotes
+              <span style={{background:'#6A1B9A',color:'#fff',borderRadius:10,padding:'1px 8px',fontSize:10,marginLeft:8,fontWeight:700}}>{saved.length}</span>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(250px,1fr))',gap:10}}>
+              {saved.map(function(q){
+                return (
+                  <div key={q.id} style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
+                      <div style={{fontWeight:700,fontSize:13,color:'#6A1B9A'}}>{q.form.qNum}</div>
+                      <button onClick={function(){ doDelete(q.id); }} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:20,lineHeight:1,padding:0}}>&times;</button>
+                    </div>
+                    <div style={{fontWeight:600,fontSize:13,marginBottom:2}}>{q.form.company||'(No company)'}</div>
+                    <div style={{fontSize:11,color:'var(--text2)',marginBottom:4}}>
+                      {q.form.vType==='truck_only'?'Truck Only':q.form.vType==='trailer_only'?'Trailer Only':'Truck + Trailer'}
+                      {q.form.duration ? ' \u00b7 '+q.form.duration+' '+q.form.durationUnit : ''}
+                    </div>
+                    <div style={{fontSize:10,color:'var(--text3)',marginBottom:10}}>{new Date(q.savedAt).toLocaleDateString('en-NZ',{day:'2-digit',month:'short',year:'numeric'})}</div>
+                    <button className="btn btn-primary btn-sm" style={{width:'100%',justifyContent:'center'}} onClick={function(){ openSaved(q); }}>Open &amp; Edit</button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* Step 1 – quote builder */
+  if (step === 1 && f) {
+    var custList = getAllCustomers().filter(function(c){ return c.status!=='blacklisted'; }).sort(function(a,b){ return a.company.localeCompare(b.company); });
+    return (
+      <div>
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}>
+          <button className="btn btn-ghost btn-sm" onClick={function(){ setStep(0); }}>&larr; Templates</button>
+          <span style={{color:'var(--text3)'}}>/</span>
+          <span style={{fontWeight:600,color:'#6A1B9A'}}>{activeTpl ? activeTpl.name : 'New Quote'}</span>
+        </div>
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+
+          {/* LEFT column */}
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+
+            <div className="card" style={{padding:'14px 16px'}}>
+              <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Quote Details</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>Quote Number</label>
+                  <input value={f.qNum} onChange={function(e){ upd('qNum',e.target.value); }}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>Issue Date</label>
+                  <input type="date" value={f.qDate} onChange={function(e){ upd('qDate',e.target.value); }}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>Valid For (days)</label>
+                  <input type="number" value={f.validDays} onChange={function(e){ upd('validDays',e.target.value); }}/>
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{padding:'14px 16px'}}>
+              <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Customer</div>
+              <div style={{display:'flex',marginBottom:12,borderRadius:8,overflow:'hidden',border:'1.5px solid #6A1B9A'}}>
+                <button onClick={function(){ upd('custMode','existing'); }} style={{flex:1,padding:'8px',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,background:f.custMode==='existing'?'#6A1B9A':'transparent',color:f.custMode==='existing'?'#fff':'#6A1B9A',transition:'background .15s'}}>Existing</button>
+                <button onClick={function(){ upd('custMode','new'); }} style={{flex:1,padding:'8px',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,background:f.custMode==='new'?'#6A1B9A':'transparent',color:f.custMode==='new'?'#fff':'#6A1B9A',transition:'background .15s'}}>New</button>
+              </div>
+              {f.custMode==='existing' ? (
+                <div>
+                  <div className="form-group" style={{marginBottom:8}}>
+                    <label>Select Customer</label>
+                    <select value={f.existCust} onChange={function(e){
+                      var cid = e.target.value;
+                      var c = getAllCustomers().find(function(x){ return x.id===cid; });
+                      setF(function(prev){ var n={}; for(var k in prev) n[k]=prev[k]; n.existCust=cid; if(c){n.company=c.company;n.contact=c.contact||'';n.phone=c.phone||'';n.email=c.email||'';n.address=c.address||'';} return n; });
+                    }}>
+                      <option value="">— Select customer —</option>
+                      {custList.map(function(c){ return <option key={c.id} value={c.id}>{c.company}</option>; })}
+                    </select>
+                  </div>
+                  {f.company && <div style={{padding:'8px 12px',background:'rgba(106,27,154,.06)',borderRadius:8,fontSize:12}}><strong>{f.company}</strong>{f.contact?' · '+f.contact:''}{f.phone?' · '+f.phone:''}</div>}
+                </div>
+              ) : (
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                  <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
+                    <label>Company Name *</label>
+                    <input placeholder="e.g. GSR Transport Ltd" value={f.company} onChange={function(e){ upd('company',e.target.value); }}/>
+                  </div>
+                  <div className="form-group" style={{marginBottom:0}}>
+                    <label>Contact Person</label>
+                    <input placeholder="Full name" value={f.contact} onChange={function(e){ upd('contact',e.target.value); }}/>
+                  </div>
+                  <div className="form-group" style={{marginBottom:0}}>
+                    <label>Phone</label>
+                    <input placeholder="027 xxx xxxx" value={f.phone} onChange={function(e){ upd('phone',e.target.value); }}/>
+                  </div>
+                  <div className="form-group" style={{marginBottom:0}}>
+                    <label>Email</label>
+                    <input type="email" value={f.email} onChange={function(e){ upd('email',e.target.value); }}/>
+                  </div>
+                  <div className="form-group" style={{marginBottom:0}}>
+                    <label>Address</label>
+                    <input placeholder="City, Region" value={f.address||''} onChange={function(e){ upd('address',e.target.value); }}/>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="card" style={{padding:'14px 16px'}}>
+              <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Hire Details</div>
+              <div className="form-group" style={{marginBottom:10}}>
+                <label>Vehicle Type</label>
+                <select value={f.vType} onChange={function(e){ upd('vType',e.target.value); }}>
+                  <option value="truck_trailer">Truck + Trailer</option>
+                  <option value="truck_only">Truck Only</option>
+                  <option value="trailer_only">Trailer Only</option>
+                </select>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:10,marginBottom:10}}>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>Duration</label>
+                  <input type="number" min="1" placeholder="e.g. 4" value={f.duration} onChange={function(e){ upd('duration',e.target.value); }}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>Unit</label>
+                  <select value={f.durationUnit} onChange={function(e){ upd('durationUnit',e.target.value); }}>
+                    <option value="days">Days</option>
+                    <option value="weeks">Weeks</option>
+                    <option value="months">Months</option>
+                    <option value="years">Years</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>Start Date</label>
+                  <input type="date" value={f.startDate} onChange={function(e){ upd('startDate',e.target.value); }}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>End Date</label>
+                  <input type="date" value={f.endDate} onChange={function(e){ upd('endDate',e.target.value); }}/>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* RIGHT column */}
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+
+            <div className="card" style={{padding:'14px 16px'}}>
+              <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Vehicle Description</div>
+              {(f.vType==='truck_only'||f.vType==='truck_trailer') && (
+                <div className="form-group" style={{marginBottom:10}}>
+                  <label>Truck</label>
+                  <select value={f.truckDesc} onChange={function(e){ upd('truckDesc',e.target.value); }}>
+                    <option value="">— Select —</option>
+                    {TRUCKS.map(function(t){ return <option key={t.id} value={t.year+' '+t.make+' '+t.model}>{t.rego} — {t.year} {t.make} {t.model}</option>; })}
+                  </select>
+                  <input style={{marginTop:6}} placeholder="Or type custom description…" value={f.truckDesc} onChange={function(e){ upd('truckDesc',e.target.value); }}/>
+                </div>
+              )}
+              {(f.vType==='trailer_only'||f.vType==='truck_trailer') && (
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>Trailer</label>
+                  <select value={f.trailerDesc} onChange={function(e){ upd('trailerDesc',e.target.value); }}>
+                    <option value="">— Select —</option>
+                    {TRAILERS.map(function(t){ return <option key={t.id} value={(t.year||'')+' '+t.make+' '+t.model}>{t.rego} — {t.year||''} {t.make} {t.model}</option>; })}
+                  </select>
+                  <input style={{marginTop:6}} placeholder="Or type custom description…" value={f.trailerDesc} onChange={function(e){ upd('trailerDesc',e.target.value); }}/>
+                </div>
+              )}
+            </div>
+
+            <div className="card" style={{padding:'14px 16px'}}>
+              <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Charges</div>
+              <div className="form-group" style={{marginBottom:10}}>
+                <label>Charge Type</label>
+                <select value={f.chargeType} onChange={function(e){ upd('chargeType',e.target.value); }}>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                <div className="form-group" style={{marginBottom:0,opacity:f.chargeType==='daily'?1:.45}}>
+                  <label>Daily Rate ($)</label>
+                  <input type="text" inputMode="decimal" value={f.daily||''} onChange={function(e){ upd('daily',e.target.value); }}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0,opacity:f.chargeType==='weekly'?1:.45}}>
+                  <label>Weekly Rate ($)</label>
+                  <input type="text" inputMode="decimal" value={f.weekly||''} onChange={function(e){ upd('weekly',e.target.value); }}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0,opacity:f.chargeType==='monthly'?1:.45}}>
+                  <label>Monthly Rate ($)</label>
+                  <input type="text" inputMode="decimal" value={f.monthly||''} onChange={function(e){ upd('monthly',e.target.value); }}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>RUC Rate (c/km)</label>
+                  <input type="text" inputMode="decimal" value={f.ruc||''} onChange={function(e){ upd('ruc',e.target.value); }}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0}}>
+                  <label>Mileage Rate (c/km)</label>
+                  <input type="text" inputMode="decimal" value={f.mileage||''} onChange={function(e){ upd('mileage',e.target.value); }}/>
+                </div>
+                <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}>
+                  <label>Max Mileage Allowance</label>
+                  <input placeholder="e.g. 130,000 km p.a." value={f.maxMiles} onChange={function(e){ upd('maxMiles',e.target.value); }}/>
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{padding:'14px 16px'}}>
+              <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Notes &amp; Conditions</div>
+              <textarea rows={7} value={f.notes} onChange={function(e){ upd('notes',e.target.value); }} style={{width:'100%',resize:'vertical',fontSize:12,fontFamily:'inherit',background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,padding:'9px 12px',color:'var(--text)'}}/>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Action bar */}
+        <div className="card" style={{padding:'16px 20px',marginTop:14,background:'rgba(106,27,154,.04)',border:'1.5px solid rgba(106,27,154,.15)'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+            <div style={{fontWeight:700,fontSize:14,color:'#6A1B9A'}}>{f.qNum}</div>
+            <div style={{fontSize:12,color:'var(--text3)'}}>Valid {f.validDays} days &nbsp;&middot;&nbsp; {f.company||'No customer yet'}</div>
+          </div>
+          <div style={{display:'flex',gap:10}}>
+            <button className="btn btn-primary" style={{flex:1,justifyContent:'center'}} onClick={doPDF}>
+              <Icon name="download" size={14}/> Download PDF
+            </button>
+            <button className="btn btn-ghost" style={{flex:1,justifyContent:'center',borderColor:'#27AE60',color:'#27AE60'}} onClick={doSave}>
+              Save Quote
+            </button>
+            <button className="btn btn-ghost" style={{justifyContent:'center'}} onClick={function(){ setF(mkForm(activeTpl)); }}>
+              Reset
+            </button>
+          </div>
+        </div>
+
+      </div>
+    );
+  }
+
+  return null;
 };
 
 const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xeroConfig, xeroSyncState, onXeroConnect, onXeroSync, onXeroDisconnect, onXeroDiag}) => {
