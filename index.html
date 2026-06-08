@@ -7789,7 +7789,7 @@ const QuotesPage = () => {
                   <div key={q.id} style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px'}}>
                     <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
                       <div style={{fontWeight:700,fontSize:13,color:'#6A1B9A'}}>{q.form.qNum}</div>
-                      <button onClick={function(){ doDelete(q.id); }} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:20,lineHeight:1,padding:0}}>&times;</button>
+                      <button onClick={function(){ doDelete(q.id); }} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:20,lineHeight:1,padding:0}}>×</button>
                     </div>
                     <div style={{fontWeight:600,fontSize:13,marginBottom:2}}>{q.form.company||'(No company)'}</div>
                     <div style={{fontSize:11,color:'var(--text2)',marginBottom:4}}>
@@ -7814,7 +7814,7 @@ const QuotesPage = () => {
     return (
       <div>
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}>
-          <button className="btn btn-ghost btn-sm" onClick={function(){ setStep(0); }}>&larr; Templates</button>
+          <button className="btn btn-ghost btn-sm" onClick={function(){ setStep(0); }}>← Templates</button>
           <span style={{color:'var(--text3)'}}>/</span>
           <span style={{fontWeight:600,color:'#6A1B9A'}}>{activeTpl ? activeTpl.name : 'New Quote'}</span>
         </div>
@@ -8005,7 +8005,7 @@ const QuotesPage = () => {
         <div className="card" style={{padding:'16px 20px',marginTop:14,background:'rgba(106,27,154,.04)',border:'1.5px solid rgba(106,27,154,.15)'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
             <div style={{fontWeight:700,fontSize:14,color:'#6A1B9A'}}>{f.qNum}</div>
-            <div style={{fontSize:12,color:'var(--text3)'}}>Valid {f.validDays} days &nbsp;&middot;&nbsp; {f.company||'No customer yet'}</div>
+            <div style={{fontSize:12,color:'var(--text3)'}}>Valid {f.validDays} days {'\u00a0·\u00a0'} {f.company||'No customer yet'}</div>
           </div>
           <div style={{display:'flex',gap:10}}>
             <button className="btn btn-primary" style={{flex:1,justifyContent:'center'}} onClick={doPDF}>
