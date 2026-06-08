@@ -7677,7 +7677,7 @@ const QuotesPage = () => {
   const loadQuoteForEdit = (rec) => {
     setQuoteForm({...emptyQuote(null),...rec.form});
     setSelectedTemplate(QUOTE_TEMPLATES.find(t=>t.id===rec.form.templateId)||null);
-    setQuoteStep(2); setPageTab('quotes');
+    setQuoteStep(2);
   };
 
   const downloadQuotePDF = () => {
@@ -7788,11 +7788,6 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
     win.document.write(printHTML); win.document.close();
   };
 
-  const tabStyle = t => ({
-    padding:'10px 18px',border:'none',cursor:'pointer',fontSize:13,fontWeight:pageTab===t?700:500,
-    borderBottom:pageTab===t?'2px solid #6A1B9A':'2px solid transparent',
-    background:'none',color:pageTab===t?'#6A1B9A':'var(--text2)',transition:'all .15s',whiteSpace:'nowrap',
-  });
 
   return (
     <div>
