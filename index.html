@@ -630,23 +630,71 @@ const runFullSync = async (config, onProgress, onDone, onError) => {
       if (custRows) pullUpdates += pullCustomersFromSheet(custRows);
     } catch(e) { console.error('Sheet pull error:', e.message); }
 
-    // STEP 1b: Read financial P&L from SS Rentals Monthly Financials
+    // STEP 1b: Read per-month tabs from SS Rentals Monthly Financials
     try {
       const finSheetId = loadFinSheetId();
-      let finRows = null;
-      for (const tabName of ['Sheet1','Monthly Financials','Financials','P&L','Financial','Income & Expenses','Summary','Data']) {
-        try {
-          const rows = await readSheetTab(accessToken, finSheetId, tabName);
-          if (rows && rows.length > 1) { finRows = rows; break; }
-        } catch(e2) {}
-      }
-      if (finRows && finRows.length > 1) {
-        const pnlRows = parsePnlRows(finRows);
+      // Get list of all sheets in the spreadsheet
+      const metaUrl = 'https://sheets.googleapis.com/v4/spreadsheets/' + finSheetId + '?fields=sheets.properties.title';
+      const metaRes = await fetch(metaUrl, {headers:{Authorization:'Bearer '+accessToken}});
+      if (metaRes.ok) {
+        const meta = await metaRes.json();
+        const tabNames = (meta.sheets||[]).map(s=>s.properties.title);
+        console.log('[Sync] Financial sheet tabs:', tabNames);
+        // Each tab is a month e.g. "Aug-25", "Sep-25" etc
+        const monthPattern = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[- ](\d{2})$/i;
+        const monthMap = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+        const pnlRows = [];
+        for (const tab of tabNames) {
+          const m = tab.match(monthPattern);
+          if (!m) continue;
+          const monthKey = '20'+m[2]+'-'+monthMap[m[1].toLowerCase()];
+          try {
+            const rows = await readSheetTab(accessToken, finSheetId, tab);
+            if (!rows || rows.length < 3) continue;
+            // Sum column C (Total) for income rows (rows 5-17 approx, before REPAIR section)
+            let totalIncome = 0, totalRepairs = 0, totalOther = 0;
+            let inIncome = false, inRepairs = false, inOther = false;
+            for (let ri = 0; ri < rows.length; ri++) {
+              const row = rows[ri];
+              const a = (row[0]||'').toString().trim().toUpperCase();
+              const b = (row[1]||'').toString().trim().toUpperCase();
+              if (a.includes('MONTHLY HIRE INCOME') || a.includes('HIRE INCOME')) { inIncome=true; inRepairs=false; inOther=false; continue; }
+              if (a.includes('REPAIR') || a.includes('MAINTENANCE EXPENSE')) { inIncome=false; inRepairs=true; inOther=false; continue; }
+              if (a.includes('OTHER EXPENSE') || a.includes('INSURANCE') || a.includes('RUC') || a.includes('NAVMAN') || a.includes('FLEXI') || a.includes('HEARTLAND')) { inIncome=false; inRepairs=false; inOther=true; continue; }
+              // Parse dollar amounts from col C (index 2) or col D (index 3)
+              const amt = parseFloat((row[2]||row[3]||'').toString().replace(/[$,]/g,''))||0;
+              if (amt <= 0) continue;
+              if (inIncome) totalIncome += amt;
+              else if (inRepairs) totalRepairs += amt;
+              else if (inOther) totalOther += amt;
+            }
+            // Also read summary from col F/G (Total Hire Income, Repair & Maintenance, Net Position)
+            let summaryIncome = 0, summaryRepairs = 0, summaryNet = 0, summaryOther = 0;
+            for (let ri = 0; ri < rows.length; ri++) {
+              const f = (rows[ri][5]||'').toString().trim();
+              const g = parseFloat((rows[ri][6]||'').toString().replace(/[$,]/g,''))||0;
+              if (f.includes('Total Hire Income') || f.includes('Total Income')) summaryIncome = g;
+              else if (f.includes('Repair') || f.includes('Maintenance')) summaryRepairs = g;
+              else if (f.includes('Other Expense')) summaryOther = g;
+              else if (f.includes('Net Position') || f.includes('Net Profit')) summaryNet = g;
+            }
+            // Use summary col if available, else use summed rows
+            const revenue = summaryIncome > 0 ? summaryIncome : totalIncome;
+            const repairs = summaryRepairs > 0 ? summaryRepairs : totalRepairs;
+            const other = summaryOther > 0 ? summaryOther : totalOther;
+            const expenses = repairs + other;
+            const net = summaryNet !== 0 ? summaryNet : revenue - expenses;
+            if (revenue > 0) {
+              pnlRows.push({month:monthKey, revenue, expenses, net, repairs, other, ruc:0, navman_ruc:0, insurance:0, flexi:0, heartland:0});
+            }
+          } catch(e2) { console.warn('[Sync] Could not read tab', tab, e2.message); }
+        }
         if (pnlRows.length > 0) {
+          pnlRows.sort((a,b)=>a.month.localeCompare(b.month));
           savePnlToSheet(pnlRows);
           localStorage.removeItem('ss_rentals_bank_txns');
           pullUpdates += pnlRows.length;
-          console.log('[Sync] Loaded', pnlRows.length, 'months P&L');
+          console.log('[Sync] Loaded', pnlRows.length, 'months P&L from per-month tabs');
         }
       }
     } catch(e) { console.error('P&L read error:', e.message); }
