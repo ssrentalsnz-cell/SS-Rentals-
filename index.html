@@ -7608,6 +7608,7 @@ const QuotesPage = () => {
   const [qlist,setQlist]=useState(()=>{try{return JSON.parse(localStorage.getItem('ss_rentals_quotes')||'[]');}catch(e){return[];}});
   const [qtpl,setQtpl]=useState(null);
   const [qform,setQform]=useState(null);
+  const upd=(k,v)=>setQform(f=>({...f,[k]:v}));
   const mkQ=(t)=>({
     qn:'Q-'+Date.now().toString().slice(-6),
     qd:new Date().toISOString().slice(0,10),
@@ -7620,11 +7621,9 @@ const QuotesPage = () => {
     dr:t?(t.dailyRate||0):0,wr:t?(t.weeklyRate||0):0,
     mr:t?(t.monthlyRate||0):0,rr:t?(t.rucRate||0):0,
     mlr:t?(t.mileageRate||0):0,mm:t?(t.maxMileage||''):'',
-    et:t?(t.extraTerms||[]):[],
     notes:t?(t.notes||''):'All prices are in NZD and exclude GST.',
     tid:t?(t.id||''):'',
   });
-  const upd=(k,v)=>setQform(f=>({...f,[k]:v}));
   const qSave=()=>{
     if(!qform||!qform.co){alert('Enter a company name.');return;}
     const ex=getAllCustomers().find(c=>c.company.toLowerCase().trim()===qform.co.toLowerCase().trim());
@@ -7633,7 +7632,55 @@ const QuotesPage = () => {
     const u=[rec,...qlist];setQlist(u);localStorage.setItem('ss_rentals_quotes',JSON.stringify(u));
     alert('Quote saved!');
   };
-  const qDel=(id)=>{if(!window.confirm('Delete?'))return;const u=qlist.filter(q=>q.id!==id);setQlist(u);localStorage.setItem('ss_rentals_quotes',JSON.stringify(u));};
+  const qDel=(id)=>{
+    if(!window.confirm('Delete?'))return;
+    const u=qlist.filter(q=>q.id!==id);
+    setQlist(u);localStorage.setItem('ss_rentals_quotes',JSON.stringify(u));
+  };
+  const qPDF=()=>{
+    if(!qform)return;
+    const f=qform;
+    const fmtM=v=>parseFloat(v)>0?'$'+parseFloat(v).toLocaleString('en-NZ',{minimumFractionDigits:2}):'';
+    const rows=[];
+    if(parseFloat(f.dr)>0)rows.push('<tr><td>Daily Hire Rate</td><td>'+fmtM(f.dr)+'</td></tr>');
+    if(parseFloat(f.wr)>0)rows.push('<tr><td>Weekly Hire Rate</td><td>'+fmtM(f.wr)+'</td></tr>');
+    if(parseFloat(f.mr)>0)rows.push('<tr><td>Monthly Hire Rate</td><td>'+fmtM(f.mr)+'</td></tr>');
+    if(parseFloat(f.rr)>0)rows.push('<tr><td>RUC Charges</td><td>'+f.rr+' c/km</td></tr>');
+    if(parseFloat(f.mlr)>0)rows.push('<tr><td>Mileage</td><td>'+f.mlr+' c/km</td></tr>');
+    if(f.mm)rows.push('<tr><td>Max Mileage</td><td>'+f.mm+'</td></tr>');
+    const fname='Quote_'+f.qn+'_'+(f.co||'Draft').split(' ').join('_');
+    const issDate=new Date(f.qd).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'});
+    const safeNotes=(f.notes||'').split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');
+    const css='body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm;color:#1a1a2e}'
+      +'h1{color:#FF6F00;font-size:18pt;margin-bottom:4px}'
+      +'h2{color:#6A1B9A;border-bottom:1.5px solid #FF6F00;padding-bottom:4px;margin-top:20px}'
+      +'table{width:100%;border-collapse:collapse;margin-bottom:14px}'
+      +'td{border:1px solid #ddd;padding:8px 12px}'
+      +'td:first-child{background:#f0f4f8;font-weight:600;width:45%}'
+      +'td:last-child{font-weight:700}'
+      +'.notes{background:#f9f9f9;border:1px solid #ddd;padding:14px;white-space:pre-wrap;font-size:10pt}'
+      +'.sig{border-top:2px solid #6A1B9A;margin-top:24px;padding-top:12px}';
+    const body='<h1>SS Rentals - Rental Quotation</h1>'
+      +'<p><strong>Quote:</strong> '+f.qn+' &nbsp; <strong>Date:</strong> '+issDate+' &nbsp; <strong>Valid:</strong> '+f.vdays+' days</p>'
+      +'<h2>Prepared For</h2><table>'
+      +'<tr><td>Company</td><td>'+f.co+'</td></tr>'
+      +'<tr><td>Contact</td><td>'+f.ct+'</td></tr>'
+      +(f.ph?'<tr><td>Phone</td><td>'+f.ph+'</td></tr>':'')
+      +(f.em?'<tr><td>Email</td><td>'+f.em+'</td></tr>':'')
+      +'</table>'
+      +(f.td||f.trd?'<h2>Vehicle</h2><table>'+(f.td?'<tr><td>Truck</td><td>'+f.td+'</td></tr>':'')+(f.trd?'<tr><td>Trailer</td><td>'+f.trd+'</td></tr>':'')+'</table>':'')
+      +'<h2>Charges</h2><table>'+rows.join('')+'</table>'
+      +'<h2>Notes</h2><div class="notes">'+safeNotes+'</div>'
+      +'<div class="sig"><p>Name: _________________________ &nbsp; Signature: _________________________</p>'
+      +'<p>Date: _________________________</p></div>'
+      +'<div style="margin-top:20px;font-size:9pt;color:#888;text-align:center">SS Rentals | 280a Peak Road, Cambridge, NZ | All amounts NZD excl GST</div>';
+    const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>'+body+'</body></html>';
+    const printScript='window.onload=function(){document.title="'+fname+'";setTimeout(window.print,400)};';
+    const w=window.open('','_blank');
+    if(!w){alert('Allow pop-ups.');return;}
+    w.document.write(html.replace('</head>','<scr'+'ipt>'+printScript+'<'+'/scr'+'ipt></head>'));
+    w.document.close();
+  };
 
   if(qstep===0) return (
     <div>
@@ -7687,10 +7734,10 @@ const QuotesPage = () => {
           <div className="card" style={{padding:'14px 16px'}}>
             <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Quote Details</div>
             <div className="form-row">
-              <div className="form-group"><label>Quote Number</label><input value={qform.qn} onChange={e=>upd('qn',e.target.value)}/></div>
+              <div className="form-group"><label>Quote No.</label><input value={qform.qn} onChange={e=>upd('qn',e.target.value)}/></div>
               <div className="form-group"><label>Issue Date</label><input type="date" value={qform.qd} onChange={e=>upd('qd',e.target.value)}/></div>
             </div>
-            <div className="form-group"><label>Valid For (days)</label><input type="number" value={qform.vdays} onChange={e=>upd('vdays',e.target.value)}/></div>
+            <div className="form-group"><label>Valid (days)</label><input type="number" value={qform.vdays} onChange={e=>upd('vdays',e.target.value)}/></div>
           </div>
           <div className="card" style={{padding:'14px 16px'}}>
             <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Customer</div>
@@ -7710,12 +7757,12 @@ const QuotesPage = () => {
               <div>
                 <div className="form-group"><label>Company Name *</label><input placeholder="e.g. GSR Transport Ltd" value={qform.co} onChange={e=>upd('co',e.target.value)}/></div>
                 <div className="form-row">
-                  <div className="form-group"><label>Contact</label><input placeholder="Full name" value={qform.ct} onChange={e=>upd('ct',e.target.value)}/></div>
-                  <div className="form-group"><label>Phone</label><input placeholder="027 xxx xxxx" value={qform.ph} onChange={e=>upd('ph',e.target.value)}/></div>
+                  <div className="form-group"><label>Contact</label><input value={qform.ct} onChange={e=>upd('ct',e.target.value)}/></div>
+                  <div className="form-group"><label>Phone</label><input value={qform.ph} onChange={e=>upd('ph',e.target.value)}/></div>
                 </div>
                 <div className="form-row">
                   <div className="form-group"><label>Email</label><input type="email" value={qform.em} onChange={e=>upd('em',e.target.value)}/></div>
-                  <div className="form-group"><label>Address</label><input placeholder="City" value={qform.addr||''} onChange={e=>upd('addr',e.target.value)}/></div>
+                  <div className="form-group"><label>Address</label><input value={qform.addr||''} onChange={e=>upd('addr',e.target.value)}/></div>
                 </div>
               </div>
             )}
@@ -7796,40 +7843,13 @@ const QuotesPage = () => {
       <div className="card" style={{padding:'16px 20px',marginTop:14,background:'rgba(106,27,154,.04)',border:'1.5px solid rgba(106,27,154,.15)'}}>
         <div style={{fontWeight:700,fontSize:13,color:'#6A1B9A',marginBottom:12}}>{qform.qn} - {qform.co||'No customer'}</div>
         <div style={{display:'flex',gap:10}}>
-          <button className="btn btn-primary" style={{flex:1,justifyContent:'center'}} onClick={()=>{
-            const f=qform;
-            const fmtM=v=>parseFloat(v)>0?'$'+parseFloat(v).toLocaleString('en-NZ',{minimumFractionDigits:2}):'N/A';
-            const rows=[];
-            if(parseFloat(f.dr)>0)rows.push('<tr><td>Daily Hire Rate</td><td>'+fmtM(f.dr)+'</td></tr>');
-            if(parseFloat(f.wr)>0)rows.push('<tr><td>Weekly Hire Rate</td><td>'+fmtM(f.wr)+'</td></tr>');
-            if(parseFloat(f.mr)>0)rows.push('<tr><td>Monthly Hire Rate</td><td>'+fmtM(f.mr)+'</td></tr>');
-            if(parseFloat(f.rr)>0)rows.push('<tr><td>RUC Charges</td><td>'+f.rr+' cents per km</td></tr>');
-            if(parseFloat(f.mlr)>0)rows.push('<tr><td>Mileage</td><td>'+f.mlr+' cents per km</td></tr>');
-            if(f.mm)rows.push('<tr><td>Max Mileage</td><td>'+f.mm+'</td></tr>');
-            const fname='Quote_'+f.qn+'_'+(f.co||'Draft').replace(/\s+/g,'_');
-            const issDate=new Date(f.qd).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'});
-            const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm;color:#1a1a2e}h1{color:#FF6F00;font-size:18pt}h2{color:#6A1B9A;border-bottom:1.5px solid #FF6F00;padding-bottom:4px}table{width:100%;border-collapse:collapse;margin-bottom:14px}td{border:1px solid #ddd;padding:8px 12px}td:first-child{background:#f0f4f8;font-weight:600;width:45%}td:last-child{font-weight:700}.notes{background:#f9f9f9;border:1px solid #ddd;padding:14px;white-space:pre-wrap}</style></head><body>'
-              +'<h1>SS Rentals - Rental Quotation</h1>'
-              +'<p>Quote: '+f.qn+' | Date: '+issDate+'</p>'
-              +'<h2>Prepared For</h2><table><tr><td>Company</td><td>'+f.co+'</td></tr><tr><td>Contact</td><td>'+f.ct+'</td></tr>'+(f.ph?'<tr><td>Phone</td><td>'+f.ph+'</td></tr>':'')+'</table>'
-              +(f.td||f.trd?'<h2>Vehicle</h2><table>'+(f.td?'<tr><td>Truck</td><td>'+f.td+'</td></tr>':'')+(f.trd?'<tr><td>Trailer</td><td>'+f.trd+'</td></tr>':'')+'</table>':'')
-              +'<h2>Charges</h2><table>'+rows.join('')+'</table>'
-              +'<h2>Notes</h2><div class="notes">'+(f.notes||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>'
-              +'<div style="margin-top:24px;border-top:2px solid #6A1B9A;padding-top:12px"><p>Name: _________________________ Signature: _________________________</p><p>Date: _________________________</p></div>'
-              +'<div style="margin-top:20px;font-size:9pt;color:#888;text-align:center">SS Rentals | 280a Peak Road, Cambridge, NZ | All amounts NZD excl GST</div>'
-              +'</body></html>';
-            const w=window.open('','_blank');
-            if(!w){alert('Allow pop-ups.');return;}
-            w.document.write(html.replace('</head>','<scr'+'ipt>window.onload=function(){document.title="'+fname+'";setTimeout(window.print,400)};<'+'/scr'+'ipt></head>'));
-            w.document.close();
-          }}><Icon name="download" size={14}/> Download PDF</button>
+          <button className="btn btn-primary" style={{flex:1,justifyContent:'center'}} onClick={qPDF}><Icon name="download" size={14}/> Download PDF</button>
           <button className="btn btn-ghost" style={{flex:1,justifyContent:'center',borderColor:'#27AE60',color:'#27AE60'}} onClick={qSave}>Save Quote</button>
           <button className="btn btn-ghost" onClick={()=>setQform(mkQ(qtpl))}>Reset</button>
         </div>
       </div>
     </div>
   );
-
   return null;
 };
 
