@@ -1246,29 +1246,76 @@ const Dashboard = ({theme,setPage}) => {
         </div>
       </div>
 
-      {/* Monthly P&L from Google Sheets */}
-      <div className="card mb-4">
-        <div className="card-header">
-          <span className="card-title">Monthly P&L — {loadPnlFromSheet()?'📊 SS Rentals Monthly Financials':'Estimated'}</span>
-          <button className="btn btn-ghost btn-sm" onClick={()=>setPage('reports')}>Full Report</button>
-        </div>
-        <div className="table-wrap" style={{border:'none',borderRadius:0,margin:'0 -20px',maxHeight:320,overflowY:'auto'}}>
-          <table>
-            <thead><tr><th>Month</th><th>Revenue</th><th>Expenses</th><th>Net Profit</th><th>Margin</th></tr></thead>
-            <tbody>
-              {getEffectivePnl().slice(-12).reverse().map(m=>(
-                <tr key={m.month}>
-                  <td style={{fontWeight:600}}>{m.month}</td>
-                  <td style={{color:'var(--green)',fontWeight:700}}>{fmtCur(m.revenue)}</td>
-                  <td style={{color:'var(--orange)'}}>{fmtCur(m.expenses)}</td>
-                  <td style={{fontWeight:800,color:m.net>=0?'var(--green)':'var(--red-light)'}}>{fmtCur(m.net)}</td>
-                  <td style={{fontSize:12,color:'var(--text3)'}}>{m.revenue>0?(m.net/m.revenue*100).toFixed(1)+'%':'—'}</td>
-                </tr>
+      {/* Monthly P&L Tabs */}
+      {(()=>{
+        const pnlMonths = getEffectivePnl().slice().reverse();
+        const [selMonth, setSelMonth] = React.useState(pnlMonths[0]?.month||'');
+        const sel = pnlMonths.find(m=>m.month===selMonth) || pnlMonths[0] || {};
+        const fmtMonth = s => { if(!s) return ''; const [y,m]=s.split('-'); const names=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (names[parseInt(m)]||m)+' '+y; };
+        return (
+          <div className="card mb-4">
+            <div className="card-header">
+              <span className="card-title">📊 Monthly P&L — SS Rentals Monthly Financials</span>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setPage('reports')}>Full Report →</button>
+            </div>
+            {/* Month tabs */}
+            <div style={{display:'flex',gap:4,flexWrap:'wrap',padding:'0 20px 12px',borderBottom:'1px solid var(--border)'}}>
+              {pnlMonths.map(m=>(
+                <button key={m.month} onClick={()=>setSelMonth(m.month)} style={{
+                  padding:'5px 12px',borderRadius:20,border:'1.5px solid',fontSize:12,fontWeight:700,cursor:'pointer',
+                  borderColor:selMonth===m.month?'#6A1B9A':'var(--border)',
+                  background:selMonth===m.month?'#6A1B9A':'var(--card)',
+                  color:selMonth===m.month?'#fff':'var(--text2)',
+                }}>{fmtMonth(m.month)}</button>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            </div>
+            {/* Selected month detail */}
+            {sel.month&&(
+              <div style={{padding:'16px 20px'}}>
+                <div style={{display:'flex',alignItems:'baseline',gap:12,marginBottom:14}}>
+                  <span style={{fontSize:22,fontWeight:800,color:'#6A1B9A'}}>{fmtMonth(sel.month)}</span>
+                  <span style={{fontSize:13,color:'var(--text3)'}}>Net margin: {sel.revenue>0?(sel.net/sel.revenue*100).toFixed(1):'0'}%</span>
+                </div>
+                {/* Summary cards */}
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:14}}>
+                  {[
+                    {l:'Total Revenue',v:fmtCur(sel.revenue),c:'var(--green)'},
+                    {l:'Total Expenses',v:fmtCur(sel.expenses),c:'var(--orange)'},
+                    {l:'Net Profit',v:fmtCur(sel.net),c:sel.net>=0?'var(--green)':'var(--red-light)'},
+                  ].map(k=>(
+                    <div key={k.l} style={{padding:'12px 14px',background:'var(--bg3)',borderRadius:8}}>
+                      <div style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',fontWeight:700,marginBottom:4}}>{k.l}</div>
+                      <div style={{fontSize:18,fontWeight:800,color:k.c}}>{k.v}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Expense breakdown */}
+                {(sel.repairs>0||sel.other>0||sel.ruc>0||sel.navman_ruc>0||sel.insurance>0||sel.flexi>0||sel.heartland>0)&&(
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',marginBottom:8}}>Expense Breakdown</div>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:6}}>
+                      {[
+                        ['Repairs & Maintenance',sel.repairs],
+                        ['Other Expenses',sel.other],
+                        ['RUC',sel.ruc],
+                        ['Navman GPS',sel.navman_ruc],
+                        ['Insurance',sel.insurance],
+                        ['Flexi',sel.flexi],
+                        ['Heartland',sel.heartland],
+                      ].filter(([,v])=>v>0).map(([l,v])=>(
+                        <div key={l} style={{display:'flex',justifyContent:'space-between',padding:'6px 10px',background:'var(--bg3)',borderRadius:6,fontSize:12}}>
+                          <span style={{color:'var(--text2)'}}>{l}</span>
+                          <span style={{fontWeight:700,color:'var(--orange)'}}>{fmtCur(v)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* AI Operational Summary */}
       <div className="card" style={{borderLeft:'3px solid var(--red)',background:'linear-gradient(135deg,var(--card) 0%,var(--bg3) 100%)'}}>
