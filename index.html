@@ -448,6 +448,135 @@ const readSheetTab = async (accessToken, spreadsheetId, sheetName) => {
   return data.values || [];
 };
 
+/* ─── FINANCIAL SHEET (SS Rentals Monthly Financials) ── */
+const FIN_SHEET_ID = '1pDcnv6YMiSGapDJgKghKjcFveh4h9SZ-3ieiIP5sSFs';
+const FIN_CACHE_KEY = 'ss_rentals_fin_cache';
+
+const loadCachedFinancials = () => {
+  try { return JSON.parse(localStorage.getItem(FIN_CACHE_KEY)||'null'); } catch { return null; }
+};
+const saveCachedFinancials = (data) => {
+  try { localStorage.setItem(FIN_CACHE_KEY, JSON.stringify(data)); } catch {}
+};
+
+// Parse a tab name like "Aug-25" -> "2025-08"
+const parseFinTabName = (tabName) => {
+  const months = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+  const m = tabName.toLowerCase().match(/^([a-z]{3})-(\d{2})$/);
+  if (!m) return null;
+  const mo = months[m[1]];
+  if (!mo) return null;
+  const yr = parseInt(m[2]) >= 50 ? '19'+m[2] : '20'+m[2];
+  return yr+'-'+mo;
+};
+
+// Parse a dollar string like "$5,162.87" -> 5162.87
+const parseDollar = (s) => {
+  if (!s) return 0;
+  const n = parseFloat(String(s).replace(/[$,\s]/g,''));
+  return isNaN(n) ? 0 : n;
+};
+
+// Read one monthly tab and extract P&L row
+// Sheet structure (from screenshot):
+//   Row 1: Title
+//   Row 3: "MONTHLY HIRE INCOME"
+//   Row 4: Headers (Hirer Name, Invoice Number, Total)
+//   Rows 5+: Hire income rows (col C = total)
+//   Col F row 4: "Total Hire Income" label, col G = value
+//   Col F row 5: "Repair & Maintenance" label, col G = value
+//   Col F row 6: "Other Expenses" label, col G = value
+//   Col F row 7: "Net Position" label, col G = value
+const parseFinTab = (rows, tabName) => {
+  const month = parseFinTabName(tabName);
+  if (!month) return null;
+
+  // Find summary values from column F/G
+  // The screenshot shows F3=Total Hire Income, F4=Repair & Maintenance, F5=Other Expenses, F6=Net Position
+  // with values in column G (index 6)
+  let revenue = 0, repairs = 0, other = 0, net = 0;
+  let foundSummary = false;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const labelCell = (row[5]||'').toString().trim().toLowerCase(); // col F (index 5)
+    const valueCell = row[6]; // col G (index 6)
+
+    if (labelCell.includes('total hire income') || labelCell.includes('total hire')) {
+      revenue = parseDollar(valueCell); foundSummary = true;
+    } else if (labelCell.includes('repair') || labelCell.includes('maintenance')) {
+      repairs = parseDollar(valueCell);
+    } else if (labelCell.includes('other expense')) {
+      other = parseDollar(valueCell);
+    } else if (labelCell.includes('net position') || labelCell.includes('net profit') || labelCell.includes('net income')) {
+      net = parseDollar(valueCell);
+    }
+  }
+
+  // If summary col not found, fall back to summing col C (Total) from hire income rows
+  if (!foundSummary) {
+    let sum = 0;
+    let inHireSection = false;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || [];
+      const a = (row[0]||'').toString().toUpperCase();
+      if (a.includes('MONTHLY HIRE INCOME')) { inHireSection = true; continue; }
+      if (inHireSection && (a.includes('REPAIR') || a.includes('MAINTENANCE') || a.includes('OTHER EXPENSE'))) { inHireSection = false; }
+      if (inHireSection && row[2]) {
+        const v = parseDollar(row[2]);
+        if (v > 0) sum += v;
+      }
+    }
+    if (sum > 0) revenue = sum;
+  }
+
+  // Derive expenses and net if not found
+  const expenses = repairs + other;
+  if (net === 0 && revenue > 0) net = revenue - expenses;
+
+  return {
+    month,
+    revenue: Math.round(revenue),
+    repairs: Math.round(repairs),
+    other: Math.round(other),
+    expenses: Math.round(expenses || repairs + other),
+    net: Math.round(net),
+    // Keep other fields for compatibility
+    insurance: 0, navman_ruc: 0, ruc: 0, flexi: 0, heartland: 0, advertising: 0, gst: 0,
+  };
+};
+
+// Load all monthly tabs from the financial sheet
+const loadPnlFromFinancialSheet = async (accessToken) => {
+  try {
+    // Get list of sheet tabs
+    const metaRes = await fetch(
+      'https://sheets.googleapis.com/v4/spreadsheets/'+FIN_SHEET_ID+'?fields=sheets.properties.title',
+      { headers: { Authorization: 'Bearer '+accessToken } }
+    );
+    if (!metaRes.ok) return null;
+    const meta = await metaRes.json();
+    const tabs = (meta.sheets||[]).map(s=>s.properties.title).filter(t=>parseFinTabName(t));
+
+    if (tabs.length === 0) return null;
+
+    const results = [];
+    for (const tab of tabs) {
+      const rows = await readSheetTab(accessToken, FIN_SHEET_ID, tab);
+      if (!rows || rows.length < 3) continue;
+      const row = parseFinTab(rows, tab);
+      if (row) results.push(row);
+    }
+
+    results.sort((a,b)=>a.month.localeCompare(b.month));
+    if (results.length > 0) saveCachedFinancials(results);
+    return results.length > 0 ? results : null;
+  } catch(e) {
+    console.warn('[FinSheet] Error:', e.message);
+    return null;
+  }
+};
+
 // Pull hire changes from Google Sheets back into app data
 const pullHiresFromSheet = (rows) => {
   if (!rows || rows.length < 2) return 0;
@@ -1301,7 +1430,8 @@ const Dashboard = ({theme,setPage}) => {
   const [kpiModal, setKpiModal] = React.useState(null);
   const activeHires = getEffectiveHires().filter(h=>h.status==='active');
   const pendingInvoices = getInvoices().filter(i=>i.status!=='paid');
-  const latestPnl = PNL_DETAIL[PNL_DETAIL.length-1];
+  const effectivePnl = dashPnl || loadCachedFinancials() || PNL_DETAIL;
+  const latestPnl = effectivePnl[effectivePnl.length-1];
 
   const KpiModal = ({id, onClose}) => {
     if (!id) return null;
@@ -1540,7 +1670,7 @@ const Dashboard = ({theme,setPage}) => {
 /* ─── FLEET PAGE ──────────────────────────────────── */
 /* ─── DASHBOARD P&L PANEL ─────────────────────────── */
 const DashboardPnl = () => {
-  const months = PNL_DETAIL.slice(-12);
+  const months = effectivePnl.slice(-12);
   const [selMonth, setSelMonth] = React.useState(months[months.length-1].month);
   const d = months.find(m=>m.month===selMonth) || months[months.length-1];
   const fmtMonth = m => { const [y,mo] = m.split('-'); return new Date(+y,+mo-1,1).toLocaleDateString('en-NZ',{month:'short',year:'2-digit'}); };
@@ -4441,8 +4571,17 @@ const CsvImportModal = ({open, onClose, parsed, onApprove}) => {
 };
 
 /* ─── REPORTS PAGE ────────────────────────────────── */
-const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
+const ReportsPage = ({theme, xeroConfig, sheetsConfig, livePnl:propLivePnl, onRefreshPnl}) => {
   const [tab,setTab]=useState('pl');
+  const [finSyncing,setFinSyncing]=useState(false);
+  const handleRefreshFin = async () => {
+    if(!sheetsConfig?.accessToken){alert('Connect Google Sheets first in Settings.');return;}
+    setFinSyncing(true);
+    const data = await loadPnlFromFinancialSheet(sheetsConfig.accessToken);
+    if(data&&data.length>0){if(onRefreshPnl)onRefreshPnl();alert('Financial data refreshed from Google Sheets!');}
+    else alert('Could not read financial sheet. Check Sheets connection in Settings.');
+    setFinSyncing(false);
+  };
   const [bankTxns,setBankTxns]=useState(()=>loadBankTxns());
   const [bankMeta,setBankMeta]=useState(()=>loadBankMeta());
   const [parsedCsv,setParsedCsv]=useState(null);
@@ -4459,7 +4598,7 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
   const pdfRef     = useRef();
   const [importType, setImportType] = useState('');
 
-  const pnlData = bankTxns.length>0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL;
+  const pnlData = propLivePnl || (bankTxns.length>0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL);
   const ytdMonths = pnlData.filter(m=>m.month.startsWith('2026'));
   const totalRev=ytdMonths.reduce((a,m)=>a+m.revenue,0);
   const totalExp=ytdMonths.reduce((a,m)=>a+m.expenses,0);
@@ -4840,6 +4979,13 @@ tr:nth-child(even){background:#f9f9f9}
       {/* P&L Tab */}
       {tab==='pl'&&(
         <div>
+          {/* Financial Sheet Source Banner */}
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',background:'rgba(106,27,154,0.07)',border:'1px solid rgba(106,27,154,0.2)',borderRadius:8,marginBottom:16,fontSize:12}}>
+            <span><Icon name="reports" size={14} color="#6A1B9A"/> &nbsp; Financial data from <strong style={{color:'#6A1B9A'}}>SS Rentals Monthly Financials</strong> Google Sheet · {pnlData.length} months loaded · Last month: <strong>{pnlData[pnlData.length-1]?.month||'—'}</strong></span>
+            <button className="btn btn-ghost btn-sm" style={{borderColor:'#6A1B9A',color:'#6A1B9A'}} onClick={handleRefreshFin} disabled={finSyncing}>
+              {finSyncing?'Refreshing…':'⟳ Refresh from Sheet'}
+            </button>
+          </div>
           {bankTxns.length>0&&(
             <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'rgba(39,174,96,0.08)',border:'1px solid rgba(39,174,96,0.25)',borderRadius:8,marginBottom:16,fontSize:12}}>
               <Icon name="check" size={15} color="var(--green)"/>
@@ -8260,6 +8406,7 @@ const App = () => {
   const [showNewHireWizard, setShowNewHireWizard] = useState(false);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
   const [sheetsConfig, setSheetsConfig] = useState(()=>loadSheetsConfig());
+  const [livePnl, setLivePnl] = useState(()=>loadCachedFinancials()||PNL_DETAIL);
 
   // Clear badge for the current page on load
   useEffect(()=>{
@@ -8364,7 +8511,10 @@ const App = () => {
     await runFullSync(
       config,
       (msg,pct)=>setSyncState(s=>({...s,syncMsg:msg,syncPct:pct})),
-      (ts)=>{setSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',syncPct:0}));syncInProgress.current=false;setDataRefreshKey(k=>k+1+Math.random());},
+      (ts)=>{setSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',syncPct:0}));syncInProgress.current=false;setDataRefreshKey(k=>k+1+Math.random());
+        // Refresh financial data after sync
+        loadPnlFromFinancialSheet(config.accessToken).then(data=>{if(data&&data.length>0)setLivePnl(data);});
+      },
       (err)=>{setSyncState(s=>({...s,syncing:false,error:err,syncMsg:'',syncPct:0}));syncInProgress.current=false;}
     );
   },[sheetsConfig]);
@@ -8396,20 +8546,25 @@ const App = () => {
       if (isTokenValid(cfg)) doSync(cfg);
       // If token expired: do nothing, just wait for user to manually reconnect
     }, 5*60*1000);
+    // Load financial data on startup
+    const cfg0 = loadSheetsConfig();
+    if (cfg0?.accessToken) {
+      loadPnlFromFinancialSheet(cfg0.accessToken).then(data=>{if(data&&data.length>0)setLivePnl(data);});
+    }
     return ()=>clearInterval(autoSyncTimer.current);
   },[sheetsConfig?.clientId]);
 
   const handleSaveConfig = (cfg) => { saveSheetsConfig(cfg); setSheetsConfig(cfg); };
 
   const pages={
-    dashboard:<Dashboard theme={theme} setPage={setPage}/>,
+    dashboard:<Dashboard theme={theme} setPage={setPage} livePnl={livePnl}/>,
     fleet:<FleetPage theme={theme} sheetsConfig={sheetsConfig} doSync={doSync}/>,
     customers:<CustomersPage refreshKey={dataRefreshKey} sheetsConfig={sheetsConfig}/>,
     hires:<HiresPage refreshKey={dataRefreshKey}/>,
     invoicing:<InvoicingPage xeroConfig={xeroConfig}/>,
     quotes:<QuotesPage/>,
     maintenance:<MaintenancePage/>,
-    reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig}/>,
+    reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig} livePnl={livePnl} onRefreshPnl={()=>{if(sheetsConfig?.accessToken)loadPnlFromFinancialSheet(sheetsConfig.accessToken).then(d=>{if(d&&d.length>0)setLivePnl(d);})}}/>,
     communications:<CommunicationsPage/>,
     documents:<DocumentsPage/>,
     navman:<NavmanPage/>,
