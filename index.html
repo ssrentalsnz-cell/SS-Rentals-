@@ -1368,7 +1368,7 @@ const Dashboard = ({theme,setPage}) => {
   const [kpiModal, setKpiModal] = React.useState(null);
   const activeHires = getEffectiveHires().filter(h=>h.status==='active');
   const pendingInvoices = getInvoices().filter(i=>i.status!=='paid');
-  const latestPnl = PNL_DETAIL[PNL_DETAIL.length-1];
+  const latestPnl = (loadCachedPnl()||PNL_DETAIL).slice(-1)[0];
 
   const KpiModal = ({id, onClose}) => {
     if (!id) return null;
@@ -1607,7 +1607,8 @@ const Dashboard = ({theme,setPage}) => {
 /* ─── FLEET PAGE ──────────────────────────────────── */
 /* ─── DASHBOARD P&L PANEL ─────────────────────────── */
 const DashboardPnl = () => {
-  const months = PNL_DETAIL.slice(-12);
+  const pnlSource = loadCachedPnl() || PNL_DETAIL;
+  const months = pnlSource.slice(-12);
   const [selMonth, setSelMonth] = React.useState(months[months.length-1].month);
   const d = months.find(m=>m.month===selMonth) || months[months.length-1];
   const fmtMonth = m => { const [y,mo] = m.split('-'); return new Date(+y,+mo-1,1).toLocaleDateString('en-NZ',{month:'short',year:'2-digit'}); };
@@ -4536,7 +4537,7 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
   const pdfRef     = useRef();
   const [importType, setImportType] = useState('');
 
-  const pnlData = livePnl || (bankTxns.length>0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL);
+  const pnlData = livePnl || loadCachedPnl() || (bankTxns.length>0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL);
   const ytdMonths = pnlData.filter(m=>m.month.startsWith('2026'));
   const totalRev=ytdMonths.reduce((a,m)=>a+m.revenue,0);
   const totalExp=ytdMonths.reduce((a,m)=>a+m.expenses,0);
@@ -8330,7 +8331,10 @@ const App = () => {
     if (autoSyncTimer.current) clearInterval(autoSyncTimer.current);
     // On load: sync only if token still valid
     const isTokenValid = (cfg) => cfg?.accessToken && cfg?.tokenExpiry && Date.now() < cfg.tokenExpiry - 60000;
-    if (isTokenValid(sheetsConfig)) doSync(sheetsConfig);
+    if (isTokenValid(sheetsConfig)) {
+      doSync(sheetsConfig);
+      loadPnlFromSheet(sheetsConfig.accessToken).then(function(data){if(data&&data.length>0){try{localStorage.setItem(FIN_CACHE_KEY,JSON.stringify(data));}catch(e){}}});
+    }
     // Every 5 min: sync ONLY if token still valid — no refresh, no popup ever
     autoSyncTimer.current = setInterval(()=>{
       const cfg = loadSheetsConfig();
