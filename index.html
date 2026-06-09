@@ -448,131 +448,69 @@ const readSheetTab = async (accessToken, spreadsheetId, sheetName) => {
   return data.values || [];
 };
 
-/* ─── FINANCIAL SHEET (SS Rentals Monthly Financials) ── */
+
+/* ─── SS RENTALS MONTHLY FINANCIALS SHEET ────────── */
 const FIN_SHEET_ID = '1pDcnv6YMiSGapDJgKghKjcFveh4h9SZ-3ieiIP5sSFs';
 const FIN_CACHE_KEY = 'ss_rentals_fin_cache';
 
-const loadCachedFinancials = () => {
-  try { return JSON.parse(localStorage.getItem(FIN_CACHE_KEY)||'null'); } catch { return null; }
+const loadCachedPnl = function() {
+  try { return JSON.parse(localStorage.getItem(FIN_CACHE_KEY)||'null'); } catch(e) { return null; }
 };
-const saveCachedFinancials = (data) => {
-  try { localStorage.setItem(FIN_CACHE_KEY, JSON.stringify(data)); } catch {}
+const savePnlCache = function(data) {
+  try { localStorage.setItem(FIN_CACHE_KEY, JSON.stringify(data)); } catch(e) {} 
 };
 
-// Parse a tab name like "Aug-25" -> "2025-08"
-const parseFinTabName = (tabName) => {
-  const months = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
-  const m = tabName.toLowerCase().match(/^([a-z]{3})-(\d{2})$/);
+const parseFinTab = function(tabName, rows) {
+  var monthMap = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+  var m = tabName.toLowerCase().match(/^([a-z]{3})-(\d{2})$/);
   if (!m) return null;
-  const mo = months[m[1]];
+  var mo = monthMap[m[1]];
   if (!mo) return null;
-  const yr = parseInt(m[2]) >= 50 ? '19'+m[2] : '20'+m[2];
-  return yr+'-'+mo;
-};
-
-// Parse a dollar string like "$5,162.87" -> 5162.87
-const parseDollar = (s) => {
-  if (!s) return 0;
-  const n = parseFloat(String(s).replace(/[$,\s]/g,''));
-  return isNaN(n) ? 0 : n;
-};
-
-// Read one monthly tab and extract P&L row
-// Sheet structure (from screenshot):
-//   Row 1: Title
-//   Row 3: "MONTHLY HIRE INCOME"
-//   Row 4: Headers (Hirer Name, Invoice Number, Total)
-//   Rows 5+: Hire income rows (col C = total)
-//   Col F row 4: "Total Hire Income" label, col G = value
-//   Col F row 5: "Repair & Maintenance" label, col G = value
-//   Col F row 6: "Other Expenses" label, col G = value
-//   Col F row 7: "Net Position" label, col G = value
-const parseFinTab = (rows, tabName) => {
-  const month = parseFinTabName(tabName);
-  if (!month) return null;
-
-  // Find summary values from column F/G
-  // The screenshot shows F3=Total Hire Income, F4=Repair & Maintenance, F5=Other Expenses, F6=Net Position
-  // with values in column G (index 6)
-  let revenue = 0, repairs = 0, other = 0, net = 0;
-  let foundSummary = false;
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i] || [];
-    const labelCell = (row[5]||'').toString().trim().toLowerCase(); // col F (index 5)
-    const valueCell = row[6]; // col G (index 6)
-
-    if (labelCell.includes('total hire income') || labelCell.includes('total hire')) {
-      revenue = parseDollar(valueCell); foundSummary = true;
-    } else if (labelCell.includes('repair') || labelCell.includes('maintenance')) {
-      repairs = parseDollar(valueCell);
-    } else if (labelCell.includes('other expense')) {
-      other = parseDollar(valueCell);
-    } else if (labelCell.includes('net position') || labelCell.includes('net profit') || labelCell.includes('net income')) {
-      net = parseDollar(valueCell);
-    }
+  var yr = parseInt(m[2]) >= 50 ? '19'+m[2] : '20'+m[2];
+  var month = yr+'-'+mo;
+  
+  var revenue = 0, repairs = 0, other = 0, net = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || [];
+    var label = ((row[5]||'')+'').toLowerCase().trim();
+    var val = parseFloat(((row[6]||'')+'').replace(/[$,\s]/g,'')) || 0;
+    if (label.indexOf('total hire') >= 0) { revenue = val; }
+    else if (label.indexOf('repair') >= 0 || label.indexOf('maintenance') >= 0) { repairs = val; }
+    else if (label.indexOf('other expense') >= 0) { other = val; }
+    else if (label.indexOf('net position') >= 0 || label.indexOf('net profit') >= 0) { net = val; }
   }
-
-  // If summary col not found, fall back to summing col C (Total) from hire income rows
-  if (!foundSummary) {
-    let sum = 0;
-    let inHireSection = false;
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i] || [];
-      const a = (row[0]||'').toString().toUpperCase();
-      if (a.includes('MONTHLY HIRE INCOME')) { inHireSection = true; continue; }
-      if (inHireSection && (a.includes('REPAIR') || a.includes('MAINTENANCE') || a.includes('OTHER EXPENSE'))) { inHireSection = false; }
-      if (inHireSection && row[2]) {
-        const v = parseDollar(row[2]);
-        if (v > 0) sum += v;
-      }
-    }
-    if (sum > 0) revenue = sum;
-  }
-
-  // Derive expenses and net if not found
-  const expenses = repairs + other;
+  var expenses = repairs + other;
   if (net === 0 && revenue > 0) net = revenue - expenses;
-
-  return {
-    month,
-    revenue: Math.round(revenue),
-    repairs: Math.round(repairs),
-    other: Math.round(other),
-    expenses: Math.round(expenses || repairs + other),
-    net: Math.round(net),
-    // Keep other fields for compatibility
-    insurance: 0, navman_ruc: 0, ruc: 0, flexi: 0, heartland: 0, advertising: 0, gst: 0,
-  };
+  return { month:month, revenue:Math.round(revenue), repairs:Math.round(repairs), other:Math.round(other), expenses:Math.round(expenses), net:Math.round(net), insurance:0, navman_ruc:0, ruc:0, flexi:0, heartland:0, advertising:0, gst:0 };
 };
 
-// Load all monthly tabs from the financial sheet
-const loadPnlFromFinancialSheet = async (accessToken) => {
+const loadPnlFromSheet = async function(accessToken) {
   try {
-    // Get list of sheet tabs
-    const metaRes = await fetch(
-      'https://sheets.googleapis.com/v4/spreadsheets/'+FIN_SHEET_ID+'?fields=sheets.properties.title',
-      { headers: { Authorization: 'Bearer '+accessToken } }
-    );
+    var metaUrl = 'https://sheets.googleapis.com/v4/spreadsheets/'+FIN_SHEET_ID+'?fields=sheets.properties.title';
+    var metaRes = await fetch(metaUrl, { headers: { Authorization: 'Bearer '+accessToken } });
     if (!metaRes.ok) return null;
-    const meta = await metaRes.json();
-    const tabs = (meta.sheets||[]).map(s=>s.properties.title).filter(t=>parseFinTabName(t));
-
+    var meta = await metaRes.json();
+    var sheets = meta.sheets || [];
+    var monthMap = {jan:1,feb:1,mar:1,apr:1,may:1,jun:1,jul:1,aug:1,sep:1,oct:1,nov:1,dec:1};
+    var tabs = [];
+    for (var si = 0; si < sheets.length; si++) {
+      var title = sheets[si].properties.title;
+      var tm = title.toLowerCase().match(/^([a-z]{3})-(\d{2})$/);
+      if (tm && monthMap[tm[1]]) tabs.push(title);
+    }
     if (tabs.length === 0) return null;
-
-    const results = [];
+    var results = [];
     for (var ti = 0; ti < tabs.length; ti++) {
       var rows = await readSheetTab(accessToken, FIN_SHEET_ID, tabs[ti]);
       if (!rows || rows.length < 3) continue;
-      var row = parseFinTab(rows, tabs[ti]);
+      var row = parseFinTab(tabs[ti], rows);
       if (row) results.push(row);
     }
-
-    results.sort((a,b)=>a.month.localeCompare(b.month));
-    if (results.length > 0) saveCachedFinancials(results);
+    results.sort(function(a,b){ return a.month.localeCompare(b.month); });
+    if (results.length > 0) savePnlCache(results);
     return results.length > 0 ? results : null;
   } catch(e) {
-    console.warn('[FinSheet] Error:', e.message);
+    console.warn('[FinSheet]', e.message);
     return null;
   }
 };
@@ -1430,8 +1368,7 @@ const Dashboard = ({theme,setPage}) => {
   const [kpiModal, setKpiModal] = React.useState(null);
   const activeHires = getEffectiveHires().filter(h=>h.status==='active');
   const pendingInvoices = getInvoices().filter(i=>i.status!=='paid');
-  const effectivePnl = dashPnl || loadCachedFinancials() || PNL_DETAIL;
-  const latestPnl = effectivePnl[effectivePnl.length-1];
+  const latestPnl = PNL_DETAIL[PNL_DETAIL.length-1];
 
   const KpiModal = ({id, onClose}) => {
     if (!id) return null;
@@ -1670,7 +1607,7 @@ const Dashboard = ({theme,setPage}) => {
 /* ─── FLEET PAGE ──────────────────────────────────── */
 /* ─── DASHBOARD P&L PANEL ─────────────────────────── */
 const DashboardPnl = () => {
-  const months = effectivePnl.slice(-12);
+  const months = PNL_DETAIL.slice(-12);
   const [selMonth, setSelMonth] = React.useState(months[months.length-1].month);
   const d = months.find(m=>m.month===selMonth) || months[months.length-1];
   const fmtMonth = m => { const [y,mo] = m.split('-'); return new Date(+y,+mo-1,1).toLocaleDateString('en-NZ',{month:'short',year:'2-digit'}); };
@@ -3974,7 +3911,7 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
               </div>
 
               <div style={{padding:'8px 12px',background:'var(--bg3)',borderRadius:6,fontSize:11,color:'var(--text3)',marginBottom:12}}>
-                📊 {inv.navmanSource} · {km.toLocaleString()} km · {'Mileage $'+mr+'/km · RUC $'+rr+'/km'}{inv.maxMileage?' · Max: '+inv.maxMileage:''}
+                📊 {inv.navmanSource} · {km.toLocaleString()} km · Mileage ${mr}/km · RUC ${rr}/km{inv.maxMileage?' · Max: '+inv.maxMileage:''}
               </div>
 
               {pushResult&&<div style={{padding:'10px 14px',background:pushResult.ok?'rgba(39,174,96,0.1)':'rgba(211,47,47,0.1)',border:`1px solid ${pushResult.ok?'rgba(39,174,96,0.3)':'rgba(211,47,47,0.3)'}`,borderRadius:8,fontSize:13,fontWeight:600,color:pushResult.ok?'#27AE60':'#d32f2f',marginBottom:12}}>{pushResult.msg}</div>}
@@ -4571,16 +4508,17 @@ const CsvImportModal = ({open, onClose, parsed, onApprove}) => {
 };
 
 /* ─── REPORTS PAGE ────────────────────────────────── */
-const ReportsPage = ({theme, xeroConfig, sheetsConfig, livePnl:propLivePnl, onRefreshPnl}) => {
+const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
   const [tab,setTab]=useState('pl');
-  const [finSyncing,setFinSyncing]=useState(false);
-  const handleRefreshFin = async () => {
+  const [livePnl,setLivePnl]=useState(()=>loadCachedPnl());
+  const [finLoading,setFinLoading]=useState(false);
+  const handleFinRefresh=async()=>{
     if(!sheetsConfig?.accessToken){alert('Connect Google Sheets first in Settings.');return;}
-    setFinSyncing(true);
-    const data = await loadPnlFromFinancialSheet(sheetsConfig.accessToken);
-    if(data&&data.length>0){if(onRefreshPnl)onRefreshPnl();alert('Financial data refreshed from Google Sheets!');}
-    else alert('Could not read financial sheet. Check Sheets connection in Settings.');
-    setFinSyncing(false);
+    setFinLoading(true);
+    var data=await loadPnlFromSheet(sheetsConfig.accessToken);
+    if(data&&data.length>0){setLivePnl(data);alert('Financial data refreshed! '+data.length+' months loaded.');}
+    else alert('Could not read financial sheet. Make sure Google Sheets is connected.');
+    setFinLoading(false);
   };
   const [bankTxns,setBankTxns]=useState(()=>loadBankTxns());
   const [bankMeta,setBankMeta]=useState(()=>loadBankMeta());
@@ -4598,7 +4536,7 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig, livePnl:propLivePnl, onRe
   const pdfRef     = useRef();
   const [importType, setImportType] = useState('');
 
-  const pnlData = propLivePnl || (bankTxns.length>0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL);
+  const pnlData = livePnl || (bankTxns.length>0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL);
   const ytdMonths = pnlData.filter(m=>m.month.startsWith('2026'));
   const totalRev=ytdMonths.reduce((a,m)=>a+m.revenue,0);
   const totalExp=ytdMonths.reduce((a,m)=>a+m.expenses,0);
@@ -4847,6 +4785,7 @@ tr:nth-child(even){background:#f9f9f9}
         <div className="flex gap-2">
           <button className="btn btn-ghost btn-sm" onClick={handleExportPDF}><Icon name="download" size={13}/> Export PDF</button>
           <button className="btn btn-ghost btn-sm" onClick={handleExportExcel} style={{borderColor:'#217346',color:'#217346'}}><Icon name="download" size={13}/> Export Excel</button>
+          <button className="btn btn-ghost btn-sm" onClick={handleFinRefresh} disabled={finLoading} style={{borderColor:'#6A1B9A',color:'#6A1B9A'}}><Icon name="reports" size={13}/> {finLoading?'Loading\u2026':'\u27f3 Sync Financials'}</button>
         </div>
       </div>
 
@@ -4979,13 +4918,6 @@ tr:nth-child(even){background:#f9f9f9}
       {/* P&L Tab */}
       {tab==='pl'&&(
         <div>
-          {/* Financial Sheet Source Banner */}
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',background:'rgba(106,27,154,0.07)',border:'1px solid rgba(106,27,154,0.2)',borderRadius:8,marginBottom:16,fontSize:12}}>
-            <span><Icon name="reports" size={14} color="#6A1B9A"/> &nbsp; Financial data from <strong style={{color:'#6A1B9A'}}>SS Rentals Monthly Financials</strong> Google Sheet · {pnlData.length} months loaded · Last month: <strong>{pnlData[pnlData.length-1]?.month||'—'}</strong></span>
-            <button className="btn btn-ghost btn-sm" style={{borderColor:'#6A1B9A',color:'#6A1B9A'}} onClick={handleRefreshFin} disabled={finSyncing}>
-              {finSyncing?'Refreshing…':'⟳ Refresh from Sheet'}
-            </button>
-          </div>
           {bankTxns.length>0&&(
             <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'rgba(39,174,96,0.08)',border:'1px solid rgba(39,174,96,0.25)',borderRadius:8,marginBottom:16,fontSize:12}}>
               <Icon name="check" size={15} color="var(--green)"/>
@@ -5702,8 +5634,8 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:12,marginBottom:8}}>
                   <div><span style={{color:'var(--text3)'}}>Truck hire:</span> <strong>{fmtCur(form.weeklyTruck)}/{form.hireType==='daily'?'day':'wk'}</strong></div>
                   {!form.noTrailer&&<div><span style={{color:'var(--text3)'}}>Trailer hire:</span> <strong>{fmtCur(form.weeklyTrailer)}/{form.hireType==='daily'?'day':'wk'}</strong></div>}
-                  <div><span style={{color:'var(--text3)'}}>Mileage rate:</span> <strong>{'$'+form.mileageRate+'/km'}</strong></div>
-                  <div><span style={{color:'var(--text3)'}}>RUC rate:</span> <strong>{'$'+form.rucRate+'/km'}</strong></div>
+                  <div><span style={{color:'var(--text3)'}}>Mileage rate:</span> <strong>${form.mileageRate}/km</strong></div>
+                  <div><span style={{color:'var(--text3)'}}>RUC rate:</span> <strong>${form.rucRate}/km</strong></div>
                   <div><span style={{color:'var(--text3)'}}>Duration:</span> <strong>{dur.label}</strong></div>
                   <div><span style={{color:'var(--text3)'}}>Bond:</span> <strong>{fmtCur(form.bond)}</strong></div>
                 </div>
@@ -6989,10 +6921,11 @@ p{margin:5px 0}
 
 <h2>3. Lease Term and Rental Charges</h2>
 <p><strong>3.1</strong> The Lease Term is set out in the Schedule. The Hirer agrees to pay the Rental Charges as specified in the Schedule.</p>
-<p><strong>Monthly Lease Rate:</strong> NZD $${d.monthlyRate} per month + GST</p>
-<p><strong>3.2</strong> Payments shall be made monthly in advance via direct debit from the Hirer's nominated account following the issue of each invoice.</p>
+<p><strong>Weekly Lease Rate:</strong> NZD $${d.weeklyRate} per week + GST${d.monthlyRate && d.monthlyRate !== "0.00" ? " &nbsp;|&nbsp; <strong>Monthly Lease Rate:</strong> NZD $"+d.monthlyRate+" per month + GST" : ""}</p>
+<p><strong>3.2</strong> Payments shall be deducted automatically from the Hirer's nominated account via direct debit following the issue of each invoice.</p>
 <p><strong>3.3</strong> A Direct Debit Dishonour Fee of 5% of the total invoice amount will be charged if any scheduled payment is declined or dishonoured.</p>
-<p><strong>3.4</strong> All Rental Charges are exclusive of GST unless otherwise stated. GST will be added at the prevailing rate.</p>
+<p><strong>3.4</strong> An additional charge of $0.50 + GST per kilometre applies for weekly usage exceeding 2,708 km.</p>
+<p><strong>3.5</strong> All Rental Charges are exclusive of GST unless otherwise stated. GST will be added at the prevailing rate.</p>
 
 <h2>4. Obligation to Pay Remaining Lease Term</h2>
 <p class="highlight"><strong>4.1 Critical Obligation:</strong> If the Hirer terminates this Agreement before the agreed Lease Term end date, for any reason whatsoever, the Hirer remains <strong>fully liable</strong> to pay the <strong>total remaining balance of the Rental Charges</strong> for the entire unexpired portion of the Lease Term.</p>
@@ -7018,11 +6951,10 @@ p{margin:5px 0}
 <p><strong>6.6</strong> In the event of an accident, the Hirer must immediately notify SS Rentals and comply with all reporting and insurance procedures.</p>
 
 <h2>7. Insurance and Liability</h2>
-<p><strong>7.1</strong> The Vehicle(s) are covered under SS Rentals' comprehensive insurance policy for the duration of this Agreement. The Hirer acknowledges that this insurance is subject to its terms, conditions, and exclusions, copies of which are available on request.</p>
-<p><strong>7.2</strong> The Hirer is solely responsible for payment of the insurance excess applicable to any claim. The current excess is $5,000 (or as otherwise notified by SS Rentals).</p>
-<p><strong>7.3</strong> The Hirer must not use the Vehicle(s) in any manner that would void or prejudice the insurance policy, including but not limited to: overloading, use outside permitted areas, use by unlicensed drivers, or use under the influence of alcohol or drugs.</p>
-<p><strong>7.4</strong> The Hirer shall indemnify and hold harmless SS Rentals from all claims, liabilities, losses, damages, and expenses (including legal costs) arising from the Hirer's operation or use of the Vehicle(s) during this Agreement.</p>
-<p><strong>7.5</strong> In the event of any accident, theft, or damage, the Hirer must: (a) immediately notify SS Rentals; (b) not admit liability to any third party; (c) obtain names and contact details of all parties involved; (d) report to Police where required; and (e) complete SS Rentals' incident report form within 24 hours.</p>
+<p><strong>7.1</strong> The Vehicle(s) will be covered under SS Rentals' insurance policy during the Lease Term, subject to its terms, conditions, and exclusions.</p>
+<p><strong>7.2</strong> The Hirer is solely responsible for the payment of any applicable insurance excess or deductible.</p>
+<p><strong>7.3</strong> The Hirer shall indemnify and hold harmless SS Rentals from all claims, liabilities, losses, or expenses arising from the Hirer's operation or use of the Vehicle(s).</p>
+<p><strong>7.4</strong> In the case of any accident involving third parties, the Hirer shall promptly provide all required information to SS Rentals.</p>
 
 <h2>8. Fines, Penalties, and Violations</h2>
 <p>The Hirer is solely responsible for all fines, penalties, and charges incurred during the Lease Term, including speeding infringements, overweight violations, parking fines, toll violations, and any other traffic or regulatory infractions arising from the Hirer's use of the Vehicle(s).</p>
@@ -7189,7 +7121,7 @@ const DocumentsPage = () => {
       {tab==='library' && (
         <div>
           <div className="grid grid-4 mb-4">
-            {[{l:'Total Documents',v:DOCUMENTS.length},{l:'Saved '+agreementWord+' Agreements',v:savedAgreements.length},{l:'Signed',v:DOCUMENTS.filter(d=>d.signed).length},{l:'Expiring Soon',v:2}].map(k=>(
+            {[{l:'Total Documents',v:DOCUMENTS.length},{l:'Saved ${agreementWord} Agreements',v:savedAgreements.length},{l:'Signed',v:DOCUMENTS.filter(d=>d.signed).length},{l:'Expiring Soon',v:2}].map(k=>(
               <div key={k.l} className="card card-sm"><div className="kpi-label">{k.l}</div><div style={{fontSize:22,fontWeight:800,marginTop:4}}>{k.v}</div></div>
             ))}
           </div>
@@ -7200,7 +7132,7 @@ const DocumentsPage = () => {
             </select>
             <div style={{flex:1}}/>
             <button className="btn btn-primary" onClick={()=>{setForm(emptyLease());setLeaseStep(1);setTab('lease-builder');}}>
-              <Icon name="plus" size={14}/>{' New '+agreementWord+' Agreement'}
+              <Icon name="plus" size={14}/> New ${agreementWord} Agreement
             </button>
           </div>
           <div className="grid grid-auto">
@@ -7363,8 +7295,8 @@ const DocumentsPage = () => {
                   <label className="form-label">Return / End Date</label>
                   <input className="form-control" type="date" value={form.endDate} onChange={e=>set('endDate',e.target.value)}/>
                 </div>
-                {agreementKind!=='lease'&&inputRow('weeklyRate','Weekly Rate (NZD, excl. GST)','number')}
-                {inputRow('monthlyRate',agreementKind==='lease'?'Monthly Lease Rate (NZD, excl. GST)':'Monthly Rate (NZD, excl. GST)','number')}
+                {inputRow('weeklyRate','Weekly Rate (NZD, excl. GST)','number')}
+                {inputRow('monthlyRate','Monthly Lease Rate (NZD, excl. GST)','number')}
                 {inputRow('bond','Bond Amount (NZD)','number')}
                 {inputRow('mileageRate','Mileage Rate ($/km)','number')}
                 {inputRow('rucRate','RUC Rate ($/km)','number')}
@@ -7426,7 +7358,7 @@ const DocumentsPage = () => {
               {!form.companyName&&<div style={{padding:'10px 14px',background:'rgba(255,111,0,0.1)',border:'1px solid rgba(255,111,0,0.3)',borderRadius:8,marginBottom:16,fontSize:13,color:'#FF6F00'}}>⚠️ Company name is required.</div>}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
                 <button className="btn btn-primary" onClick={()=>handleDownload('agreement')} style={{justifyContent:'center'}} disabled={!form.companyName}>
-                  <Icon name="download" size={14}/>{' Download '+agreementWord+' Agreement (PDF)'}
+                  <Icon name="download" size={14}/> Download ${agreementWord} Agreement (PDF)
                 </button>
                 <button className="btn btn-primary" onClick={()=>handleDownload('schedule')} style={{justifyContent:'center'}} disabled={!form.companyName}>
                   <Icon name="download" size={14}/> Download Truck Schedule (PDF)
@@ -7452,15 +7384,15 @@ const DocumentsPage = () => {
           {savedAgreements.length===0 ? (
             <div className="card" style={{textAlign:'center',padding:'48px 20px',color:'var(--text3)'}}>
               <div style={{fontSize:40,marginBottom:12}}>📄</div>
-              <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>{'No saved '+agreementWord.toLowerCase()+' agreements yet'}</div>
-              <div style={{fontSize:13,marginBottom:16}}>{'Create one using the "New '+agreementWord+' Agreement" tab and click "Save to Documents".'}</div>
+              <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>No saved ${agreementWord.toLowerCase()} agreements yet</div>
+              <div style={{fontSize:13,marginBottom:16}}>Create one using the "New ${agreementWord} Agreement" tab and click "Save to Documents".</div>
               <button className="btn btn-primary" onClick={()=>setTab('lease-builder')}><Icon name="plus" size={14}/> Create New Agreement</button>
             </div>
           ) : (
             <div>
               <div style={{display:'flex',justifyContent:'flex-end',marginBottom:16}}>
                 <button className="btn btn-primary" onClick={()=>{setForm(emptyLease());setLeaseStep(1);setTab('lease-builder');}}>
-                  <Icon name="plus" size={14}/>{' New '+agreementWord+' Agreement'}
+                  <Icon name="plus" size={14}/> New ${agreementWord} Agreement
                 </button>
               </div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:14}}>
@@ -7478,7 +7410,7 @@ const DocumentsPage = () => {
                     <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Contact:</strong> {a.form.contactName||'—'} · {a.form.contactPhone||'—'}</div>
                     <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Truck:</strong> {a.form.truckRego||'—'} {a.form.truckMake} {a.form.truckModel}</div>
                     <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Period:</strong> {fmtDocDate(a.form.startDate)||'—'} — {fmtDocDate(a.form.endDate)||'—'}</div>
-                    <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Rate:</strong> {'$'+(a.form.weeklyRate||'—')+'/wk · Bond: $'+(a.form.bond||'—')}</div>
+                    <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Rate:</strong> ${a.form.weeklyRate||'—'}/wk · Bond: ${a.form.bond||'—'}</div>
                     <div style={{fontSize:10,color:'var(--text3)',marginBottom:12}}>Saved: {new Date(a.savedAt).toLocaleDateString('en-NZ')}</div>
                     <div style={{display:'flex',gap:8}}>
                       <button className="btn btn-primary btn-sm" style={{flex:1,justifyContent:'center'}} onClick={()=>handleLoad(a)}>
@@ -7751,136 +7683,46 @@ const NavmanPage = () => {
 /* ─── QUOTES PAGE ─────────────────────────────────── */
 const QuotesPage = () => {
   const [qstep,setQstep]=useState(0);
-  const [qlist,setQlist]=useState(()=>{try{const q=JSON.parse(localStorage.getItem('ss_rentals_quotes')||'[]');return q.filter(r=>r&&r.form&&r.form.companyName!==undefined);}catch(e){return[];}});
+  const [qlist,setQlist]=useState(function(){try{var q=JSON.parse(localStorage.getItem('ss_rentals_quotes')||'[]');return q.filter(function(r){return r&&r.form&&r.form.companyName!==undefined;});}catch(e){return[];}});
   const [qtpl,setQtpl]=useState(null);
   const [qform,setQform]=useState(null);
-  const upd=(k,v)=>setQform(prev=>Object.assign({},prev,{[k]:v}));
-  const mkQ=(t)=>({
-    quoteNumber:'Q-'+Date.now().toString().slice(-6),
-    quoteDate:new Date().toISOString().slice(0,10),
-    validDays:'14',customerMode:'new',useExistingCustomer:'',
-    companyName:'',contactName:'',contactPhone:'',contactEmail:'',contactAddress:'',
-    vehicleType:t?(t.type||'truck_trailer'):'truck_trailer',
-    truckDesc:t?(t.truckDesc||''):'',trailerDesc:t?(t.trailerDesc||''):'',
-    hireDuration:'',hireDurationUnit:'weeks',startDate:'',endDate:'',
-    chargeType:t?(t.chargeType||'weekly'):'weekly',
-    dailyRate:t?(t.dailyRate||0):0,weeklyRate:t?(t.weeklyRate||0):0,
-    monthlyRate:t?(t.monthlyRate||0):0,rucRate:t?(t.rucRate||0):0,
-    mileageRate:t?(t.mileageRate||0):0,maxMileage:t?(t.maxMileage||''):'',
-    extraTerms:t?(t.extraTerms||[]):[],
-    notes:t?(t.notes||''):'All prices are in NZD and exclude GST.\nRUC and mileage charges apply on top of hire rates.\nQuotes exclude GST, fuel, and insurance costs.',
-    templateId:t?(t.id||''):'',
-  });
-  const saveToLS=(u)=>{try{localStorage.setItem('ss_rentals_quotes',JSON.stringify(u));}catch(e){}};
-  const qSave=()=>{
-    if(!qform||!qform.companyName){alert('Enter a company name.');return;}
-    const ex=getAllCustomers().find(c=>c.company.toLowerCase().trim()===qform.companyName.toLowerCase().trim());
-    if(qform.customerMode==='new'&&!ex)createNewCustomer({company:qform.companyName,contact:qform.contactName||'',phone:qform.contactPhone||'',email:qform.contactEmail||'',address:qform.contactAddress||'',status:'prospect'});
-    const u=[{id:'Q-'+Date.now(),savedAt:new Date().toISOString(),form:Object.assign({},qform)},...qlist];
-    setQlist(u);saveToLS(u);alert('Quote saved!');
-  };
-  const qDel=(id)=>{if(!window.confirm('Delete?'))return;const u=qlist.filter(q=>q.id!==id);setQlist(u);saveToLS(u);};
-  const qPDF=()=>{
-    if(!qform)return;
-    var f=qform;
-    var fmtM=function(v){return parseFloat(v)>0?'$'+parseFloat(v).toLocaleString('en-NZ',{minimumFractionDigits:2}):'';};
-    var rows=[];
-    if(parseFloat(f.dailyRate)>0)rows.push('<tr><td>Daily Hire Rate</td><td>'+fmtM(f.dailyRate)+'</td></tr>');
-    if(parseFloat(f.weeklyRate)>0)rows.push('<tr><td>Weekly Hire Rate</td><td>'+fmtM(f.weeklyRate)+'</td></tr>');
-    if(parseFloat(f.monthlyRate)>0)rows.push('<tr><td>Monthly Hire Rate</td><td>'+fmtM(f.monthlyRate)+'</td></tr>');
-    if(parseFloat(f.rucRate)>0)rows.push('<tr><td>RUC Charges</td><td>'+f.rucRate+' cents per km</td></tr>');
-    if(parseFloat(f.mileageRate)>0)rows.push('<tr><td>Mileage Charges</td><td>'+f.mileageRate+' cents per km</td></tr>');
-    if(f.maxMileage)rows.push('<tr><td>Maximum Mileage</td><td>'+f.maxMileage+'</td></tr>');
-    var et=f.extraTerms||[];
-    var extraRows='';
-    for(var i=0;i<et.length;i++){if(et[i].label)extraRows+='<tr><td>'+et[i].label+'</td><td>$'+parseFloat(et[i].monthly||0).toLocaleString('en-NZ',{minimumFractionDigits:2})+' per month</td></tr>';}
-    var notes=String(f.notes||'').split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');
-    var fname='Quote_'+f.quoteNumber+'_'+String(f.companyName||'Draft').split(' ').join('_');
-    var issDate=new Date(f.quoteDate).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'});
-    var isLease=f.chargeType==='monthly'&&!parseFloat(f.weeklyRate);
-    var css='body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm;color:#1a1a2e;line-height:1.6}'
-      +'.hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;border-bottom:3px solid #FF6F00;padding-bottom:14px}'
-      +'.ttl h1{font-size:18pt;font-weight:bold;color:#FF6F00;margin:0;text-align:right}'
-      +'.sub{font-size:11pt;color:#555;text-align:right;margin-top:4px}'
-      +'.g2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}'
-      +'.box{border:1px solid #ddd;border-radius:6px;padding:14px 16px;background:#f9f9f9}'
-      +'.box h3{margin:0 0 8px;font-size:11pt;text-transform:uppercase;color:#6A1B9A;font-weight:700;border-bottom:1px solid #ddd;padding-bottom:6px}'
-      +'.box p{margin:3px 0;font-size:10.5pt}'
-      +'h2{font-size:12pt;font-weight:bold;color:#6A1B9A;text-transform:uppercase;border-bottom:1.5px solid #FF6F00;padding-bottom:4px;margin-top:20px;margin-bottom:10px}'
-      +'table{width:100%;border-collapse:collapse;margin-bottom:14px}'
-      +'td{border:1px solid #ddd;padding:8px 12px;font-size:10.5pt;vertical-align:top}'
-      +'td:first-child{background:#f0f4f8;font-weight:600;width:45%}'
-      +'td:last-child{font-weight:700}'
-      +'.notes{background:#f9f9f9;border:1px solid #ddd;border-radius:6px;padding:14px 16px;font-size:10pt;white-space:pre-wrap;line-height:1.7}'
-      +'.sig{border-top:2px solid #6A1B9A;padding-top:10px;margin-top:32px}'
-      +'@media print{body{margin:1.5cm}@page{size:A4;margin:1.5cm}}';
-    var body='<div class="hdr"><div style="font-size:22pt;font-weight:900;color:#6A1B9A">SS<span style="color:#FF6F00">R</span></div>'
-      +'<div class="ttl"><h1>SS Rentals \u2013 '+(isLease?'Lease':'Rental')+' Quotation</h1>'
-      +'<div class="sub">Quote No: '+f.quoteNumber+' | Date: '+issDate+'</div></div></div>'
-      +'<div class="g2"><div class="box"><h3>Prepared For</h3><p><strong>'+(f.companyName||'')+'</strong></p>'
-      +'<p>Attn: '+(f.contactName||'')+'</p>'+(f.contactPhone?'<p>Phone: '+f.contactPhone+'</p>':'')+(f.contactEmail?'<p>Email: '+f.contactEmail+'</p>':'')+'</div>'
-      +'<div class="box"><h3>Hire Details</h3><p><strong>Type:</strong> '+(f.vehicleType==='truck_only'?'Truck Only':f.vehicleType==='trailer_only'?'Trailer Only':'Truck + Trailer')+'</p>'
-      +(f.hireDuration?'<p><strong>Duration:</strong> '+f.hireDuration+' '+f.hireDurationUnit+'</p>':'')
-      +(f.startDate?'<p><strong>Start:</strong> '+new Date(f.startDate).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'})+'</p>':'')
-      +(f.validDays?'<p><strong>Valid:</strong> '+f.validDays+' days from issue</p>':'')+'</div></div>'
-      +(f.truckDesc||f.trailerDesc?'<h2>Vehicle Details</h2><table>'+(f.truckDesc?'<tr><td>Truck</td><td>'+f.truckDesc+'</td></tr>':'')+(f.trailerDesc?'<tr><td>Trailer</td><td>'+f.trailerDesc+'</td></tr>':'')+'</table>':'')
-      +'<h2>'+(isLease?'Lease Charges':'Hire Charges')+'</h2><table>'+rows.join('')+'</table>'
-      +(extraRows?'<h2>Alternative Lease Terms</h2><table>'+extraRows+'</table>':'')
-      +'<h2>Notes &amp; Conditions</h2><div class="notes">'+notes+'</div>'
-      +'<div class="sig"><p><strong>To accept this quotation, sign below:</strong></p><br>'
-      +'<p>Name: _________________________ &nbsp; Signature: _________________________</p>'
-      +'<p>Date: _________________________ &nbsp; Position: _________________________</p></div>'
-      +'<div style="margin-top:24px;font-size:9.5pt;color:#888;border-top:1px solid #eee;padding-top:10px;text-align:center">SS Rentals | 280a Peak Road, Cambridge, New Zealand | All amounts in NZD, excl. GST</div>';
-    var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+css+'</style></head><body>'+body+'</body></html>';
-    var pr=html.replace('</head>','<scr'+'ipt>window.onload=function(){document.title="'+fname+'";setTimeout(window.print,400)};<'+'/scr'+'ipt></head>');
-    var w=window.open('','_blank');
-    if(!w){alert('Allow pop-ups.');return;}
-    w.document.write(pr);w.document.close();
-  };
+  const upd=function(k,v){setQform(function(p){var n=Object.assign({},p);n[k]=v;return n;});};
+  const mkQ=function(t){return{quoteNumber:'Q-'+Date.now().toString().slice(-6),quoteDate:new Date().toISOString().slice(0,10),validDays:'14',customerMode:'new',useExistingCustomer:'',companyName:'',contactName:'',contactPhone:'',contactEmail:'',contactAddress:'',vehicleType:t?(t.type||'truck_trailer'):'truck_trailer',truckDesc:t?(t.truckDesc||''):'',trailerDesc:t?(t.trailerDesc||''):'',hireDuration:'',hireDurationUnit:'weeks',startDate:'',endDate:'',chargeType:t?(t.chargeType||'weekly'):'weekly',dailyRate:t?(t.dailyRate||0):0,weeklyRate:t?(t.weeklyRate||0):0,monthlyRate:t?(t.monthlyRate||0):0,rucRate:t?(t.rucRate||0):0,mileageRate:t?(t.mileageRate||0):0,maxMileage:t?(t.maxMileage||''):'',extraTerms:t?(t.extraTerms||[]):[],notes:t?(t.notes||''):'All prices are in NZD and exclude GST.',templateId:t?(t.id||''):'',};};
+  const qSave=function(){if(!qform||!qform.companyName){alert('Enter a company name.');return;}var ex=getAllCustomers().find(function(c){return c.company.toLowerCase().trim()===qform.companyName.toLowerCase().trim();});if(qform.customerMode==='new'&&!ex)createNewCustomer({company:qform.companyName,contact:qform.contactName||'',phone:qform.contactPhone||'',email:qform.contactEmail||'',address:qform.contactAddress||'',status:'prospect'});var u=[{id:'Q-'+Date.now(),savedAt:new Date().toISOString(),form:Object.assign({},qform)}].concat(qlist);setQlist(u);try{localStorage.setItem('ss_rentals_quotes',JSON.stringify(u));}catch(e){}alert('Quote saved!');};
+  const qDel=function(id){if(!window.confirm('Delete?'))return;var u=qlist.filter(function(q){return q.id!==id;});setQlist(u);try{localStorage.setItem('ss_rentals_quotes',JSON.stringify(u));}catch(e){}};
+  const qPDF=function(){if(!qform)return;var f=qform;var rows=[];if(parseFloat(f.weeklyRate)>0)rows.push('<tr><td>Weekly Hire Rate</td><td>$'+parseFloat(f.weeklyRate).toLocaleString('en-NZ',{minimumFractionDigits:2})+'</td></tr>');if(parseFloat(f.monthlyRate)>0)rows.push('<tr><td>Monthly Hire Rate</td><td>$'+parseFloat(f.monthlyRate).toLocaleString('en-NZ',{minimumFractionDigits:2})+'</td></tr>');if(parseFloat(f.rucRate)>0)rows.push('<tr><td>RUC Charges</td><td>'+f.rucRate+' c/km</td></tr>');if(f.maxMileage)rows.push('<tr><td>Max Mileage</td><td>'+f.maxMileage+'</td></tr>');var notes=String(f.notes||'').split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');var fname='Quote_'+f.quoteNumber+'_'+String(f.companyName||'Draft').split(' ').join('_');var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm}h1{color:#FF6F00}h2{color:#6A1B9A;border-bottom:1.5px solid #FF6F00;padding-bottom:4px}table{width:100%;border-collapse:collapse;margin-bottom:14px}td{border:1px solid #ddd;padding:8px 12px}td:first-child{background:#f0f4f8;font-weight:600;width:45%}.notes{border:1px solid #ddd;padding:12px;white-space:pre-wrap}.sig{border-top:2px solid #6A1B9A;margin-top:24px;padding-top:10px}</style></head><body><h1>SS Rentals - Rental Quotation</h1><p>Quote: <b>'+f.quoteNumber+'</b> | Date: '+f.quoteDate+'</p><h2>Prepared For</h2><table><tr><td>Company</td><td>'+f.companyName+'</td></tr><tr><td>Contact</td><td>'+f.contactName+'</td></tr>'+(f.contactPhone?'<tr><td>Phone</td><td>'+f.contactPhone+'</td></tr>':'')+'</table><h2>Charges</h2><table>'+rows.join('')+'</table><h2>Notes</h2><div class="notes">'+notes+'</div><div class="sig"><p>Name: _________________________ Signature: _________________________</p><p>Date: _________________________</p></div><div style="margin-top:20px;font-size:9pt;color:#888;text-align:center">SS Rentals | 280a Peak Road, Cambridge, NZ | All amounts NZD excl GST</div></body></html>';var pr=html.replace('</head>','<scr'+'ipt>window.onload=function(){document.title="'+fname+'";setTimeout(window.print,400)};<'+'/scr'+'ipt></head>');var w=window.open('','_blank');if(!w){alert('Allow pop-ups.');return;}w.document.write(pr);w.document.close();};
 
-  if(qstep===0)return(
+  if(qstep===0) return (
     <div>
-      <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>Quotes</div>
-      <div style={{fontSize:12,color:'var(--text2)',marginBottom:20}}>{qlist.length} saved {qlist.length===1?'quote':'quotes'}</div>
+      <div style={{fontSize:20,fontWeight:800,marginBottom:16}}>Quotes</div>
       <div style={{fontWeight:700,fontSize:11,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.7px',marginBottom:12}}>Templates</div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:12,marginBottom:28}}>
         {QUOTE_TEMPLATES.map(tpl=>(
-          <div key={tpl.id} className="card" style={{padding:'16px 18px',cursor:'pointer',border:'1.5px solid var(--border)',transition:'box-shadow .15s'}}
-            onClick={()=>{setQtpl(tpl);setQform(mkQ(tpl));setQstep(1);}}
-            onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 4px 16px rgba(106,27,154,.15)';e.currentTarget.style.borderColor='#6A1B9A';}}
-            onMouseLeave={e=>{e.currentTarget.style.boxShadow='none';e.currentTarget.style.borderColor='var(--border)';}}>
+          <div key={tpl.id} className="card" style={{padding:'16px 18px',cursor:'pointer',border:'1.5px solid var(--border)'}}
+            onClick={()=>{setQtpl(tpl);setQform(mkQ(tpl));setQstep(1);}}>
             <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{tpl.name}</div>
-            <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>{tpl.chargeType==='weekly'?'Weekly':'Monthly'} · {tpl.type==='truck_only'?'Truck Only':tpl.type==='trailer_only'?'Trailer Only':'Truck + Trailer'}</div>
-            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-              {tpl.weeklyRate>0&&<span className="badge badge-blue">{'$'+tpl.weeklyRate.toLocaleString()+'/wk'}</span>}
-              {tpl.monthlyRate>0&&<span className="badge badge-blue">{'$'+tpl.monthlyRate.toLocaleString()+'/mo'}</span>}
-              {tpl.rucRate>0&&<span className="badge badge-gray">{'RUC '+tpl.rucRate+'c/km'}</span>}
-            </div>
+            <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>{tpl.chargeType==='weekly'?'Weekly':'Monthly'}</div>
+            {tpl.weeklyRate>0&&<span className="badge badge-blue">{'$'+tpl.weeklyRate.toLocaleString()+'/wk'}</span>}
+            {tpl.monthlyRate>0&&<span className="badge badge-blue">{'$'+tpl.monthlyRate.toLocaleString()+'/mo'}</span>}
           </div>
         ))}
         <div className="card" style={{padding:'16px 18px',cursor:'pointer',border:'1.5px dashed var(--border2)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:90}}
-          onClick={()=>{setQtpl(null);setQform(mkQ(null));setQstep(1);}}
-          onMouseEnter={e=>{e.currentTarget.style.borderColor='#6A1B9A';}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border2)';}}>
-          <div style={{fontSize:26,color:'var(--text3)'}}>+</div>
-          <div style={{fontWeight:700,fontSize:13,color:'var(--text2)'}}>Blank Quote</div>
+          onClick={()=>{setQtpl(null);setQform(mkQ(null));setQstep(1);}}>
+          <div style={{fontSize:24,color:'var(--text3)'}}>+</div>
+          <div style={{fontWeight:700,color:'var(--text2)'}}>Blank Quote</div>
         </div>
       </div>
       {qlist.length>0&&(
         <div>
-          <div style={{fontWeight:700,fontSize:11,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.7px',marginBottom:12}}>
-            Saved Quotes <span style={{background:'#6A1B9A',color:'#fff',borderRadius:10,padding:'1px 8px',fontSize:10,marginLeft:6}}>{qlist.length}</span>
-          </div>
+          <div style={{fontWeight:700,fontSize:11,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.7px',marginBottom:12}}>Saved Quotes ({qlist.length})</div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:10}}>
             {qlist.map(q=>(
               <div key={q.id} className="card" style={{padding:'14px 16px'}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
                   <div style={{fontWeight:700,fontSize:13,color:'#6A1B9A'}}>{q.form.quoteNumber}</div>
-                  <button onClick={()=>qDel(q.id)} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:20,padding:0,lineHeight:1}}>x</button>
+                  <button onClick={()=>qDel(q.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'var(--text3)',padding:0}}>x</button>
                 </div>
-                <div style={{fontWeight:600,fontSize:13,marginBottom:2}}>{q.form.companyName}</div>
-                <div style={{fontSize:11,color:'var(--text2)',marginBottom:4}}>{q.form.vehicleType==='truck_only'?'Truck Only':q.form.vehicleType==='trailer_only'?'Trailer Only':'Truck + Trailer'}</div>
-                <div style={{fontSize:10,color:'var(--text3)',marginBottom:10}}>{new Date(q.savedAt).toLocaleDateString('en-NZ',{day:'2-digit',month:'short',year:'numeric'})}</div>
+                <div style={{fontWeight:600,marginBottom:6}}>{q.form.companyName}</div>
                 <button className="btn btn-primary btn-sm" style={{width:'100%',justifyContent:'center'}} onClick={()=>{setQform(Object.assign({},mkQ(null),q.form));setQtpl(null);setQstep(1);}}>Open</button>
               </div>
             ))}
@@ -7890,45 +7732,29 @@ const QuotesPage = () => {
     </div>
   );
 
-  if(qstep===1&&qform)return(
+  if(qstep===1&&qform) return (
     <div>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}>
         <button className="btn btn-ghost btn-sm" onClick={()=>setQstep(0)}>Back</button>
-        <span style={{color:'var(--text3)'}}>/</span>
         <span style={{fontWeight:600,color:'#6A1B9A'}}>{qtpl?qtpl.name:'New Quote'}</span>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
         <div style={{display:'flex',flexDirection:'column',gap:14}}>
           <div className="card" style={{padding:'14px 16px'}}>
-            <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Quote Details</div>
-            <div className="form-group"><label>Quote Number</label><input value={qform.quoteNumber} onChange={e=>upd('quoteNumber',e.target.value)}/></div>
-            <div className="form-group"><label>Issue Date</label><input type="date" value={qform.quoteDate} onChange={e=>upd('quoteDate',e.target.value)}/></div>
-            <div className="form-group"><label>Valid For (days)</label><input type="number" value={qform.validDays} onChange={e=>upd('validDays',e.target.value)}/></div>
+            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Quote Details</div>
+            <div className="form-group"><label>Quote No.</label><input value={qform.quoteNumber} onChange={e=>upd('quoteNumber',e.target.value)}/></div>
+            <div className="form-group"><label>Date</label><input type="date" value={qform.quoteDate} onChange={e=>upd('quoteDate',e.target.value)}/></div>
+            <div className="form-group"><label>Valid (days)</label><input type="number" value={qform.validDays} onChange={e=>upd('validDays',e.target.value)}/></div>
           </div>
           <div className="card" style={{padding:'14px 16px'}}>
-            <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Customer</div>
-            <div style={{display:'flex',marginBottom:12,borderRadius:8,overflow:'hidden',border:'1.5px solid #6A1B9A'}}>
-              <button onClick={()=>upd('customerMode','existing')} style={{flex:1,padding:'8px',border:'none',cursor:'pointer',fontWeight:700,background:qform.customerMode==='existing'?'#6A1B9A':'transparent',color:qform.customerMode==='existing'?'#fff':'#6A1B9A'}}>Existing</button>
-              <button onClick={()=>upd('customerMode','new')} style={{flex:1,padding:'8px',border:'none',cursor:'pointer',fontWeight:700,background:qform.customerMode==='new'?'#6A1B9A':'transparent',color:qform.customerMode==='new'?'#fff':'#6A1B9A'}}>New</button>
-            </div>
-            {qform.customerMode==='existing'?(
-              <div className="form-group"><label>Select Customer</label>
-                <select value={qform.useExistingCustomer} onChange={e=>{var cid=e.target.value;var c=getAllCustomers().find(x=>x.id===cid);setQform(prev=>Object.assign({},prev,{useExistingCustomer:cid,companyName:c?c.company:'',contactName:c?(c.contact||''):'',contactPhone:c?(c.phone||''):'',contactEmail:c?(c.email||''):''}));}}>
-                  <option value="">Select...</option>
-                  {getAllCustomers().filter(c=>c.status!=='blacklisted').sort((a,b)=>a.company.localeCompare(b.company)).map(c=><option key={c.id} value={c.id}>{c.company}</option>)}
-                </select>
-              </div>
-            ):(
-              <div>
-                <div className="form-group"><label>Company Name *</label><input placeholder="e.g. GSR Transport Ltd" value={qform.companyName} onChange={e=>upd('companyName',e.target.value)}/></div>
-                <div className="form-group"><label>Contact Person</label><input value={qform.contactName} onChange={e=>upd('contactName',e.target.value)}/></div>
-                <div className="form-group"><label>Phone</label><input value={qform.contactPhone} onChange={e=>upd('contactPhone',e.target.value)}/></div>
-                <div className="form-group"><label>Email</label><input type="email" value={qform.contactEmail} onChange={e=>upd('contactEmail',e.target.value)}/></div>
-              </div>
-            )}
+            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Customer</div>
+            <div className="form-group"><label>Company *</label><input placeholder="e.g. GSR Transport Ltd" value={qform.companyName} onChange={e=>upd('companyName',e.target.value)}/></div>
+            <div className="form-group"><label>Contact</label><input value={qform.contactName} onChange={e=>upd('contactName',e.target.value)}/></div>
+            <div className="form-group"><label>Phone</label><input value={qform.contactPhone} onChange={e=>upd('contactPhone',e.target.value)}/></div>
+            <div className="form-group"><label>Email</label><input type="email" value={qform.contactEmail} onChange={e=>upd('contactEmail',e.target.value)}/></div>
           </div>
           <div className="card" style={{padding:'14px 16px'}}>
-            <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Hire Details</div>
+            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Hire Details</div>
             <div className="form-group"><label>Vehicle Type</label>
               <select value={qform.vehicleType} onChange={e=>upd('vehicleType',e.target.value)}>
                 <option value="truck_trailer">Truck + Trailer</option>
@@ -7936,69 +7762,38 @@ const QuotesPage = () => {
                 <option value="trailer_only">Trailer Only</option>
               </select>
             </div>
-            <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:8,marginBottom:12}}>
-              <div className="form-group" style={{marginBottom:0}}><label>Duration</label><input type="number" min="1" value={qform.hireDuration} onChange={e=>upd('hireDuration',e.target.value)}/></div>
-              <div className="form-group" style={{marginBottom:0}}><label>Unit</label>
-                <select value={qform.hireDurationUnit} onChange={e=>upd('hireDurationUnit',e.target.value)}>
+            <div className="form-group"><label>Duration</label>
+              <div style={{display:'flex',gap:8}}>
+                <input type="number" min="1" value={qform.hireDuration} onChange={e=>upd('hireDuration',e.target.value)} style={{flex:2}}/>
+                <select value={qform.hireDurationUnit} onChange={e=>upd('hireDurationUnit',e.target.value)} style={{flex:1}}>
                   <option value="days">Days</option><option value="weeks">Weeks</option><option value="months">Months</option>
                 </select>
               </div>
-            </div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-              <div className="form-group" style={{marginBottom:0}}><label>Start Date</label><input type="date" value={qform.startDate} onChange={e=>upd('startDate',e.target.value)}/></div>
-              <div className="form-group" style={{marginBottom:0}}><label>End Date</label><input type="date" value={qform.endDate} onChange={e=>upd('endDate',e.target.value)}/></div>
             </div>
           </div>
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:14}}>
           <div className="card" style={{padding:'14px 16px'}}>
-            <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Vehicle Description</div>
-            {(qform.vehicleType==='truck_only'||qform.vehicleType==='truck_trailer')&&(
-              <div className="form-group">
-                <label>Truck</label>
-                <select value={qform.truckDesc} onChange={e=>upd('truckDesc',e.target.value)}>
-                  <option value="">Select...</option>
-                  {TRUCKS.map(t=><option key={t.id} value={t.year+' '+t.make+' '+t.model}>{t.rego} - {t.year} {t.make} {t.model}</option>)}
-                </select>
-                <input style={{marginTop:6}} placeholder="Or type custom..." value={qform.truckDesc} onChange={e=>upd('truckDesc',e.target.value)}/>
-              </div>
-            )}
-            {(qform.vehicleType==='trailer_only'||qform.vehicleType==='truck_trailer')&&(
-              <div className="form-group" style={{marginBottom:0}}>
-                <label>Trailer</label>
-                <select value={qform.trailerDesc} onChange={e=>upd('trailerDesc',e.target.value)}>
-                  <option value="">Select...</option>
-                  {TRAILERS.map(t=><option key={t.id} value={(t.year||'')+' '+t.make+' '+t.model}>{t.rego} - {t.make} {t.model}</option>)}
-                </select>
-                <input style={{marginTop:6}} placeholder="Or type custom..." value={qform.trailerDesc} onChange={e=>upd('trailerDesc',e.target.value)}/>
-              </div>
-            )}
-          </div>
-          <div className="card" style={{padding:'14px 16px'}}>
-            <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Charges</div>
+            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Charges</div>
             <div className="form-group"><label>Charge Type</label>
               <select value={qform.chargeType} onChange={e=>upd('chargeType',e.target.value)}>
                 <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
               </select>
             </div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-              <div className="form-group" style={{marginBottom:0,opacity:qform.chargeType==='daily'?1:.4}}><label>Daily ($)</label><input type="text" value={qform.dailyRate||''} onChange={e=>upd('dailyRate',e.target.value)}/></div>
-              <div className="form-group" style={{marginBottom:0,opacity:qform.chargeType==='weekly'?1:.4}}><label>Weekly ($)</label><input type="text" value={qform.weeklyRate||''} onChange={e=>upd('weeklyRate',e.target.value)}/></div>
-              <div className="form-group" style={{marginBottom:0,opacity:qform.chargeType==='monthly'?1:.4}}><label>Monthly ($)</label><input type="text" value={qform.monthlyRate||''} onChange={e=>upd('monthlyRate',e.target.value)}/></div>
-              <div className="form-group" style={{marginBottom:0}}><label>RUC (c/km)</label><input type="text" value={qform.rucRate||''} onChange={e=>upd('rucRate',e.target.value)}/></div>
-              <div className="form-group" style={{marginBottom:0}}><label>Mileage (c/km)</label><input type="text" value={qform.mileageRate||''} onChange={e=>upd('mileageRate',e.target.value)}/></div>
-              <div className="form-group" style={{marginBottom:0,gridColumn:'span 2'}}><label>Max Mileage</label><input placeholder="e.g. 130,000 km p.a." value={qform.maxMileage} onChange={e=>upd('maxMileage',e.target.value)}/></div>
-            </div>
+            <div className="form-group"><label>Weekly Rate ($)</label><input type="text" value={qform.weeklyRate||''} onChange={e=>upd('weeklyRate',e.target.value)}/></div>
+            <div className="form-group"><label>Monthly Rate ($)</label><input type="text" value={qform.monthlyRate||''} onChange={e=>upd('monthlyRate',e.target.value)}/></div>
+            <div className="form-group"><label>RUC (c/km)</label><input type="text" value={qform.rucRate||''} onChange={e=>upd('rucRate',e.target.value)}/></div>
+            <div className="form-group"><label>Max Mileage</label><input placeholder="e.g. 130,000 km p.a." value={qform.maxMileage} onChange={e=>upd('maxMileage',e.target.value)}/></div>
           </div>
           <div className="card" style={{padding:'14px 16px'}}>
             <div style={{fontWeight:700,fontSize:11,marginBottom:8,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Notes</div>
-            <textarea rows={6} value={qform.notes} onChange={e=>upd('notes',e.target.value)} style={{width:'100%',resize:'vertical',fontSize:12,fontFamily:'inherit'}}/>
+            <textarea rows={5} value={qform.notes} onChange={e=>upd('notes',e.target.value)} style={{width:'100%',resize:'vertical',fontSize:12,fontFamily:'inherit'}}/>
           </div>
           <div className="card" style={{padding:'16px',background:'rgba(106,27,154,.04)',border:'1.5px solid rgba(106,27,154,.15)'}}>
-            <div style={{fontWeight:700,fontSize:13,color:'#6A1B9A',marginBottom:12}}>{qform.quoteNumber} · {qform.companyName||'No customer'}</div>
+            <div style={{fontWeight:700,color:'#6A1B9A',marginBottom:10}}>{qform.quoteNumber} - {qform.companyName||'No customer'}</div>
             <div style={{display:'flex',gap:10}}>
-              <button className="btn btn-primary" style={{flex:1,justifyContent:'center'}} onClick={qPDF}><Icon name="download" size={14}/> Download PDF</button>
-              <button className="btn btn-ghost" style={{flex:1,justifyContent:'center',borderColor:'#27AE60',color:'#27AE60'}} onClick={qSave}>Save Quote</button>
+              <button className="btn btn-primary" style={{flex:1,justifyContent:'center'}} onClick={qPDF}><Icon name="download" size={14}/> PDF</button>
+              <button className="btn btn-ghost" style={{flex:1,justifyContent:'center',borderColor:'#27AE60',color:'#27AE60'}} onClick={qSave}>Save</button>
               <button className="btn btn-ghost" onClick={()=>setQform(mkQ(qtpl))}>Reset</button>
             </div>
           </div>
@@ -8406,7 +8201,6 @@ const App = () => {
   const [showNewHireWizard, setShowNewHireWizard] = useState(false);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
   const [sheetsConfig, setSheetsConfig] = useState(()=>loadSheetsConfig());
-  const [livePnl, setLivePnl] = useState(()=>loadCachedFinancials()||PNL_DETAIL);
 
   // Clear badge for the current page on load
   useEffect(()=>{
@@ -8511,10 +8305,7 @@ const App = () => {
     await runFullSync(
       config,
       (msg,pct)=>setSyncState(s=>({...s,syncMsg:msg,syncPct:pct})),
-      (ts)=>{setSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',syncPct:0}));syncInProgress.current=false;setDataRefreshKey(k=>k+1+Math.random());
-        // Refresh financial data after sync
-        loadPnlFromFinancialSheet(config.accessToken).then(data=>{if(data&&data.length>0)setLivePnl(data);});
-      },
+      (ts)=>{setSyncState(s=>({...s,syncing:false,lastSync:ts,syncMsg:'',syncPct:0}));syncInProgress.current=false;setDataRefreshKey(k=>k+1+Math.random());},
       (err)=>{setSyncState(s=>({...s,syncing:false,error:err,syncMsg:'',syncPct:0}));syncInProgress.current=false;}
     );
   },[sheetsConfig]);
@@ -8546,25 +8337,20 @@ const App = () => {
       if (isTokenValid(cfg)) doSync(cfg);
       // If token expired: do nothing, just wait for user to manually reconnect
     }, 5*60*1000);
-    // Load financial data on startup
-    const cfg0 = loadSheetsConfig();
-    if (cfg0?.accessToken) {
-      loadPnlFromFinancialSheet(cfg0.accessToken).then(data=>{if(data&&data.length>0)setLivePnl(data);});
-    }
     return ()=>clearInterval(autoSyncTimer.current);
   },[sheetsConfig?.clientId]);
 
   const handleSaveConfig = (cfg) => { saveSheetsConfig(cfg); setSheetsConfig(cfg); };
 
   const pages={
-    dashboard:<Dashboard theme={theme} setPage={setPage} livePnl={livePnl}/>,
+    dashboard:<Dashboard theme={theme} setPage={setPage}/>,
     fleet:<FleetPage theme={theme} sheetsConfig={sheetsConfig} doSync={doSync}/>,
     customers:<CustomersPage refreshKey={dataRefreshKey} sheetsConfig={sheetsConfig}/>,
     hires:<HiresPage refreshKey={dataRefreshKey}/>,
     invoicing:<InvoicingPage xeroConfig={xeroConfig}/>,
     quotes:<QuotesPage/>,
     maintenance:<MaintenancePage/>,
-    reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig} livePnl={livePnl} onRefreshPnl={()=>{if(sheetsConfig?.accessToken)loadPnlFromFinancialSheet(sheetsConfig.accessToken).then(d=>{if(d&&d.length>0)setLivePnl(d);})}}/>,
+    reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig}/>,
     communications:<CommunicationsPage/>,
     documents:<DocumentsPage/>,
     navman:<NavmanPage/>,
