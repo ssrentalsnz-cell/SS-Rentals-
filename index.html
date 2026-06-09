@@ -468,20 +468,69 @@ const parseFinTab = function(tabName, rows) {
   if (!mo) return null;
   var yr = parseInt(m[2]) >= 50 ? '19'+m[2] : '20'+m[2];
   var month = yr+'-'+mo;
-  
+
+  var parseDollar = function(s) {
+    if (!s && s !== 0) return 0;
+    var n = parseFloat((s+'').replace(/[$,\s]/g,''));
+    return isNaN(n) ? 0 : n;
+  };
+
   var revenue = 0, repairs = 0, other = 0, net = 0;
+
+  // Strategy: scan every row, check every cell for summary labels,
+  // then read the next non-empty cell in that row as the value.
+  // Also sum col C for hire income as a fallback.
+  var hireSectionActive = false;
+  var hireSum = 0;
+
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i] || [];
-    var label = ((row[5]||'')+'').toLowerCase().trim();
-    var val = parseFloat(((row[6]||'')+'').replace(/[$,\s]/g,'')) || 0;
-    if (label.indexOf('total hire') >= 0) { revenue = val; }
-    else if (label.indexOf('repair') >= 0 || label.indexOf('maintenance') >= 0) { repairs = val; }
-    else if (label.indexOf('other expense') >= 0) { other = val; }
-    else if (label.indexOf('net position') >= 0 || label.indexOf('net profit') >= 0) { net = val; }
+
+    // Check col A for section headers
+    var colA = ((row[0]||'')+'').toUpperCase().trim();
+    if (colA.indexOf('MONTHLY HIRE INCOME') >= 0) { hireSectionActive = true; continue; }
+    if (colA.indexOf('REPAIR') >= 0 && colA.indexOf('MAINTENANCE') >= 0) { hireSectionActive = false; }
+
+    // Sum hire income from col C when in hire section
+    if (hireSectionActive && row[2]) {
+      var v = parseDollar(row[2]);
+      if (v > 0) hireSum += v;
+    }
+
+    // Scan all columns for summary labels (could be col E, F, or G depending on sheet)
+    for (var j = 0; j < row.length - 1; j++) {
+      var cell = ((row[j]||'')+'').toLowerCase().trim();
+      if (!cell) continue;
+
+      // Find value: look right for the first non-empty numeric cell
+      var val = 0;
+      for (var k = j + 1; k < row.length; k++) {
+        var candidate = parseDollar(row[k]);
+        if (candidate > 0) { val = candidate; break; }
+      }
+      if (val === 0) continue;
+
+      if (cell.indexOf('total hire income') >= 0 || cell === 'total hire') { revenue = val; }
+      else if ((cell.indexOf('repair') >= 0 || cell.indexOf('maintenance') >= 0) && cell.indexOf('vehicle') < 0) { repairs = val; }
+      else if (cell.indexOf('other expense') >= 0) { other = val; }
+      else if (cell.indexOf('net position') >= 0 || cell.indexOf('net profit') >= 0 || cell.indexOf('net income') >= 0) { net = val; }
+    }
   }
+
+  // Use hire sum as fallback if summary revenue not found
+  if (revenue === 0 && hireSum > 0) revenue = hireSum;
+
   var expenses = repairs + other;
   if (net === 0 && revenue > 0) net = revenue - expenses;
-  return { month:month, revenue:Math.round(revenue), repairs:Math.round(repairs), other:Math.round(other), expenses:Math.round(expenses), net:Math.round(net), insurance:0, navman_ruc:0, ruc:0, flexi:0, heartland:0, advertising:0, gst:0 };
+  return {
+    month: month,
+    revenue: Math.round(revenue),
+    repairs: Math.round(repairs),
+    other: Math.round(other),
+    expenses: Math.round(expenses),
+    net: Math.round(net),
+    insurance: 0, navman_ruc: 0, ruc: 0, flexi: 0, heartland: 0, advertising: 0, gst: 0
+  };
 };
 
 const loadPnlFromSheet = async function(accessToken) {
@@ -1349,7 +1398,7 @@ const WeeklyChart = ({theme}) => {
 };
 
 /* ─── DASHBOARD PAGE ──────────────────────────────── */
-const Dashboard = ({theme,setPage}) => {
+const Dashboard = ({theme,setPage,livePnl:dashLivePnl}) => {
   const allV = [...TRUCKS,...TRAILERS];
   const onHire = TRUCKS.filter(t=>t.status==='on_hire').length;
   const avail = TRUCKS.filter(t=>t.status==='available').length;
@@ -1368,7 +1417,7 @@ const Dashboard = ({theme,setPage}) => {
   const [kpiModal, setKpiModal] = React.useState(null);
   const activeHires = getEffectiveHires().filter(h=>h.status==='active');
   const pendingInvoices = getInvoices().filter(i=>i.status!=='paid');
-  const latestPnl = (loadCachedPnl()||PNL_DETAIL).slice(-1)[0];
+  const latestPnl = (dashLivePnl||loadCachedPnl()||PNL_DETAIL).slice(-1)[0];
 
   const KpiModal = ({id, onClose}) => {
     if (!id) return null;
@@ -1587,7 +1636,7 @@ const Dashboard = ({theme,setPage}) => {
       </div>
 
       {/* Monthly P&L Tabs */}
-      <DashboardPnl />
+      <DashboardPnl livePnl={dashLivePnl}/>
 
       {/* AI Operational Summary */}
       <div className="card" style={{borderLeft:'3px solid var(--red)',background:'linear-gradient(135deg,var(--card) 0%,var(--bg3) 100%)'}}>
@@ -1606,8 +1655,8 @@ const Dashboard = ({theme,setPage}) => {
 
 /* ─── FLEET PAGE ──────────────────────────────────── */
 /* ─── DASHBOARD P&L PANEL ─────────────────────────── */
-const DashboardPnl = () => {
-  const pnlSource = loadCachedPnl() || PNL_DETAIL;
+const DashboardPnl = ({livePnl:propPnl}) => {
+  const pnlSource = propPnl || loadCachedPnl() || PNL_DETAIL;
   const months = pnlSource.slice(-12);
   const [selMonth, setSelMonth] = React.useState(months[months.length-1].month);
   const d = months.find(m=>m.month===selMonth) || months[months.length-1];
@@ -4509,9 +4558,9 @@ const CsvImportModal = ({open, onClose, parsed, onApprove}) => {
 };
 
 /* ─── REPORTS PAGE ────────────────────────────────── */
-const ReportsPage = ({theme, xeroConfig, sheetsConfig}) => {
+const ReportsPage = ({theme, xeroConfig, sheetsConfig, livePnl:propLivePnl}) => {
   const [tab,setTab]=useState('pl');
-  const [livePnl,setLivePnl]=useState(()=>loadCachedPnl());
+  const [livePnl,setLivePnl]=useState(()=>propLivePnl||loadCachedPnl());
   const [finLoading,setFinLoading]=useState(false);
   const handleFinRefresh=async()=>{
     if(!sheetsConfig?.accessToken){alert('Connect Google Sheets first in Settings.');return;}
@@ -8202,6 +8251,7 @@ const App = () => {
   const [showNewHireWizard, setShowNewHireWizard] = useState(false);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
   const [sheetsConfig, setSheetsConfig] = useState(()=>loadSheetsConfig());
+  const [livePnl, setLivePnl] = useState(loadCachedPnl);
 
   // Clear badge for the current page on load
   useEffect(()=>{
@@ -8333,13 +8383,15 @@ const App = () => {
     const isTokenValid = (cfg) => cfg?.accessToken && cfg?.tokenExpiry && Date.now() < cfg.tokenExpiry - 60000;
     if (isTokenValid(sheetsConfig)) {
       doSync(sheetsConfig);
-      loadPnlFromSheet(sheetsConfig.accessToken).then(function(data){if(data&&data.length>0){try{localStorage.setItem(FIN_CACHE_KEY,JSON.stringify(data));}catch(e){}}});
+      loadPnlFromSheet(sheetsConfig.accessToken).then(function(data){if(data&&data.length>0){setLivePnl(data);}});
     }
     // Every 5 min: sync ONLY if token still valid — no refresh, no popup ever
     autoSyncTimer.current = setInterval(()=>{
       const cfg = loadSheetsConfig();
-      if (isTokenValid(cfg)) doSync(cfg);
-      // If token expired: do nothing, just wait for user to manually reconnect
+      if (isTokenValid(cfg)) {
+        doSync(cfg);
+        loadPnlFromSheet(cfg.accessToken).then(function(data){if(data&&data.length>0){setLivePnl(data);}});
+      }
     }, 5*60*1000);
     return ()=>clearInterval(autoSyncTimer.current);
   },[sheetsConfig?.clientId]);
@@ -8347,14 +8399,14 @@ const App = () => {
   const handleSaveConfig = (cfg) => { saveSheetsConfig(cfg); setSheetsConfig(cfg); };
 
   const pages={
-    dashboard:<Dashboard theme={theme} setPage={setPage}/>,
+    dashboard:<Dashboard theme={theme} setPage={setPage} livePnl={livePnl}/>,
     fleet:<FleetPage theme={theme} sheetsConfig={sheetsConfig} doSync={doSync}/>,
     customers:<CustomersPage refreshKey={dataRefreshKey} sheetsConfig={sheetsConfig}/>,
     hires:<HiresPage refreshKey={dataRefreshKey}/>,
     invoicing:<InvoicingPage xeroConfig={xeroConfig}/>,
     quotes:<QuotesPage/>,
     maintenance:<MaintenancePage/>,
-    reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig}/>,
+    reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig} livePnl={livePnl}/>,
     communications:<CommunicationsPage/>,
     documents:<DocumentsPage/>,
     navman:<NavmanPage/>,
