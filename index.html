@@ -2491,6 +2491,23 @@ const QUOTE_TEMPLATES = [
     notes:'All prices are in NZD and exclude GST.\nRUC charges will be paid by hirer via DDB.\nMileage charges are included in the monthly lease payment.\nContract maximum mileage is 130,000 km per annum.\nQuotes exclude GST, fuel, and insurance costs.\nThis is a fully maintained truck and trailer lease quote.' },
 ];
 
+class ErrBound extends React.Component {
+  constructor(p){super(p);this.state={err:null,info:null};}
+  static getDerivedStateFromError(e){return{err:e};}
+  componentDidCatch(e,i){this.setState({err:e,info:i});}
+  render(){
+    if(this.state.err)return(
+      <div style={{padding:24,margin:16,background:'#fff3f3',border:'3px solid #d32f2f',borderRadius:8,fontFamily:'monospace'}}>
+        <div style={{fontWeight:800,fontSize:16,color:'#d32f2f',marginBottom:8}}>ERROR — Please screenshot this entire message</div>
+        <div style={{fontSize:13,marginBottom:8,color:'#333'}}>{String(this.state.err)}</div>
+        <pre style={{fontSize:11,whiteSpace:'pre-wrap',color:'#555',maxHeight:400,overflow:'auto'}}>{this.state.err&&this.state.err.stack}</pre>
+        {this.state.info&&<pre style={{fontSize:11,whiteSpace:'pre-wrap',color:'#777',marginTop:8}}>{this.state.info.componentStack}</pre>}
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 const HiresPage = ({refreshKey=0}) => {
   const [pageTab, setPageTab] = useState('hires');
   const [showNew,setShowNew]=useState(false);
@@ -8143,7 +8160,7 @@ const App = () => {
     dashboard:<Dashboard theme={theme} setPage={setPage}/>,
     fleet:<FleetPage theme={theme} sheetsConfig={sheetsConfig} doSync={doSync}/>,
     customers:<CustomersPage refreshKey={dataRefreshKey} sheetsConfig={sheetsConfig}/>,
-    hires:<HiresPage refreshKey={dataRefreshKey}/>,
+    hires:<ErrBound><HiresPage refreshKey={dataRefreshKey}/></ErrBound>,
     invoicing:<InvoicingPage xeroConfig={xeroConfig}/>,
     maintenance:<MaintenancePage/>,
     reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig}/>,
