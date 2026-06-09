@@ -6843,11 +6843,10 @@ p{margin:5px 0}
 
 <h2>3. Lease Term and Rental Charges</h2>
 <p><strong>3.1</strong> The Lease Term is set out in the Schedule. The Hirer agrees to pay the Rental Charges as specified in the Schedule.</p>
-<p><strong>Weekly Lease Rate:</strong> NZD $${d.weeklyRate} per week + GST${d.monthlyRate && d.monthlyRate !== "0.00" ? " &nbsp;|&nbsp; <strong>Monthly Lease Rate:</strong> NZD $"+d.monthlyRate+" per month + GST" : ""}</p>
-<p><strong>3.2</strong> Payments shall be deducted automatically from the Hirer's nominated account via direct debit following the issue of each invoice.</p>
+<p><strong>Monthly Lease Rate:</strong> NZD $${d.monthlyRate} per month + GST</p>
+<p><strong>3.2</strong> Payments shall be made monthly in advance via direct debit from the Hirer's nominated account following the issue of each invoice.</p>
 <p><strong>3.3</strong> A Direct Debit Dishonour Fee of 5% of the total invoice amount will be charged if any scheduled payment is declined or dishonoured.</p>
-<p><strong>3.4</strong> An additional charge of $0.50 + GST per kilometre applies for weekly usage exceeding 2,708 km.</p>
-<p><strong>3.5</strong> All Rental Charges are exclusive of GST unless otherwise stated. GST will be added at the prevailing rate.</p>
+<p><strong>3.4</strong> All Rental Charges are exclusive of GST unless otherwise stated. GST will be added at the prevailing rate.</p>
 
 <h2>4. Obligation to Pay Remaining Lease Term</h2>
 <p class="highlight"><strong>4.1 Critical Obligation:</strong> If the Hirer terminates this Agreement before the agreed Lease Term end date, for any reason whatsoever, the Hirer remains <strong>fully liable</strong> to pay the <strong>total remaining balance of the Rental Charges</strong> for the entire unexpired portion of the Lease Term.</p>
@@ -6873,10 +6872,11 @@ p{margin:5px 0}
 <p><strong>6.6</strong> In the event of an accident, the Hirer must immediately notify SS Rentals and comply with all reporting and insurance procedures.</p>
 
 <h2>7. Insurance and Liability</h2>
-<p><strong>7.1</strong> The Vehicle(s) will be covered under SS Rentals' insurance policy during the Lease Term, subject to its terms, conditions, and exclusions.</p>
-<p><strong>7.2</strong> The Hirer is solely responsible for the payment of any applicable insurance excess or deductible.</p>
-<p><strong>7.3</strong> The Hirer shall indemnify and hold harmless SS Rentals from all claims, liabilities, losses, or expenses arising from the Hirer's operation or use of the Vehicle(s).</p>
-<p><strong>7.4</strong> In the case of any accident involving third parties, the Hirer shall promptly provide all required information to SS Rentals.</p>
+<p><strong>7.1</strong> The Vehicle(s) are covered under SS Rentals' comprehensive insurance policy for the duration of this Agreement. The Hirer acknowledges that this insurance is subject to its terms, conditions, and exclusions, copies of which are available on request.</p>
+<p><strong>7.2</strong> The Hirer is solely responsible for payment of the insurance excess applicable to any claim. The current excess is $5,000 (or as otherwise notified by SS Rentals).</p>
+<p><strong>7.3</strong> The Hirer must not use the Vehicle(s) in any manner that would void or prejudice the insurance policy, including but not limited to: overloading, use outside permitted areas, use by unlicensed drivers, or use under the influence of alcohol or drugs.</p>
+<p><strong>7.4</strong> The Hirer shall indemnify and hold harmless SS Rentals from all claims, liabilities, losses, damages, and expenses (including legal costs) arising from the Hirer's operation or use of the Vehicle(s) during this Agreement.</p>
+<p><strong>7.5</strong> In the event of any accident, theft, or damage, the Hirer must: (a) immediately notify SS Rentals; (b) not admit liability to any third party; (c) obtain names and contact details of all parties involved; (d) report to Police where required; and (e) complete SS Rentals' incident report form within 24 hours.</p>
 
 <h2>8. Fines, Penalties, and Violations</h2>
 <p>The Hirer is solely responsible for all fines, penalties, and charges incurred during the Lease Term, including speeding infringements, overweight violations, parking fines, toll violations, and any other traffic or regulatory infractions arising from the Hirer's use of the Vehicle(s).</p>
@@ -7217,8 +7217,8 @@ const DocumentsPage = () => {
                   <label className="form-label">Return / End Date</label>
                   <input className="form-control" type="date" value={form.endDate} onChange={e=>set('endDate',e.target.value)}/>
                 </div>
-                {inputRow('weeklyRate','Weekly Rate (NZD, excl. GST)','number')}
-                {inputRow('monthlyRate','Monthly Lease Rate (NZD, excl. GST)','number')}
+                {agreementKind!=='lease'&&inputRow('weeklyRate','Weekly Rate (NZD, excl. GST)','number')}
+                {inputRow('monthlyRate',agreementKind==='lease'?'Monthly Lease Rate (NZD, excl. GST)':'Monthly Rate (NZD, excl. GST)','number')}
                 {inputRow('bond','Bond Amount (NZD)','number')}
                 {inputRow('mileageRate','Mileage Rate ($/km)','number')}
                 {inputRow('rucRate','RUC Rate ($/km)','number')}
