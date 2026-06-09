@@ -2755,7 +2755,6 @@ const HiresPage = ({refreshKey=0}) => {
     // Get logo from the schedule generator
     const logoSrc = document.querySelector('img[alt="SS Rentals"]')?.src || '';
 
-    const safeNotes = f.notes.split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
 body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm;color:#1a1a2e;line-height:1.6}
 .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;border-bottom:3px solid #1a1a2e;padding-bottom:14px}
@@ -2815,7 +2814,7 @@ ${chargeRows.map(([l,v])=>'<tr><td>'+l+'</td><td>'+v+'</td></tr>').join('')}
 </table>
 ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l,v])=>'<tr><td>'+l+'</td><td>'+v+'</td></tr>').join('')+'</table>':''}
 <h2>Notes & Conditions</h2>
-<div class="notes">${safeNotes}</div>
+<div class="notes">${f.notes.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
 <div class="sig-block">
   <div class="sig">
     <p><strong>To accept this quotation, sign below:</strong></p><br>
@@ -2954,8 +2953,8 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
                     {tpl.truckDesc&&<div style={{fontSize:11,color:'var(--text2)',marginBottom:2}}>🚛 {tpl.truckDesc}</div>}
                     {tpl.trailerDesc&&<div style={{fontSize:11,color:'var(--text2)',marginBottom:2}}>🔗 {tpl.trailerDesc}</div>}
                     <div style={{display:'flex',gap:8,marginTop:10,flexWrap:'wrap'}}>
-                      {tpl.weeklyRate>0&&<span className="badge badge-blue">${tpl.weeklyRate.toLocaleString()}/wk</span>}
-                      {tpl.monthlyRate>0&&<span className="badge badge-blue">${tpl.monthlyRate.toLocaleString()}/mo</span>}
+                      {tpl.weeklyRate>0&&<span className="badge badge-blue">{'$'+tpl.weeklyRate.toLocaleString()+'/wk'}</span>}
+                      {tpl.monthlyRate>0&&<span className="badge badge-blue">{'$'+tpl.monthlyRate.toLocaleString()+'/mo'}</span>}
                       {tpl.rucRate>0&&<span className="badge badge-gray">RUC {tpl.rucRate}¢/km</span>}
                     </div>
                     <div style={{marginTop:12,textAlign:'right'}}>
