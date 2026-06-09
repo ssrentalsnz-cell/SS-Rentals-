@@ -561,10 +561,10 @@ const loadPnlFromFinancialSheet = async (accessToken) => {
     if (tabs.length === 0) return null;
 
     const results = [];
-    for (const tab of tabs) {
-      const rows = await readSheetTab(accessToken, FIN_SHEET_ID, tab);
+    for (var ti = 0; ti < tabs.length; ti++) {
+      var rows = await readSheetTab(accessToken, FIN_SHEET_ID, tabs[ti]);
       if (!rows || rows.length < 3) continue;
-      const row = parseFinTab(rows, tab);
+      var row = parseFinTab(rows, tabs[ti]);
       if (row) results.push(row);
     }
 
