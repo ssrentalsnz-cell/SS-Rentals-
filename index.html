@@ -2464,7 +2464,7 @@ const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
 
 /* ─── HIRES PAGE ──────────────────────────────────── */
 const QUOTES_KEY = 'ss_rentals_quotes';
-const loadQuotes = () => { try { return JSON.parse(localStorage.getItem(QUOTES_KEY)||'[]'); } catch { return []; } };
+const loadQuotes = () => { try { const q=JSON.parse(localStorage.getItem(QUOTES_KEY)||'[]'); return q.filter(r=>r&&r.form&&r.form.companyName!==undefined); } catch { return []; } };
 const saveQuotesToStorage = q => localStorage.setItem(QUOTES_KEY, JSON.stringify(q));
 
 const QUOTE_TEMPLATES = [
@@ -2490,23 +2490,6 @@ const QUOTE_TEMPLATES = [
     extraTerms:[{label:'5-Year Rate',monthly:11189.33},{label:'3-Year Rate',monthly:12191.33},{label:'1-Year Rate',monthly:13289.33}],
     notes:'All prices are in NZD and exclude GST.\nRUC charges will be paid by hirer via DDB.\nMileage charges are included in the monthly lease payment.\nContract maximum mileage is 130,000 km per annum.\nQuotes exclude GST, fuel, and insurance costs.\nThis is a fully maintained truck and trailer lease quote.' },
 ];
-
-class ErrBound extends React.Component {
-  constructor(p){super(p);this.state={err:null,info:null};}
-  static getDerivedStateFromError(e){return{err:e};}
-  componentDidCatch(e,i){this.setState({err:e,info:i});}
-  render(){
-    if(this.state.err)return(
-      <div style={{padding:24,margin:16,background:'#fff3f3',border:'3px solid #d32f2f',borderRadius:8,fontFamily:'monospace'}}>
-        <div style={{fontWeight:800,fontSize:16,color:'#d32f2f',marginBottom:8}}>ERROR — Please screenshot this entire message</div>
-        <div style={{fontSize:13,marginBottom:8,color:'#333'}}>{String(this.state.err)}</div>
-        <pre style={{fontSize:11,whiteSpace:'pre-wrap',color:'#555',maxHeight:400,overflow:'auto'}}>{this.state.err&&this.state.err.stack}</pre>
-        {this.state.info&&<pre style={{fontSize:11,whiteSpace:'pre-wrap',color:'#777',marginTop:8}}>{this.state.info.componentStack}</pre>}
-      </div>
-    );
-    return this.props.children;
-  }
-}
 
 const HiresPage = ({refreshKey=0}) => {
   const [pageTab, setPageTab] = useState('hires');
@@ -2986,7 +2969,7 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
                 <div>
                   <div style={{fontWeight:700,fontSize:14,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',fontSize:11,letterSpacing:'.5px'}}>Saved Quotes ({savedQuotes.length})</div>
                   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
-                    {savedQuotes.map(q=>(
+                    {savedQuotes.filter(q=>q&&q.form&&q.form.companyName!==undefined).map(q=>(
                       <div key={q.id} className="card" style={{padding:'14px 16px'}}>
                         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
                           <div>
@@ -8160,7 +8143,7 @@ const App = () => {
     dashboard:<Dashboard theme={theme} setPage={setPage}/>,
     fleet:<FleetPage theme={theme} sheetsConfig={sheetsConfig} doSync={doSync}/>,
     customers:<CustomersPage refreshKey={dataRefreshKey} sheetsConfig={sheetsConfig}/>,
-    hires:<ErrBound><HiresPage refreshKey={dataRefreshKey}/></ErrBound>,
+    hires:<HiresPage refreshKey={dataRefreshKey}/>,
     invoicing:<InvoicingPage xeroConfig={xeroConfig}/>,
     maintenance:<MaintenancePage/>,
     reports:<ReportsPage theme={theme} xeroConfig={xeroConfig} sheetsConfig={sheetsConfig}/>,
