@@ -3843,7 +3843,7 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
               </div>
 
               <div style={{padding:'8px 12px',background:'var(--bg3)',borderRadius:6,fontSize:11,color:'var(--text3)',marginBottom:12}}>
-                📊 {inv.navmanSource} · {km.toLocaleString()} km · Mileage ${mr}/km · RUC ${rr}/km{inv.maxMileage?' · Max: '+inv.maxMileage:''}
+                📊 {inv.navmanSource} · {km.toLocaleString()} km · {'Mileage $'+mr+'/km · RUC $'+rr+'/km'}{inv.maxMileage?' · Max: '+inv.maxMileage:''}
               </div>
 
               {pushResult&&<div style={{padding:'10px 14px',background:pushResult.ok?'rgba(39,174,96,0.1)':'rgba(211,47,47,0.1)',border:`1px solid ${pushResult.ok?'rgba(39,174,96,0.3)':'rgba(211,47,47,0.3)'}`,borderRadius:8,fontSize:13,fontWeight:600,color:pushResult.ok?'#27AE60':'#d32f2f',marginBottom:12}}>{pushResult.msg}</div>}
@@ -5555,8 +5555,8 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:12,marginBottom:8}}>
                   <div><span style={{color:'var(--text3)'}}>Truck hire:</span> <strong>{fmtCur(form.weeklyTruck)}/{form.hireType==='daily'?'day':'wk'}</strong></div>
                   {!form.noTrailer&&<div><span style={{color:'var(--text3)'}}>Trailer hire:</span> <strong>{fmtCur(form.weeklyTrailer)}/{form.hireType==='daily'?'day':'wk'}</strong></div>}
-                  <div><span style={{color:'var(--text3)'}}>Mileage rate:</span> <strong>${form.mileageRate}/km</strong></div>
-                  <div><span style={{color:'var(--text3)'}}>RUC rate:</span> <strong>${form.rucRate}/km</strong></div>
+                  <div><span style={{color:'var(--text3)'}}>Mileage rate:</span> <strong>{'$'+form.mileageRate+'/km'}</strong></div>
+                  <div><span style={{color:'var(--text3)'}}>RUC rate:</span> <strong>{'$'+form.rucRate+'/km'}</strong></div>
                   <div><span style={{color:'var(--text3)'}}>Duration:</span> <strong>{dur.label}</strong></div>
                   <div><span style={{color:'var(--text3)'}}>Bond:</span> <strong>{fmtCur(form.bond)}</strong></div>
                 </div>
@@ -7042,7 +7042,7 @@ const DocumentsPage = () => {
       {tab==='library' && (
         <div>
           <div className="grid grid-4 mb-4">
-            {[{l:'Total Documents',v:DOCUMENTS.length},{l:'Saved ${agreementWord} Agreements',v:savedAgreements.length},{l:'Signed',v:DOCUMENTS.filter(d=>d.signed).length},{l:'Expiring Soon',v:2}].map(k=>(
+            {[{l:'Total Documents',v:DOCUMENTS.length},{l:'Saved '+agreementWord+' Agreements',v:savedAgreements.length},{l:'Signed',v:DOCUMENTS.filter(d=>d.signed).length},{l:'Expiring Soon',v:2}].map(k=>(
               <div key={k.l} className="card card-sm"><div className="kpi-label">{k.l}</div><div style={{fontSize:22,fontWeight:800,marginTop:4}}>{k.v}</div></div>
             ))}
           </div>
@@ -7053,7 +7053,7 @@ const DocumentsPage = () => {
             </select>
             <div style={{flex:1}}/>
             <button className="btn btn-primary" onClick={()=>{setForm(emptyLease());setLeaseStep(1);setTab('lease-builder');}}>
-              <Icon name="plus" size={14}/> New ${agreementWord} Agreement
+              <Icon name="plus" size={14}/>{' New '+agreementWord+' Agreement'}
             </button>
           </div>
           <div className="grid grid-auto">
@@ -7279,7 +7279,7 @@ const DocumentsPage = () => {
               {!form.companyName&&<div style={{padding:'10px 14px',background:'rgba(255,111,0,0.1)',border:'1px solid rgba(255,111,0,0.3)',borderRadius:8,marginBottom:16,fontSize:13,color:'#FF6F00'}}>⚠️ Company name is required.</div>}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
                 <button className="btn btn-primary" onClick={()=>handleDownload('agreement')} style={{justifyContent:'center'}} disabled={!form.companyName}>
-                  <Icon name="download" size={14}/> Download ${agreementWord} Agreement (PDF)
+                  <Icon name="download" size={14}/>{' Download '+agreementWord+' Agreement (PDF)'}
                 </button>
                 <button className="btn btn-primary" onClick={()=>handleDownload('schedule')} style={{justifyContent:'center'}} disabled={!form.companyName}>
                   <Icon name="download" size={14}/> Download Truck Schedule (PDF)
@@ -7305,15 +7305,15 @@ const DocumentsPage = () => {
           {savedAgreements.length===0 ? (
             <div className="card" style={{textAlign:'center',padding:'48px 20px',color:'var(--text3)'}}>
               <div style={{fontSize:40,marginBottom:12}}>📄</div>
-              <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>No saved ${agreementWord.toLowerCase()} agreements yet</div>
-              <div style={{fontSize:13,marginBottom:16}}>Create one using the "New ${agreementWord} Agreement" tab and click "Save to Documents".</div>
+              <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>{'No saved '+agreementWord.toLowerCase()+' agreements yet'}</div>
+              <div style={{fontSize:13,marginBottom:16}}>{'Create one using the "New '+agreementWord+' Agreement" tab and click "Save to Documents".</div>
               <button className="btn btn-primary" onClick={()=>setTab('lease-builder')}><Icon name="plus" size={14}/> Create New Agreement</button>
             </div>
           ) : (
             <div>
               <div style={{display:'flex',justifyContent:'flex-end',marginBottom:16}}>
                 <button className="btn btn-primary" onClick={()=>{setForm(emptyLease());setLeaseStep(1);setTab('lease-builder');}}>
-                  <Icon name="plus" size={14}/> New ${agreementWord} Agreement
+                  <Icon name="plus" size={14}/>{' New '+agreementWord+' Agreement'}
                 </button>
               </div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:14}}>
@@ -7331,7 +7331,7 @@ const DocumentsPage = () => {
                     <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Contact:</strong> {a.form.contactName||'—'} · {a.form.contactPhone||'—'}</div>
                     <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Truck:</strong> {a.form.truckRego||'—'} {a.form.truckMake} {a.form.truckModel}</div>
                     <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Period:</strong> {fmtDocDate(a.form.startDate)||'—'} — {fmtDocDate(a.form.endDate)||'—'}</div>
-                    <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Rate:</strong> ${a.form.weeklyRate||'—'}/wk · Bond: ${a.form.bond||'—'}</div>
+                    <div style={{fontSize:12,color:'var(--text2)',marginBottom:4}}><strong>Rate:</strong> {'$'+(a.form.weeklyRate||'—')+'/wk · Bond: $'+(a.form.bond||'—')}</div>
                     <div style={{fontSize:10,color:'var(--text3)',marginBottom:12}}>Saved: {new Date(a.savedAt).toLocaleDateString('en-NZ')}</div>
                     <div style={{display:'flex',gap:8}}>
                       <button className="btn btn-primary btn-sm" style={{flex:1,justifyContent:'center'}} onClick={()=>handleLoad(a)}>
