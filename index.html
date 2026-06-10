@@ -1405,8 +1405,11 @@ const Dashboard = ({theme,setPage,livePnl:dashLivePnl}) => {
   const maint = TRUCKS.filter(t=>t.status==='maintenance').length;
   const util = Math.round((onHire/TRUCKS.length)*100);
   const weekRev = WEEKLY_REVENUE[WEEKLY_REVENUE.length-1].amount;
-  const monthRev = MONTHLY_REVENUE[MONTHLY_REVENUE.length-1].amount;
-  const monthNet = MONTHLY_REVENUE[MONTHLY_REVENUE.length-1].net;
+  const pnlForKpi = dashLivePnl || loadCachedPnl() || PNL_DETAIL;
+  const latestPnlMonth = pnlForKpi[pnlForKpi.length-1] || {};
+  const monthRev = latestPnlMonth.revenue || MONTHLY_REVENUE[MONTHLY_REVENUE.length-1].amount;
+  const monthNet = latestPnlMonth.net || MONTHLY_REVENUE[MONTHLY_REVENUE.length-1].net;
+  const monthLabel = latestPnlMonth.month ? new Date(latestPnlMonth.month+'-01').toLocaleDateString('en-NZ',{month:'long',year:'numeric'}) : 'Latest Month';
   const outstanding = getInvoices().filter(i=>i.status!=='paid').reduce((a,b)=>a+b.total,0);
   const overdue = getInvoices().filter(i=>i.status==='overdue');
   const overdueAmt = overdue.reduce((a,b)=>a+b.total,0);
@@ -1417,7 +1420,7 @@ const Dashboard = ({theme,setPage,livePnl:dashLivePnl}) => {
   const [kpiModal, setKpiModal] = React.useState(null);
   const activeHires = getEffectiveHires().filter(h=>h.status==='active');
   const pendingInvoices = getInvoices().filter(i=>i.status!=='paid');
-  const latestPnl = (dashLivePnl||loadCachedPnl()||PNL_DETAIL).slice(-1)[0];
+  const latestPnl = latestPnlMonth.revenue ? latestPnlMonth : (dashLivePnl||loadCachedPnl()||PNL_DETAIL).slice(-1)[0];
 
   const KpiModal = ({id, onClose}) => {
     if (!id) return null;
@@ -1554,7 +1557,7 @@ const Dashboard = ({theme,setPage,livePnl:dashLivePnl}) => {
           {id:'active-hires',label:'Active Hires',value:onHire,sub:`${avail} available · ${maint} in workshop`,accent:'var(--blue)',trend:'↑ 1 from last week',up:true},
           {id:'fleet-util',label:'Fleet Utilisation',value:`${util}%`,sub:`${TRUCKS.length} trucks · ${TRAILERS.length} trailers`,accent:'var(--green)',trend:'On target (>70%)',up:true},
           {id:'weekly-rev',label:'Weekly Revenue',value:fmtCur(weekRev),sub:'Week ending 31 May 2026',accent:'var(--red)',trend:'↑ 10.3% vs last week',up:true},
-          {id:'monthly-rev',label:'Monthly Revenue',value:fmtCur(monthRev),sub:`May 2026 — Net ${fmtCur(monthNet)}`,accent:'#8E44AD',trend:'Best month since Oct 2025',up:true},
+          {id:'monthly-rev',label:'Monthly Revenue',value:fmtCur(monthRev),sub:`${monthLabel} — Net ${fmtCur(monthNet)}`,accent:'#8E44AD',trend:monthNet>0?'Net profit: '+fmtCur(monthNet):'Net loss: '+fmtCur(Math.abs(monthNet)),up:monthNet>0},
         ].map(k=>(
           <div key={k.label} className="kpi-card" onClick={()=>setKpiModal(k.id)}
             style={{'--accent':k.accent,cursor:'pointer',transition:'box-shadow .15s,transform .15s'}}
