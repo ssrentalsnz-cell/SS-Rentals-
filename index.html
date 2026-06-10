@@ -1465,16 +1465,38 @@ const Dashboard = ({theme,setPage,livePnl:dashLivePnl}) => {
         <tbody>{activeHires.map(h=><tr key={h.id}><td>{custName(h.customer)}</td><td>{truckRego(h.truck)}</td><td style={{fontWeight:700}}>{fmtCur(h.weekly_truck||0)}</td><td>{fmtCur(h.mileage_rate||0)}/km</td><td>{fmtCur(h.ruc_rate||0)}/km</td></tr>)}</tbody></table></div>
       </div>);
     } else if (id==='monthly-rev') {
+      const pnlSrc = dashLivePnl || loadCachedPnl() || PNL_DETAIL;
+      const latest = pnlSrc[pnlSrc.length-1] || latestPnl;
+      const latestName = new Date(latest.month+'-01').toLocaleDateString('en-NZ',{month:'long',year:'numeric'});
+      const totRev12 = pnlSrc.slice(-12).reduce((s,m)=>s+m.revenue,0);
+      const totNet12 = pnlSrc.slice(-12).reduce((s,m)=>s+m.net,0);
       title='Monthly Revenue';
       body=(<div>
-        {statGrid([{label:'May 2026 Revenue',value:fmtCur(monthRev),color:'#6A1B9A'},{label:'Net Profit',value:fmtCur(monthNet),color:'#27AE60'},{label:'Total Expenses',value:fmtCur(latestPnl.expenses),color:'#FF6F00'}])}
+        {statGrid([{label:latestName+' Revenue',value:fmtCur(latest.revenue),color:'#6A1B9A'},{label:'Net Profit',value:fmtCur(latest.net),color:'#27AE60'},{label:'Total Expenses',value:fmtCur(latest.expenses||0),color:'#FF6F00'},{label:'12-Month Revenue',value:fmtCur(totRev12),color:'#6A1B9A'},{label:'12-Month Net',value:fmtCur(totNet12),color:totNet12>=0?'#27AE60':'#d32f2f'}])}
         <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>Monthly Trend</div>
         <div className="table-wrap mb-4"><table><thead><tr><th>Month</th><th>Revenue</th><th>Expenses</th><th>Net Profit</th><th>Margin</th></tr></thead>
-        <tbody>{MONTHLY_REVENUE.map(m=>{const margin=Math.round((m.net/m.amount)*100);return<tr key={m.month}><td style={{fontWeight:600}}>{m.month}</td><td style={{fontWeight:700}}>{fmtCur(m.amount)}</td><td>{fmtCur(m.expenses)}</td><td style={{fontWeight:700,color:m.net>=0?'#27AE60':'#FF6F00'}}>{m.net>=0?'+':''}{fmtCur(m.net)}</td><td style={{color:margin>=10?'#27AE60':margin>=0?'#F39C12':'#FF6F00',fontWeight:600}}>{margin}%</td></tr>;})}
-        </tbody></table></div>
-        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>May Expense Breakdown</div>
-        <div className="table-wrap"><table><thead><tr><th>Category</th><th>Amount</th><th>% of Revenue</th></tr></thead>
-        <tbody>{[{l:'Insurance',v:latestPnl.insurance},{l:'Navman/RUC',v:latestPnl.navman_ruc},{l:'RUC Charges',v:latestPnl.ruc},{l:'Other',v:latestPnl.other},{l:'Repairs',v:latestPnl.repairs},{l:'Flexi Finance',v:latestPnl.flexi},{l:'Heartland Finance',v:latestPnl.heartland},{l:'Advertising',v:latestPnl.advertising},{l:'GST/Tax',v:latestPnl.gst}].filter(r=>r.v>0).map(r=><tr key={r.l}><td>{r.l}</td><td style={{fontWeight:700}}>{fmtCur(r.v)}</td><td style={{color:'var(--text2)'}}>{Math.round((r.v/latestPnl.revenue)*100)}%</td></tr>)}</tbody></table></div>
+        <tbody>{pnlSrc.map(m=>{
+          const margin = m.revenue>0?Math.round((m.net/m.revenue)*100):0;
+          const mName = new Date(m.month+'-01').toLocaleDateString('en-NZ',{month:'short',year:'2-digit'});
+          return <tr key={m.month}>
+            <td style={{fontWeight:600}}>{mName}</td>
+            <td style={{fontWeight:700}}>{fmtCur(m.revenue)}</td>
+            <td>{fmtCur(m.expenses||0)}</td>
+            <td style={{fontWeight:700,color:m.net>=0?'#27AE60':'#d32f2f'}}>{m.net>=0?'+':''}{fmtCur(m.net)}</td>
+            <td style={{color:margin>=10?'#27AE60':margin>=0?'#F39C12':'#d32f2f',fontWeight:600}}>{margin}%</td>
+          </tr>;
+        })}</tbody></table></div>
+        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>{latestName} Expense Breakdown</div>
+        <div className="table-wrap">
+          {[{l:'Repairs & Maintenance',v:latest.repairs},{l:'Other Expenses',v:latest.other},{l:'Insurance',v:latest.insurance},{l:'Navman/RUC',v:latest.navman_ruc},{l:'RUC Charges',v:latest.ruc},{l:'Flexi Finance',v:latest.flexi},{l:'Heartland Finance',v:latest.heartland},{l:'Advertising',v:latest.advertising},{l:'GST/Tax',v:latest.gst}].filter(r=>r.v>0).length > 0 ? (
+            <table><thead><tr><th>Category</th><th>Amount</th><th>% of Revenue</th></tr></thead>
+            <tbody>{[{l:'Repairs & Maintenance',v:latest.repairs},{l:'Other Expenses',v:latest.other},{l:'Insurance',v:latest.insurance},{l:'Navman/RUC',v:latest.navman_ruc},{l:'RUC Charges',v:latest.ruc},{l:'Flexi Finance',v:latest.flexi},{l:'Heartland Finance',v:latest.heartland},{l:'Advertising',v:latest.advertising},{l:'GST/Tax',v:latest.gst}].filter(r=>r.v>0).map(r=><tr key={r.l}><td>{r.l}</td><td style={{fontWeight:700}}>{fmtCur(r.v)}</td><td style={{color:'var(--text2)'}}>{latest.revenue>0?Math.round((r.v/latest.revenue)*100):0}%</td></tr>)}</tbody></table>
+          ) : (
+            <div style={{padding:'16px',color:'var(--text2)',fontSize:13,background:'var(--bg3)',borderRadius:8}}>
+              Detailed expense breakdown not available from sheet. Sheet provides: Repairs {fmtCur(latest.repairs||0)}, Other Expenses {fmtCur(latest.other||0)}, Total Expenses {fmtCur(latest.expenses||0)}.
+            </div>
+          )}
+        </div>
       </div>);
     } else if (id==='outstanding') {
       title='Outstanding Invoices';
