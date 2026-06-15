@@ -449,119 +449,45 @@ const readSheetTab = async (accessToken, spreadsheetId, sheetName) => {
 };
 
 
-/* ─── SS RENTALS MONTHLY FINANCIALS SHEET ────────── */
+/* ─── SS RENTALS MONTHLY FINANCIALS SHEET ─────────── */
 const FIN_SHEET_ID = '1pDcnv6YMiSGapDJgKghKjcFveh4h9SZ-3ieiIP5sSFs';
 const FIN_CACHE_KEY = 'ss_rentals_fin_cache';
-
-const loadCachedPnl = function() {
-  try { return JSON.parse(localStorage.getItem(FIN_CACHE_KEY)||'null'); } catch(e) { return null; }
-};
-const savePnlCache = function(data) {
-  try { localStorage.setItem(FIN_CACHE_KEY, JSON.stringify(data)); } catch(e) {} 
-};
-
+const loadCachedPnl = function() { try { return JSON.parse(localStorage.getItem(FIN_CACHE_KEY)||'null'); } catch(e) { return null; } };
+const savePnlCache = function(data) { try { localStorage.setItem(FIN_CACHE_KEY, JSON.stringify(data)); } catch(e) {} };
 const parseFinTab = function(tabName, rows) {
   var monthMap = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
   var m = tabName.toLowerCase().match(/^([a-z]{3})-(\d{2})$/);
   if (!m) return null;
-  var mo = monthMap[m[1]];
-  if (!mo) return null;
+  var mo = monthMap[m[1]]; if (!mo) return null;
   var yr = parseInt(m[2]) >= 50 ? '19'+m[2] : '20'+m[2];
   var month = yr+'-'+mo;
-
-  var parseDollar = function(s) {
-    if (!s && s !== 0) return 0;
-    var n = parseFloat((s+'').replace(/[$,\s]/g,''));
-    return isNaN(n) ? 0 : n;
-  };
-
-  var revenue = 0, repairs = 0, other = 0, net = 0;
-
-  // Strategy: scan every row, check every cell for summary labels,
-  // then read the next non-empty cell in that row as the value.
-  // Also sum col C for hire income as a fallback.
-  var hireSectionActive = false;
-  var hireSum = 0;
-
-  for (var i = 0; i < rows.length; i++) {
-    var row = rows[i] || [];
-
-    // Check col A for section headers
-    var colA = ((row[0]||'')+'').toUpperCase().trim();
-    if (colA.indexOf('MONTHLY HIRE INCOME') >= 0) { hireSectionActive = true; continue; }
-    if (colA.indexOf('REPAIR') >= 0 && colA.indexOf('MAINTENANCE') >= 0) { hireSectionActive = false; }
-
-    // Sum hire income from col C when in hire section
-    if (hireSectionActive && row[2]) {
-      var v = parseDollar(row[2]);
-      if (v > 0) hireSum += v;
-    }
-
-    // Scan all columns for summary labels (could be col E, F, or G depending on sheet)
-    for (var j = 0; j < row.length - 1; j++) {
-      var cell = ((row[j]||'')+'').toLowerCase().trim();
-      if (!cell) continue;
-
-      // Find value: look right for the first non-empty numeric cell
-      var val = 0;
-      for (var k = j + 1; k < row.length; k++) {
-        var candidate = parseDollar(row[k]);
-        if (candidate > 0) { val = candidate; break; }
-      }
-      if (val === 0) continue;
-
-      if (cell.indexOf('total hire income') >= 0 || cell === 'total hire') { revenue = val; }
-      else if ((cell.indexOf('repair') >= 0 || cell.indexOf('maintenance') >= 0) && cell.indexOf('vehicle') < 0) { repairs = val; }
-      else if (cell.indexOf('other expense') >= 0) { other = val; }
-      else if (cell.indexOf('net position') >= 0 || cell.indexOf('net profit') >= 0 || cell.indexOf('net income') >= 0) { net = val; }
-    }
+  var revenue=0,repairs=0,other=0,net=0;
+  for (var i=0;i<rows.length;i++) {
+    var row=rows[i]||[]; var label=((row[5]||'')+'').toLowerCase().trim();
+    var val=parseFloat(((row[6]||'')+'').replace(/[$,\s]/g,''))||0;
+    if(label.indexOf('total hire')>=0){revenue=val;}
+    else if(label.indexOf('repair')>=0||label.indexOf('maintenance')>=0){repairs=val;}
+    else if(label.indexOf('other expense')>=0){other=val;}
+    else if(label.indexOf('net position')>=0||label.indexOf('net profit')>=0){net=val;}
   }
-
-  // Use hire sum as fallback if summary revenue not found
-  if (revenue === 0 && hireSum > 0) revenue = hireSum;
-
-  var expenses = repairs + other;
-  if (net === 0 && revenue > 0) net = revenue - expenses;
-  return {
-    month: month,
-    revenue: Math.round(revenue),
-    repairs: Math.round(repairs),
-    other: Math.round(other),
-    expenses: Math.round(expenses),
-    net: Math.round(net),
-    insurance: 0, navman_ruc: 0, ruc: 0, flexi: 0, heartland: 0, advertising: 0, gst: 0
-  };
+  var expenses=repairs+other; if(net===0&&revenue>0)net=revenue-expenses;
+  return{month:month,revenue:Math.round(revenue),repairs:Math.round(repairs),other:Math.round(other),expenses:Math.round(expenses),net:Math.round(net),insurance:0,navman_ruc:0,ruc:0,flexi:0,heartland:0,advertising:0,gst:0};
 };
-
 const loadPnlFromSheet = async function(accessToken) {
   try {
-    var metaUrl = 'https://sheets.googleapis.com/v4/spreadsheets/'+FIN_SHEET_ID+'?fields=sheets.properties.title';
-    var metaRes = await fetch(metaUrl, { headers: { Authorization: 'Bearer '+accessToken } });
-    if (!metaRes.ok) return null;
-    var meta = await metaRes.json();
-    var sheets = meta.sheets || [];
-    var monthMap = {jan:1,feb:1,mar:1,apr:1,may:1,jun:1,jul:1,aug:1,sep:1,oct:1,nov:1,dec:1};
-    var tabs = [];
-    for (var si = 0; si < sheets.length; si++) {
-      var title = sheets[si].properties.title;
-      var tm = title.toLowerCase().match(/^([a-z]{3})-(\d{2})$/);
-      if (tm && monthMap[tm[1]]) tabs.push(title);
-    }
-    if (tabs.length === 0) return null;
-    var results = [];
-    for (var ti = 0; ti < tabs.length; ti++) {
-      var rows = await readSheetTab(accessToken, FIN_SHEET_ID, tabs[ti]);
-      if (!rows || rows.length < 3) continue;
-      var row = parseFinTab(tabs[ti], rows);
-      if (row) results.push(row);
-    }
-    results.sort(function(a,b){ return a.month.localeCompare(b.month); });
-    if (results.length > 0) savePnlCache(results);
-    return results.length > 0 ? results : null;
-  } catch(e) {
-    console.warn('[FinSheet]', e.message);
-    return null;
-  }
+    var metaRes=await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+FIN_SHEET_ID+'?fields=sheets.properties.title',{headers:{Authorization:'Bearer '+accessToken}});
+    if(!metaRes.ok)return null;
+    var meta=await metaRes.json(); var sheets=meta.sheets||[];
+    var monthMap={jan:1,feb:1,mar:1,apr:1,may:1,jun:1,jul:1,aug:1,sep:1,oct:1,nov:1,dec:1};
+    var tabs=[];
+    for(var si=0;si<sheets.length;si++){var title=sheets[si].properties.title;var tm=title.toLowerCase().match(/^([a-z]{3})-(\d{2})$/);if(tm&&monthMap[tm[1]])tabs.push(title);}
+    if(tabs.length===0)return null;
+    var results=[];
+    for(var ti=0;ti<tabs.length;ti++){var rows=await readSheetTab(accessToken,FIN_SHEET_ID,tabs[ti]);if(!rows||rows.length<3)continue;var row=parseFinTab(tabs[ti],rows);if(row)results.push(row);}
+    results.sort(function(a,b){return a.month.localeCompare(b.month);});
+    if(results.length>0)savePnlCache(results);
+    return results.length>0?results:null;
+  } catch(e){console.warn('[FinSheet]',e.message);return null;}
 };
 
 // Pull hire changes from Google Sheets back into app data
@@ -1468,38 +1394,16 @@ const Dashboard = ({theme,setPage,livePnl:dashLivePnl}) => {
         <tbody>{activeHires.map(h=><tr key={h.id}><td>{custName(h.customer)}</td><td>{truckRego(h.truck)}</td><td style={{fontWeight:700}}>{fmtCur(h.weekly_truck||0)}</td><td>{fmtCur(h.mileage_rate||0)}/km</td><td>{fmtCur(h.ruc_rate||0)}/km</td></tr>)}</tbody></table></div>
       </div>);
     } else if (id==='monthly-rev') {
-      const pnlSrc = dashLivePnl || loadCachedPnl() || PNL_DETAIL;
-      const latest = pnlSrc[pnlSrc.length-1] || latestPnl;
-      const latestName = new Date(latest.month+'-01').toLocaleDateString('en-NZ',{month:'long',year:'numeric'});
-      const totRev12 = pnlSrc.slice(-12).reduce((s,m)=>s+m.revenue,0);
-      const totNet12 = pnlSrc.slice(-12).reduce((s,m)=>s+m.net,0);
       title='Monthly Revenue';
       body=(<div>
-        {statGrid([{label:latestName+' Revenue',value:fmtCur(latest.revenue),color:'#6A1B9A'},{label:'Net Profit',value:fmtCur(latest.net),color:'#27AE60'},{label:'Total Expenses',value:fmtCur(latest.expenses||0),color:'#FF6F00'},{label:'12-Month Revenue',value:fmtCur(totRev12),color:'#6A1B9A'},{label:'12-Month Net',value:fmtCur(totNet12),color:totNet12>=0?'#27AE60':'#d32f2f'}])}
+        {statGrid([{label:'May 2026 Revenue',value:fmtCur(monthRev),color:'#6A1B9A'},{label:'Net Profit',value:fmtCur(monthNet),color:'#27AE60'},{label:'Total Expenses',value:fmtCur(latestPnl.expenses),color:'#FF6F00'}])}
         <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>Monthly Trend</div>
         <div className="table-wrap mb-4"><table><thead><tr><th>Month</th><th>Revenue</th><th>Expenses</th><th>Net Profit</th><th>Margin</th></tr></thead>
-        <tbody>{pnlSrc.map(m=>{
-          const margin = m.revenue>0?Math.round((m.net/m.revenue)*100):0;
-          const mName = new Date(m.month+'-01').toLocaleDateString('en-NZ',{month:'short',year:'2-digit'});
-          return <tr key={m.month}>
-            <td style={{fontWeight:600}}>{mName}</td>
-            <td style={{fontWeight:700}}>{fmtCur(m.revenue)}</td>
-            <td>{fmtCur(m.expenses||0)}</td>
-            <td style={{fontWeight:700,color:m.net>=0?'#27AE60':'#d32f2f'}}>{m.net>=0?'+':''}{fmtCur(m.net)}</td>
-            <td style={{color:margin>=10?'#27AE60':margin>=0?'#F39C12':'#d32f2f',fontWeight:600}}>{margin}%</td>
-          </tr>;
-        })}</tbody></table></div>
-        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>{latestName} Expense Breakdown</div>
-        <div className="table-wrap">
-          {[{l:'Repairs & Maintenance',v:latest.repairs},{l:'Other Expenses',v:latest.other},{l:'Insurance',v:latest.insurance},{l:'Navman/RUC',v:latest.navman_ruc},{l:'RUC Charges',v:latest.ruc},{l:'Flexi Finance',v:latest.flexi},{l:'Heartland Finance',v:latest.heartland},{l:'Advertising',v:latest.advertising},{l:'GST/Tax',v:latest.gst}].filter(r=>r.v>0).length > 0 ? (
-            <table><thead><tr><th>Category</th><th>Amount</th><th>% of Revenue</th></tr></thead>
-            <tbody>{[{l:'Repairs & Maintenance',v:latest.repairs},{l:'Other Expenses',v:latest.other},{l:'Insurance',v:latest.insurance},{l:'Navman/RUC',v:latest.navman_ruc},{l:'RUC Charges',v:latest.ruc},{l:'Flexi Finance',v:latest.flexi},{l:'Heartland Finance',v:latest.heartland},{l:'Advertising',v:latest.advertising},{l:'GST/Tax',v:latest.gst}].filter(r=>r.v>0).map(r=><tr key={r.l}><td>{r.l}</td><td style={{fontWeight:700}}>{fmtCur(r.v)}</td><td style={{color:'var(--text2)'}}>{latest.revenue>0?Math.round((r.v/latest.revenue)*100):0}%</td></tr>)}</tbody></table>
-          ) : (
-            <div style={{padding:'16px',color:'var(--text2)',fontSize:13,background:'var(--bg3)',borderRadius:8}}>
-              Detailed expense breakdown not available from sheet. Sheet provides: Repairs {fmtCur(latest.repairs||0)}, Other Expenses {fmtCur(latest.other||0)}, Total Expenses {fmtCur(latest.expenses||0)}.
-            </div>
-          )}
-        </div>
+        <tbody>{MONTHLY_REVENUE.map(m=>{const margin=Math.round((m.net/m.amount)*100);return<tr key={m.month}><td style={{fontWeight:600}}>{m.month}</td><td style={{fontWeight:700}}>{fmtCur(m.amount)}</td><td>{fmtCur(m.expenses)}</td><td style={{fontWeight:700,color:m.net>=0?'#27AE60':'#FF6F00'}}>{m.net>=0?'+':''}{fmtCur(m.net)}</td><td style={{color:margin>=10?'#27AE60':margin>=0?'#F39C12':'#FF6F00',fontWeight:600}}>{margin}%</td></tr>;})}
+        </tbody></table></div>
+        <div style={{fontWeight:700,fontSize:12,color:'var(--text2)',textTransform:'uppercase',marginBottom:8}}>May Expense Breakdown</div>
+        <div className="table-wrap"><table><thead><tr><th>Category</th><th>Amount</th><th>% of Revenue</th></tr></thead>
+        <tbody>{[{l:'Insurance',v:latestPnl.insurance},{l:'Navman/RUC',v:latestPnl.navman_ruc},{l:'RUC Charges',v:latestPnl.ruc},{l:'Other',v:latestPnl.other},{l:'Repairs',v:latestPnl.repairs},{l:'Flexi Finance',v:latestPnl.flexi},{l:'Heartland Finance',v:latestPnl.heartland},{l:'Advertising',v:latestPnl.advertising},{l:'GST/Tax',v:latestPnl.gst}].filter(r=>r.v>0).map(r=><tr key={r.l}><td>{r.l}</td><td style={{fontWeight:700}}>{fmtCur(r.v)}</td><td style={{color:'var(--text2)'}}>{Math.round((r.v/latestPnl.revenue)*100)}%</td></tr>)}</tbody></table></div>
       </div>);
     } else if (id==='outstanding') {
       title='Outstanding Invoices';
@@ -1683,11 +1587,9 @@ const Dashboard = ({theme,setPage,livePnl:dashLivePnl}) => {
 const DashboardPnl = ({livePnl:propPnl}) => {
   const pnlSource = propPnl || loadCachedPnl() || PNL_DETAIL;
   const months = pnlSource.slice(-12);
-  const SUMMARY_TAB = '__summary__';
   const [selMonth, setSelMonth] = React.useState(months[months.length-1].month);
   const d = months.find(m=>m.month===selMonth) || months[months.length-1];
   const fmtMonth = m => { const [y,mo] = m.split('-'); return new Date(+y,+mo-1,1).toLocaleDateString('en-NZ',{month:'short',year:'2-digit'}); };
-  const fmtMonthLong = m => { const [y,mo] = m.split('-'); return new Date(+y,+mo-1,1).toLocaleDateString('en-NZ',{month:'long',year:'numeric'}); };
   const isProfit = d.net >= 0;
   const expenseRows = [
     {label:'Insurance',value:d.insurance},{label:'Navman / RUC Purchase',value:d.navman_ruc},
@@ -1696,32 +1598,6 @@ const DashboardPnl = ({livePnl:propPnl}) => {
     {label:'Heartland Finance',value:d.heartland},{label:'Advertising',value:d.advertising},
     {label:'GST / Other Tax',value:d.gst},
   ].filter(r=>r.value>0);
-
-  // 12-month totals
-  const totRevenue = months.reduce((s,m)=>s+m.revenue,0);
-  const totExpenses = months.reduce((s,m)=>s+(m.expenses||0),0);
-  const totNet = months.reduce((s,m)=>s+m.net,0);
-  const totRepairs = months.reduce((s,m)=>s+(m.repairs||0),0);
-  const totOther = months.reduce((s,m)=>s+(m.other||0),0);
-  const profitMonths = months.filter(m=>m.net>=0).length;
-  const lossMonths = months.length - profitMonths;
-  const avgMargin = totRevenue>0 ? Math.round((totNet/totRevenue)*100) : 0;
-
-  const isSummary = selMonth===SUMMARY_TAB;
-
-  const tabBtn = (key, label, subLabel, color, active) => (
-    <button key={key} onClick={()=>setSelMonth(key)} style={{
-      padding:'6px 12px',borderRadius:'7px 7px 0 0',border:'none',cursor:'pointer',
-      fontSize:12,fontWeight:active?700:500,whiteSpace:'nowrap',
-      background:active?'var(--card)':'var(--bg3)',
-      color:active?color:'var(--text2)',
-      borderBottom:active?'2px solid '+color:'2px solid transparent',
-    }}>
-      {label}
-      {subLabel&&<span style={{display:'block',fontSize:10,fontWeight:600,color:color}}>{subLabel}</span>}
-    </button>
-  );
-
   return (
     <div className="card mb-4" style={{padding:0,overflow:'hidden'}}>
       <div style={{padding:'16px 20px 0',borderBottom:'1px solid var(--border)'}}>
@@ -1729,146 +1605,69 @@ const DashboardPnl = ({livePnl:propPnl}) => {
           <span className="card-title">Monthly P&amp;L</span>
           <span className="badge badge-blue">Last {months.length} Months</span>
         </div>
-        <div style={{display:'flex',gap:4,overflowX:'auto',flexWrap:'nowrap',paddingBottom:1}}>
+        <div style={{display:'flex',gap:4,overflowX:'auto',flexWrap:'wrap'}}>
           {months.map(m=>{
+            const active = m.month===selMonth;
             const profit = m.net>=0;
-            return tabBtn(m.month, fmtMonth(m.month), (profit?'+':'')+fmtCur(m.net), profit?'#27AE60':'#FF6F00', m.month===selMonth);
+            return (
+              <button key={m.month} onClick={()=>setSelMonth(m.month)} style={{
+                padding:'6px 12px',borderRadius:'7px 7px 0 0',border:'none',cursor:'pointer',
+                fontSize:12,fontWeight:active?700:500,whiteSpace:'nowrap',
+                background:active?'var(--card)':'var(--bg3)',
+                color:active?(profit?'#27AE60':'#FF6F00'):'var(--text2)',
+                borderBottom:active?'2px solid '+(profit?'#27AE60':'#FF6F00'):'2px solid transparent',
+              }}>
+                {fmtMonth(m.month)}
+                <span style={{display:'block',fontSize:10,fontWeight:600,color:profit?'#27AE60':'#FF6F00'}}>{profit?'+':''}{fmtCur(m.net)}</span>
+              </button>
+            );
           })}
-          <div style={{width:1,background:'var(--border)',margin:'0 6px',alignSelf:'stretch',minHeight:32}}/>
-          {tabBtn(SUMMARY_TAB, '12-Month Summary', totNet>=0?'+'+fmtCur(totNet):fmtCur(totNet), totNet>=0?'#6A1B9A':'#d32f2f', isSummary)}
         </div>
       </div>
-
-      {/* Monthly detail view */}
-      {!isSummary&&(
-        <div style={{padding:20}}>
-          <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16}}>
-            <h3 style={{fontSize:15,fontWeight:700,color:'var(--text)',margin:0}}>{fmtMonthLong(selMonth)}</h3>
-            <span className={`badge ${isProfit?'badge-green':'badge-orange'}`}>{isProfit?'Profit':'Loss'}: {fmtCur(Math.abs(d.net))}</span>
-          </div>
-          <div className="grid" style={{gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:20}}>
-            <div style={{background:'rgba(39,174,96,0.07)',border:'1px solid rgba(39,174,96,0.2)',borderRadius:10,padding:'14px 16px'}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#27AE60',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Total Revenue</div>
-              <div style={{fontSize:24,fontWeight:800,color:'var(--text)'}}>{fmtCur(d.revenue)}</div>
-            </div>
-            <div style={{background:'rgba(255,111,0,0.07)',border:'1px solid rgba(255,111,0,0.2)',borderRadius:10,padding:'14px 16px'}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#FF6F00',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Total Expenses</div>
-              <div style={{fontSize:24,fontWeight:800,color:'var(--text)'}}>{fmtCur(d.expenses)}</div>
-            </div>
-            <div style={{background:isProfit?'rgba(39,174,96,0.07)':'rgba(255,111,0,0.07)',border:'1px solid '+(isProfit?'rgba(39,174,96,0.2)':'rgba(255,111,0,0.2)'),borderRadius:10,padding:'14px 16px'}}>
-              <div style={{fontSize:11,fontWeight:700,color:isProfit?'#27AE60':'#FF6F00',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Net {isProfit?'Profit':'Loss'}</div>
-              <div style={{fontSize:24,fontWeight:800,color:isProfit?'#27AE60':'#FF6F00'}}>{isProfit?'':'-'}{fmtCur(Math.abs(d.net))}</div>
-              <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>Margin: {d.revenue>0?Math.round((d.net/d.revenue)*100):0}%</div>
-            </div>
-          </div>
-          {expenseRows.length>0&&(
-            <div>
-              <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.6px',marginBottom:10}}>Expense Breakdown</div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'2px 24px'}}>
-                {expenseRows.map(r=>(
-                  <div key={r.label} style={{display:'flex',justifyContent:'space-between',padding:'7px 0',borderBottom:'1px solid var(--border)'}}>
-                    <span style={{fontSize:13,color:'var(--text2)'}}>{r.label}</span>
-                    <span style={{fontSize:13,fontWeight:600,color:'var(--text)'}}>{fmtCur(r.value)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {d.revenue>0&&(
-            <div style={{marginTop:16}}>
-              <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'var(--text2)',marginBottom:4}}>
-                <span>Expenses as % of Revenue</span><span>{Math.round((d.expenses/d.revenue)*100)}%</span>
-              </div>
-              <div className="progress">
-                <div className="progress-bar" style={{width:`${Math.min(100,Math.round((d.expenses/d.revenue)*100))}%`,background:d.expenses/d.revenue>1?'#FF6F00':d.expenses/d.revenue>0.85?'#F39C12':'#27AE60'}}/>
-              </div>
-            </div>
-          )}
+      <div style={{padding:20}}>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16}}>
+          <h3 style={{fontSize:15,fontWeight:700,color:'var(--text)',margin:0}}>
+            {new Date(selMonth+'-01').toLocaleDateString('en-NZ',{month:'long',year:'numeric'})}
+          </h3>
+          <span className={`badge ${isProfit?'badge-green':'badge-orange'}`}>
+            {isProfit?'Profit':'Loss'}: {fmtCur(Math.abs(d.net))}
+          </span>
         </div>
-      )}
-
-      {/* 12-Month Summary view */}
-      {isSummary&&(
-        <div style={{padding:20}}>
-          <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16,flexWrap:'wrap'}}>
-            <h3 style={{fontSize:15,fontWeight:700,color:'var(--text)',margin:0}}>12-Month Summary</h3>
-            <span className={`badge ${totNet>=0?'badge-green':'badge-orange'}`}>{totNet>=0?'Total Profit':'Total Loss'}: {fmtCur(Math.abs(totNet))}</span>
-            <span className="badge badge-blue">Avg Margin: {avgMargin}%</span>
-            <span className="badge badge-blue">{profitMonths} profitable months</span>
-            {lossMonths>0&&<span className="badge badge-orange">{lossMonths} loss months</span>}
+        <div className="grid" style={{gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:20}}>
+          <div style={{background:'rgba(39,174,96,0.07)',border:'1px solid rgba(39,174,96,0.2)',borderRadius:10,padding:'14px 16px'}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#27AE60',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Total Revenue</div>
+            <div style={{fontSize:24,fontWeight:800,color:'var(--text)'}}>{fmtCur(d.revenue)}</div>
           </div>
-
-          {/* Summary KPI cards */}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:20}}>
-            <div style={{background:'rgba(39,174,96,0.07)',border:'1px solid rgba(39,174,96,0.2)',borderRadius:10,padding:'14px 16px'}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#27AE60',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Total Revenue</div>
-              <div style={{fontSize:24,fontWeight:800,color:'var(--text)'}}>{fmtCur(totRevenue)}</div>
-              <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>Avg {fmtCur(Math.round(totRevenue/months.length))}/mo</div>
-            </div>
-            <div style={{background:'rgba(255,111,0,0.07)',border:'1px solid rgba(255,111,0,0.2)',borderRadius:10,padding:'14px 16px'}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#FF6F00',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Total Expenses</div>
-              <div style={{fontSize:24,fontWeight:800,color:'var(--text)'}}>{fmtCur(totExpenses)}</div>
-              <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>Avg {fmtCur(Math.round(totExpenses/months.length))}/mo</div>
-            </div>
-            <div style={{background:totNet>=0?'rgba(39,174,96,0.07)':'rgba(255,111,0,0.07)',border:'1px solid '+(totNet>=0?'rgba(39,174,96,0.2)':'rgba(255,111,0,0.2)'),borderRadius:10,padding:'14px 16px'}}>
-              <div style={{fontSize:11,fontWeight:700,color:totNet>=0?'#27AE60':'#FF6F00',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Net {totNet>=0?'Profit':'Loss'}</div>
-              <div style={{fontSize:24,fontWeight:800,color:totNet>=0?'#27AE60':'#FF6F00'}}>{totNet>=0?'':'-'}{fmtCur(Math.abs(totNet))}</div>
-              <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>Margin: {avgMargin}%</div>
-            </div>
+          <div style={{background:'rgba(255,111,0,0.07)',border:'1px solid rgba(255,111,0,0.2)',borderRadius:10,padding:'14px 16px'}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#FF6F00',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Total Expenses</div>
+            <div style={{fontSize:24,fontWeight:800,color:'var(--text)'}}>{fmtCur(d.expenses)}</div>
           </div>
-
-          {/* Month-by-month table */}
-          <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-              <thead>
-                <tr style={{background:'var(--bg3)'}}>
-                  <th style={{padding:'10px 12px',textAlign:'left',fontWeight:700,fontSize:11,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',borderBottom:'2px solid var(--border)'}}>Month</th>
-                  <th style={{padding:'10px 12px',textAlign:'right',fontWeight:700,fontSize:11,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',borderBottom:'2px solid var(--border)'}}>Revenue</th>
-                  <th style={{padding:'10px 12px',textAlign:'right',fontWeight:700,fontSize:11,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',borderBottom:'2px solid var(--border)'}}>Repairs</th>
-                  <th style={{padding:'10px 12px',textAlign:'right',fontWeight:700,fontSize:11,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',borderBottom:'2px solid var(--border)'}}>Other Exp</th>
-                  <th style={{padding:'10px 12px',textAlign:'right',fontWeight:700,fontSize:11,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',borderBottom:'2px solid var(--border)'}}>Total Exp</th>
-                  <th style={{padding:'10px 12px',textAlign:'right',fontWeight:700,fontSize:11,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',borderBottom:'2px solid var(--border)'}}>Net P&amp;L</th>
-                  <th style={{padding:'10px 12px',textAlign:'right',fontWeight:700,fontSize:11,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',borderBottom:'2px solid var(--border)'}}>Margin</th>
-                </tr>
-              </thead>
-              <tbody>
-                {months.map((m,i)=>{
-                  const profit = m.net>=0;
-                  const margin = m.revenue>0?Math.round((m.net/m.revenue)*100):0;
-                  return (
-                    <tr key={m.month} style={{background:i%2===0?'transparent':'var(--bg3)',cursor:'pointer'}}
-                      onClick={()=>setSelMonth(m.month)}>
-                      <td style={{padding:'10px 12px',fontWeight:600,borderBottom:'1px solid var(--border)'}}>{fmtMonthLong(m.month)}</td>
-                      <td style={{padding:'10px 12px',textAlign:'right',fontWeight:600,color:'#27AE60',borderBottom:'1px solid var(--border)'}}>{fmtCur(m.revenue)}</td>
-                      <td style={{padding:'10px 12px',textAlign:'right',color:'var(--text2)',borderBottom:'1px solid var(--border)'}}>{m.repairs>0?fmtCur(m.repairs):'—'}</td>
-                      <td style={{padding:'10px 12px',textAlign:'right',color:'var(--text2)',borderBottom:'1px solid var(--border)'}}>{m.other>0?fmtCur(m.other):'—'}</td>
-                      <td style={{padding:'10px 12px',textAlign:'right',color:'#FF6F00',fontWeight:600,borderBottom:'1px solid var(--border)'}}>{fmtCur(m.expenses||0)}</td>
-                      <td style={{padding:'10px 12px',textAlign:'right',fontWeight:700,color:profit?'#27AE60':'#d32f2f',borderBottom:'1px solid var(--border)'}}>{profit?'+':'-'}{fmtCur(Math.abs(m.net))}</td>
-                      <td style={{padding:'10px 12px',textAlign:'right',borderBottom:'1px solid var(--border)'}}>
-                        <span style={{padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700,background:margin>15?'rgba(39,174,96,0.12)':margin>0?'rgba(255,152,0,0.12)':'rgba(211,47,47,0.1)',color:margin>15?'#27AE60':margin>0?'#F39C12':'#d32f2f'}}>{margin}%</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr style={{background:'rgba(106,27,154,0.06)',borderTop:'2px solid #6A1B9A'}}>
-                  <td style={{padding:'12px',fontWeight:800,fontSize:13,color:'#6A1B9A'}}>TOTAL</td>
-                  <td style={{padding:'12px',textAlign:'right',fontWeight:800,color:'#27AE60'}}>{fmtCur(totRevenue)}</td>
-                  <td style={{padding:'12px',textAlign:'right',fontWeight:700,color:'var(--text2)'}}>{totRepairs>0?fmtCur(totRepairs):'—'}</td>
-                  <td style={{padding:'12px',textAlign:'right',fontWeight:700,color:'var(--text2)'}}>{totOther>0?fmtCur(totOther):'—'}</td>
-                  <td style={{padding:'12px',textAlign:'right',fontWeight:800,color:'#FF6F00'}}>{fmtCur(totExpenses)}</td>
-                  <td style={{padding:'12px',textAlign:'right',fontWeight:800,color:totNet>=0?'#27AE60':'#d32f2f'}}>{totNet>=0?'+':'-'}{fmtCur(Math.abs(totNet))}</td>
-                  <td style={{padding:'12px',textAlign:'right'}}>
-                    <span style={{padding:'3px 10px',borderRadius:6,fontSize:12,fontWeight:800,background:avgMargin>15?'rgba(39,174,96,0.15)':avgMargin>0?'rgba(255,152,0,0.15)':'rgba(211,47,47,0.1)',color:avgMargin>15?'#27AE60':avgMargin>0?'#F39C12':'#d32f2f'}}>{avgMargin}%</span>
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
+          <div style={{background:isProfit?'rgba(39,174,96,0.07)':'rgba(255,111,0,0.07)',border:`1px solid ${isProfit?'rgba(39,174,96,0.2)':'rgba(255,111,0,0.2)'}`,borderRadius:10,padding:'14px 16px'}}>
+            <div style={{fontSize:11,fontWeight:700,color:isProfit?'#27AE60':'#FF6F00',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:6}}>Net {isProfit?'Profit':'Loss'}</div>
+            <div style={{fontSize:24,fontWeight:800,color:isProfit?'#27AE60':'#FF6F00'}}>{isProfit?'':'-'}{fmtCur(Math.abs(d.net))}</div>
+            <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>Margin: {d.revenue>0?Math.round((d.net/d.revenue)*100):0}%</div>
           </div>
-          <div style={{fontSize:11,color:'var(--text3)',marginTop:10}}>Click any row to view that month's detail.</div>
         </div>
-      )}
+        <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.6px',marginBottom:10}}>Expense Breakdown</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'2px 24px'}}>
+          {expenseRows.map(r=>(
+            <div key={r.label} style={{display:'flex',justifyContent:'space-between',padding:'7px 0',borderBottom:'1px solid var(--border)'}}>
+              <span style={{fontSize:13,color:'var(--text2)'}}>{r.label}</span>
+              <span style={{fontSize:13,fontWeight:600,color:'var(--text)'}}>{fmtCur(r.value)}</span>
+            </div>
+          ))}
+        </div>
+        {d.revenue>0&&(
+          <div style={{marginTop:16}}>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'var(--text2)',marginBottom:4}}>
+              <span>Expenses as % of Revenue</span><span>{Math.round((d.expenses/d.revenue)*100)}%</span>
+            </div>
+            <div className="progress">
+              <div className="progress-bar" style={{width:`${Math.min(100,Math.round((d.expenses/d.revenue)*100))}%`,background:d.expenses/d.revenue>1?'#FF6F00':d.expenses/d.revenue>0.85?'#F39C12':'#27AE60'}}/>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -4690,16 +4489,6 @@ const CsvImportModal = ({open, onClose, parsed, onApprove}) => {
 /* ─── REPORTS PAGE ────────────────────────────────── */
 const ReportsPage = ({theme, xeroConfig, sheetsConfig, livePnl:propLivePnl}) => {
   const [tab,setTab]=useState('pl');
-  const [livePnl,setLivePnl]=useState(()=>propLivePnl||loadCachedPnl());
-  const [finLoading,setFinLoading]=useState(false);
-  const handleFinRefresh=async()=>{
-    if(!sheetsConfig?.accessToken){alert('Connect Google Sheets first in Settings.');return;}
-    setFinLoading(true);
-    var data=await loadPnlFromSheet(sheetsConfig.accessToken);
-    if(data&&data.length>0){setLivePnl(data);alert('Financial data refreshed! '+data.length+' months loaded.');}
-    else alert('Could not read financial sheet. Make sure Google Sheets is connected.');
-    setFinLoading(false);
-  };
   const [bankTxns,setBankTxns]=useState(()=>loadBankTxns());
   const [bankMeta,setBankMeta]=useState(()=>loadBankMeta());
   const [parsedCsv,setParsedCsv]=useState(null);
@@ -4716,7 +4505,10 @@ const ReportsPage = ({theme, xeroConfig, sheetsConfig, livePnl:propLivePnl}) => 
   const pdfRef     = useRef();
   const [importType, setImportType] = useState('');
 
-  const pnlData = livePnl || loadCachedPnl() || (bankTxns.length>0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL);
+  const [livePnlState,setLivePnlState]=useState(()=>propLivePnl||loadCachedPnl());
+  const [finLoading,setFinLoading]=useState(false);
+  const handleFinRefresh=async()=>{if(!sheetsConfig?.accessToken){alert('Connect Google Sheets first.');return;}setFinLoading(true);var data=await loadPnlFromSheet(sheetsConfig.accessToken);if(data&&data.length>0){setLivePnlState(data);alert('Financial data refreshed! '+data.length+' months loaded.');}else alert('Could not read financial sheet.');setFinLoading(false);};
+  const pnlData = livePnlState || loadCachedPnl() || (bankTxns.length>0 ? buildPnlFromTxns(bankTxns) : PNL_DETAIL);
   const ytdMonths = pnlData.filter(m=>m.month.startsWith('2026'));
   const totalRev=ytdMonths.reduce((a,m)=>a+m.revenue,0);
   const totalExp=ytdMonths.reduce((a,m)=>a+m.expenses,0);
@@ -4965,7 +4757,7 @@ tr:nth-child(even){background:#f9f9f9}
         <div className="flex gap-2">
           <button className="btn btn-ghost btn-sm" onClick={handleExportPDF}><Icon name="download" size={13}/> Export PDF</button>
           <button className="btn btn-ghost btn-sm" onClick={handleExportExcel} style={{borderColor:'#217346',color:'#217346'}}><Icon name="download" size={13}/> Export Excel</button>
-          <button className="btn btn-ghost btn-sm" onClick={handleFinRefresh} disabled={finLoading} style={{borderColor:'#6A1B9A',color:'#6A1B9A'}}><Icon name="reports" size={13}/> {finLoading?'Loading\u2026':'\u27f3 Sync Financials'}</button>
+          <button className="btn btn-ghost btn-sm" onClick={handleFinRefresh} disabled={finLoading} style={{borderColor:'#6A1B9A',color:'#6A1B9A'}}><Icon name="reports" size={13}/> {finLoading?'Loading...':'Sync Financials'}</button>
         </div>
       </div>
 
@@ -7043,12 +6835,16 @@ const generateAgreementHTML = (d) => {
   const title = d.docTitle || 'Truck and Trailer Agreement';
   const isLease = d.isLease === true; // only Lease if explicitly set
   const agreementWord = isLease ? 'Lease' : 'Rental';
-  const section6A = isLease ? '<h2>6A. Breakdown and Replacement Vehicle</h2>'
+  const section7 = isLease
+    ? '<h2>7. Insurance and Liability</h2><p><strong>7.1 Lessee\'s Obligation to Insure.</strong> The Lessee shall, at its sole cost and expense, procure, maintain and keep current throughout the entire Lease Term (and any extension or holdover period) comprehensive motor vehicle insurance and third-party liability insurance over each Vehicle in amounts no less than: (a) the full replacement value of each Vehicle for own-damage cover; and (b) $5,000,000 (five million dollars) per occurrence for third-party bodily injury and property damage liability. The Lessee shall ensure that SS Rentals is noted on each policy as an interested party and loss payee.</p><p><strong>7.2 Policy Requirements.</strong> Each insurance policy maintained by the Lessee pursuant to clause 7.1 must: (a) be placed with a reputable and solvent insurer licensed in New Zealand and approved in writing by SS Rentals (approval not to be unreasonably withheld or delayed); (b) not contain terms, conditions or exclusions that materially prejudice the interests of SS Rentals; (c) remain continuously in force for the full duration of the Lease Term; and (d) provide that the insurer will give SS Rentals not less than thirty (30) days\' prior written notice of any material alteration, cancellation or lapse of coverage.</p><p><strong>7.3 Evidence of Insurance.</strong> The Lessee shall deliver to SS Rentals: (a) a current certificate of currency and evidence of premium payment within seven (7) days of the Commencement Date; and (b) a renewal certificate within seven (7) days of each subsequent policy renewal. Failure to maintain required insurance or to provide satisfactory evidence thereof shall constitute a material breach of this Agreement, entitling SS Rentals to: (i) terminate this Agreement immediately pursuant to Clause 10; and/or (ii) procure replacement insurance cover at the Lessee\'s cost and add the premium to the next monthly invoice.</p><p><strong>7.4 Excess and Uninsured Losses.</strong> The Lessee is solely and absolutely responsible for the payment of all insurance excesses, deductibles and any uninsured losses arising during the Lease Term. SS Rentals shall bear no responsibility whatsoever for any shortfall in coverage or uninsured exposure arising from the Lessee\'s failure to maintain adequate insurance.</p><p><strong>7.5 Prohibited Use.</strong> The Lessee must not use, or permit the use of, any Vehicle in any manner that would void, prejudice or render voidable any insurance policy, including but not limited to: (a) operation by an unlicensed, disqualified or uninsured driver; (b) operation under the influence of alcohol, drugs or other impairing substances; (c) overloading beyond the Vehicle\'s rated gross vehicle mass; (d) use outside the geographic area or purpose permitted under the policy; or (e) modification of the Vehicle without the insurer\'s prior written consent.</p><p><strong>7.6 Claims Procedure.</strong> Upon the occurrence of any accident, theft, damage, fire or third-party claim involving any Vehicle, the Lessee must: (a) immediately (and in any event within 24 hours) notify SS Rentals in writing with full particulars; (b) not admit liability, make any offer of settlement or take any action that may prejudice SS Rentals\' or the insurer\'s position; (c) record and preserve the names, addresses, contact details and insurance information of all parties involved; (d) report the incident to the New Zealand Police where required by law or where the insurer requires a police report; (e) lodge a claim with the insurer promptly and without delay; and (f) cooperate fully with SS Rentals and any insurer or loss adjuster in the investigation, assessment and resolution of any claim.</p><p><strong>7.7 Indemnity.</strong> Without limiting any other provision of this Agreement, the Lessee shall fully indemnify, defend and hold harmless SS Rentals and its directors, officers, employees and agents from and against all actions, claims, demands, losses, liabilities, damages, costs and expenses (including legal costs on a full solicitor-client indemnity basis) arising out of or in connection with: (a) the Lessee\'s failure to procure or maintain the insurance required under this clause; (b) any claim, loss or liability that is not covered by insurance as a result of the Lessee\'s act, omission, negligence or breach of this Agreement; (c) any excess, deductible or uninsured portion of any claim; or (d) any third-party claim arising from the Lessee\'s use or operation of the Vehicle(s) during the Lease Term.</p><p><strong>7.8 Survival.</strong> The Lessee\'s obligations under this clause 7 shall survive the expiry or earlier termination of this Agreement and shall remain binding in respect of any event, act or omission occurring during the Lease Term.</p>'
+    : '<h2>7. Insurance and Liability</h2><p><strong>7.1</strong> The Vehicle(s) are covered under SS Rentals\' comprehensive insurance policy for the duration of this Agreement, subject to its terms, conditions and exclusions.</p><p><strong>7.2</strong> The Hirer is solely responsible for payment of the applicable insurance excess. The current excess is $5,000 (or as otherwise notified by SS Rentals).</p><p><strong>7.3</strong> The Hirer must not use the Vehicle(s) in any manner that would void or prejudice the insurance policy, including overloading, use by unlicensed drivers, or use under the influence of alcohol or drugs.</p><p><strong>7.4</strong> The Hirer shall indemnify and hold harmless SS Rentals from all claims, losses, damages and expenses arising from the Hirer\'s use of the Vehicle(s).</p><p><strong>7.5</strong> In the event of any accident, theft or damage, the Hirer must: (a) immediately notify SS Rentals; (b) not admit liability to any third party; (c) obtain contact details of all parties; (d) report to Police where required; and (e) complete SS Rentals\' incident report within 24 hours.</p>';
+  const section6A = isLease
+    ? '<h2>6A. Breakdown and Replacement Vehicle</h2>'
     + '<p><strong>6A.1</strong> In the event that the leased Vehicle(s) become inoperable due to mechanical breakdown or failure, SS Rentals shall use reasonable endeavours to arrange the necessary repairs as soon as practicable.</p>'
-    + '<p><strong>6A.2</strong> Where the anticipated repair period exceeds three (3) consecutive calendar days from the date SS Rentals is notified of the breakdown, SS Rentals shall, subject to availability, provide the Lessee with a replacement vehicle of a similar class and operational capability for the duration of the repair period. For the avoidance of doubt, no obligation to provide a replacement vehicle arises where the repair period is three (3) days or fewer.</p>'
-    + '<p><strong>6A.3</strong> The provision of any replacement vehicle is conditional upon: (a) the Lessee having complied with all obligations under this Agreement at the time of the breakdown; (b) the breakdown not being attributable to the Lessee\'s negligence, misuse, or breach of this Agreement; and (c) a suitable replacement vehicle being available in SS Rentals\' fleet.</p>'
-    + '<p><strong>6A.4</strong> Any replacement vehicle provided shall be subject to the full terms and conditions of this Agreement. The Lessee shall remain responsible for all obligations in respect of the replacement vehicle for the duration of its supply, including insurance excess liability and compliance with all road transport regulations.</p>'
-    + '<p><strong>6A.5</strong> SS Rentals shall bear no liability for any consequential loss, loss of income, or business interruption suffered by the Lessee arising from any period during which the Vehicle(s) are unavailable due to breakdown or repair.</p>'
+    + '<p><strong>6A.2</strong> Where the anticipated repair period exceeds three (3) consecutive calendar days from the date SS Rentals is notified of the breakdown, SS Rentals shall, subject to availability, provide the Lessee with a replacement vehicle of a similar class and operational capability. For the avoidance of doubt, no obligation to provide a replacement vehicle arises where the repair period is three (3) days or fewer.</p>'
+    + '<p><strong>6A.3</strong> Any replacement vehicle is conditional upon: (a) the Lessee being in compliance with all obligations under this Agreement; (b) the breakdown not being attributable to the Lessee\'s negligence or breach; and (c) a suitable replacement being available in SS Rentals\' fleet.</p>'
+    + '<p><strong>6A.4</strong> Any replacement vehicle shall be subject to the full terms of this Agreement. The Lessee remains responsible for all obligations in respect of the replacement vehicle during the period of its supply.</p>'
+    + '<p><strong>6A.5</strong> SS Rentals shall bear no liability for consequential loss, loss of income, or business interruption arising from any period during which the Vehicle(s) are unavailable due to breakdown or repair.</p>'
     : '';
   const guaranteeSection = isLease
     ? '<div class="page-break"></div>' +
@@ -7107,12 +6903,14 @@ p{margin:5px 0}
 <p><strong>2.4</strong> The Hirer waives its rights under sections 114(1)(a), 116, 117, 119, 120(2), 121, 125, 129, 131, 132, 133, 134 and 148 of the PPSA.</p>
 
 <h2>3. Lease Term and Rental Charges</h2>
-<p><strong>3.1</strong> The Lease Term is set out in the Schedule. The Hirer agrees to pay the Rental Charges as specified in the Schedule.</p>
+<p><strong>3.1</strong> The Lease Term is set out in the Schedule. The Lessee agrees to pay the Rental Charges as specified in the Schedule.</p>
 <p><strong>Monthly Lease Rate:</strong> NZD $${d.monthlyRate} per month + GST</p>
-<p><strong>3.2</strong> Payments shall be made monthly in advance by direct debit from the Hirer's nominated bank account. Invoices will be issued at the commencement of each month.</p>
+<p><strong>3.2</strong> Payments shall be made monthly in advance by direct debit from the Lessee's nominated bank account. Invoices will be issued at the commencement of each month.</p>
 <p><strong>3.3</strong> A Direct Debit Dishonour Fee of 5% of the total invoice amount will be charged if any scheduled payment is declined or dishonoured.</p>
-<p><strong>3.4</strong> In addition to the Monthly Lease Rate, the Lessee shall pay to SS Rentals a monthly charge of <strong>$200.00 + GST</strong> in respect of Eroad GPS tracking and fleet monitoring services fitted to the Vehicle(s). This charge is payable concurrently with the monthly lease payment and shall be included in the monthly invoice.</p>
+<p><strong>3.4</strong> In addition to the Monthly Lease Rate, the Lessee shall pay a monthly charge of <strong>$200.00 + GST</strong> for Eroad GPS tracking and fleet monitoring services fitted to the Vehicle(s). This charge is payable concurrently with each monthly lease payment.</p>
 <p><strong>3.5</strong> All charges under this Agreement are exclusive of GST unless otherwise stated. GST will be added at the prevailing rate.</p>
+
+
 
 <h2>4. Obligation to Pay Remaining Lease Term</h2>
 <p class="highlight"><strong>4.1 Critical Obligation:</strong> If the Hirer terminates this Agreement before the agreed Lease Term end date, for any reason whatsoever, the Hirer remains <strong>fully liable</strong> to pay the <strong>total remaining balance of the Rental Charges</strong> for the entire unexpired portion of the Lease Term.</p>
@@ -7138,12 +6936,7 @@ p{margin:5px 0}
 <p><strong>6.6</strong> In the event of an accident, the Hirer must immediately notify SS Rentals and comply with all reporting and insurance procedures.</p>
 
 ${section6A}
-<h2>7. Insurance and Liability</h2>
-<p><strong>7.1</strong> The Vehicle(s) will be covered under SS Rentals' insurance policy during the Lease Term, subject to its terms, conditions, and exclusions.</p>
-<p><strong>7.2</strong> The Hirer is solely responsible for the payment of any applicable insurance excess or deductible.</p>
-<p><strong>7.3</strong> The Hirer shall indemnify and hold harmless SS Rentals from all claims, liabilities, losses, or expenses arising from the Hirer's operation or use of the Vehicle(s).</p>
-<p><strong>7.4</strong> In the case of any accident involving third parties, the Hirer shall promptly provide all required information to SS Rentals.</p>
-
+${section7}
 <h2>8. Fines, Penalties, and Violations</h2>
 <p>The Hirer is solely responsible for all fines, penalties, and charges incurred during the Lease Term, including speeding infringements, overweight violations, parking fines, toll violations, and any other traffic or regulatory infractions arising from the Hirer's use of the Vehicle(s).</p>
 
@@ -7878,117 +7671,9 @@ const QuotesPage = () => {
   const mkQ=function(t){return{quoteNumber:'Q-'+Date.now().toString().slice(-6),quoteDate:new Date().toISOString().slice(0,10),validDays:'14',customerMode:'new',useExistingCustomer:'',companyName:'',contactName:'',contactPhone:'',contactEmail:'',contactAddress:'',vehicleType:t?(t.type||'truck_trailer'):'truck_trailer',truckDesc:t?(t.truckDesc||''):'',trailerDesc:t?(t.trailerDesc||''):'',hireDuration:'',hireDurationUnit:'weeks',startDate:'',endDate:'',chargeType:t?(t.chargeType||'weekly'):'weekly',dailyRate:t?(t.dailyRate||0):0,weeklyRate:t?(t.weeklyRate||0):0,monthlyRate:t?(t.monthlyRate||0):0,rucRate:t?(t.rucRate||0):0,mileageRate:t?(t.mileageRate||0):0,maxMileage:t?(t.maxMileage||''):'',extraTerms:t?(t.extraTerms||[]):[],notes:t?(t.notes||''):'All prices are in NZD and exclude GST.',templateId:t?(t.id||''):'',};};
   const qSave=function(){if(!qform||!qform.companyName){alert('Enter a company name.');return;}var ex=getAllCustomers().find(function(c){return c.company.toLowerCase().trim()===qform.companyName.toLowerCase().trim();});if(qform.customerMode==='new'&&!ex)createNewCustomer({company:qform.companyName,contact:qform.contactName||'',phone:qform.contactPhone||'',email:qform.contactEmail||'',address:qform.contactAddress||'',status:'prospect'});var u=[{id:'Q-'+Date.now(),savedAt:new Date().toISOString(),form:Object.assign({},qform)}].concat(qlist);setQlist(u);try{localStorage.setItem('ss_rentals_quotes',JSON.stringify(u));}catch(e){}alert('Quote saved!');};
   const qDel=function(id){if(!window.confirm('Delete?'))return;var u=qlist.filter(function(q){return q.id!==id;});setQlist(u);try{localStorage.setItem('ss_rentals_quotes',JSON.stringify(u));}catch(e){}};
-  const qPDF=function(){if(!qform)return;var f=qform;var rows=[];if(parseFloat(f.weeklyRate)>0)rows.push('<tr><td>Weekly Hire Rate</td><td>$'+parseFloat(f.weeklyRate).toLocaleString('en-NZ',{minimumFractionDigits:2})+'</td></tr>');if(parseFloat(f.monthlyRate)>0)rows.push('<tr><td>Monthly Hire Rate</td><td>$'+parseFloat(f.monthlyRate).toLocaleString('en-NZ',{minimumFractionDigits:2})+'</td></tr>');if(parseFloat(f.rucRate)>0)rows.push('<tr><td>RUC Charges</td><td>'+f.rucRate+' c/km</td></tr>');if(f.maxMileage)rows.push('<tr><td>Max Mileage</td><td>'+f.maxMileage+'</td></tr>');var notes=String(f.notes||'').split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');var fname='Quote_'+f.quoteNumber+'_'+String(f.companyName||'Draft').split(' ').join('_');var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm}h1{color:#FF6F00}h2{color:#6A1B9A;border-bottom:1.5px solid #FF6F00;padding-bottom:4px}table{width:100%;border-collapse:collapse;margin-bottom:14px}td{border:1px solid #ddd;padding:8px 12px}td:first-child{background:#f0f4f8;font-weight:600;width:45%}.notes{border:1px solid #ddd;padding:12px;white-space:pre-wrap}.sig{border-top:2px solid #6A1B9A;margin-top:24px;padding-top:10px}</style></head><body><h1>SS Rentals - Rental Quotation</h1><p>Quote: <b>'+f.quoteNumber+'</b> | Date: '+f.quoteDate+'</p><h2>Prepared For</h2><table><tr><td>Company</td><td>'+f.companyName+'</td></tr><tr><td>Contact</td><td>'+f.contactName+'</td></tr>'+(f.contactPhone?'<tr><td>Phone</td><td>'+f.contactPhone+'</td></tr>':'')+'</table><h2>Charges</h2><table>'+rows.join('')+'</table><h2>Notes</h2><div class="notes">'+notes+'</div><div class="sig"><p>Name: _________________________ Signature: _________________________</p><p>Date: _________________________</p></div><div style="margin-top:20px;font-size:9pt;color:#888;text-align:center">SS Rentals | 280a Peak Road, Cambridge, NZ | All amounts NZD excl GST</div></body></html>';var pr=html.replace('</head>','<scr'+'ipt>window.onload=function(){document.title="'+fname+'";setTimeout(window.print,400)};<'+'/scr'+'ipt></head>');var w=window.open('','_blank');if(!w){alert('Allow pop-ups.');return;}w.document.write(pr);w.document.close();};
-
-  if(qstep===0) return (
-    <div>
-      <div style={{fontSize:20,fontWeight:800,marginBottom:16}}>Quotes</div>
-      <div style={{fontWeight:700,fontSize:11,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.7px',marginBottom:12}}>Templates</div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:12,marginBottom:28}}>
-        {QUOTE_TEMPLATES.map(tpl=>(
-          <div key={tpl.id} className="card" style={{padding:'16px 18px',cursor:'pointer',border:'1.5px solid var(--border)'}}
-            onClick={()=>{setQtpl(tpl);setQform(mkQ(tpl));setQstep(1);}}>
-            <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{tpl.name}</div>
-            <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>{tpl.chargeType==='weekly'?'Weekly':'Monthly'}</div>
-            {tpl.weeklyRate>0&&<span className="badge badge-blue">{'$'+tpl.weeklyRate.toLocaleString()+'/wk'}</span>}
-            {tpl.monthlyRate>0&&<span className="badge badge-blue">{'$'+tpl.monthlyRate.toLocaleString()+'/mo'}</span>}
-          </div>
-        ))}
-        <div className="card" style={{padding:'16px 18px',cursor:'pointer',border:'1.5px dashed var(--border2)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:90}}
-          onClick={()=>{setQtpl(null);setQform(mkQ(null));setQstep(1);}}>
-          <div style={{fontSize:24,color:'var(--text3)'}}>+</div>
-          <div style={{fontWeight:700,color:'var(--text2)'}}>Blank Quote</div>
-        </div>
-      </div>
-      {qlist.length>0&&(
-        <div>
-          <div style={{fontWeight:700,fontSize:11,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.7px',marginBottom:12}}>Saved Quotes ({qlist.length})</div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:10}}>
-            {qlist.map(q=>(
-              <div key={q.id} className="card" style={{padding:'14px 16px'}}>
-                <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
-                  <div style={{fontWeight:700,fontSize:13,color:'#6A1B9A'}}>{q.form.quoteNumber}</div>
-                  <button onClick={()=>qDel(q.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'var(--text3)',padding:0}}>x</button>
-                </div>
-                <div style={{fontWeight:600,marginBottom:6}}>{q.form.companyName}</div>
-                <button className="btn btn-primary btn-sm" style={{width:'100%',justifyContent:'center'}} onClick={()=>{setQform(Object.assign({},mkQ(null),q.form));setQtpl(null);setQstep(1);}}>Open</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  if(qstep===1&&qform) return (
-    <div>
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}>
-        <button className="btn btn-ghost btn-sm" onClick={()=>setQstep(0)}>Back</button>
-        <span style={{fontWeight:600,color:'#6A1B9A'}}>{qtpl?qtpl.name:'New Quote'}</span>
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
-        <div style={{display:'flex',flexDirection:'column',gap:14}}>
-          <div className="card" style={{padding:'14px 16px'}}>
-            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Quote Details</div>
-            <div className="form-group"><label>Quote No.</label><input value={qform.quoteNumber} onChange={e=>upd('quoteNumber',e.target.value)}/></div>
-            <div className="form-group"><label>Date</label><input type="date" value={qform.quoteDate} onChange={e=>upd('quoteDate',e.target.value)}/></div>
-            <div className="form-group"><label>Valid (days)</label><input type="number" value={qform.validDays} onChange={e=>upd('validDays',e.target.value)}/></div>
-          </div>
-          <div className="card" style={{padding:'14px 16px'}}>
-            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Customer</div>
-            <div className="form-group"><label>Company *</label><input placeholder="e.g. GSR Transport Ltd" value={qform.companyName} onChange={e=>upd('companyName',e.target.value)}/></div>
-            <div className="form-group"><label>Contact</label><input value={qform.contactName} onChange={e=>upd('contactName',e.target.value)}/></div>
-            <div className="form-group"><label>Phone</label><input value={qform.contactPhone} onChange={e=>upd('contactPhone',e.target.value)}/></div>
-            <div className="form-group"><label>Email</label><input type="email" value={qform.contactEmail} onChange={e=>upd('contactEmail',e.target.value)}/></div>
-          </div>
-          <div className="card" style={{padding:'14px 16px'}}>
-            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Hire Details</div>
-            <div className="form-group"><label>Vehicle Type</label>
-              <select value={qform.vehicleType} onChange={e=>upd('vehicleType',e.target.value)}>
-                <option value="truck_trailer">Truck + Trailer</option>
-                <option value="truck_only">Truck Only</option>
-                <option value="trailer_only">Trailer Only</option>
-              </select>
-            </div>
-            <div className="form-group"><label>Duration</label>
-              <div style={{display:'flex',gap:8}}>
-                <input type="number" min="1" value={qform.hireDuration} onChange={e=>upd('hireDuration',e.target.value)} style={{flex:2}}/>
-                <select value={qform.hireDurationUnit} onChange={e=>upd('hireDurationUnit',e.target.value)} style={{flex:1}}>
-                  <option value="days">Days</option><option value="weeks">Weeks</option><option value="months">Months</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div style={{display:'flex',flexDirection:'column',gap:14}}>
-          <div className="card" style={{padding:'14px 16px'}}>
-            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Charges</div>
-            <div className="form-group"><label>Charge Type</label>
-              <select value={qform.chargeType} onChange={e=>upd('chargeType',e.target.value)}>
-                <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
-              </select>
-            </div>
-            <div className="form-group"><label>Weekly Rate ($)</label><input type="text" value={qform.weeklyRate||''} onChange={e=>upd('weeklyRate',e.target.value)}/></div>
-            <div className="form-group"><label>Monthly Rate ($)</label><input type="text" value={qform.monthlyRate||''} onChange={e=>upd('monthlyRate',e.target.value)}/></div>
-            <div className="form-group"><label>RUC (c/km)</label><input type="text" value={qform.rucRate||''} onChange={e=>upd('rucRate',e.target.value)}/></div>
-            <div className="form-group"><label>Max Mileage</label><input placeholder="e.g. 130,000 km p.a." value={qform.maxMileage} onChange={e=>upd('maxMileage',e.target.value)}/></div>
-          </div>
-          <div className="card" style={{padding:'14px 16px'}}>
-            <div style={{fontWeight:700,fontSize:11,marginBottom:8,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Notes</div>
-            <textarea rows={5} value={qform.notes} onChange={e=>upd('notes',e.target.value)} style={{width:'100%',resize:'vertical',fontSize:12,fontFamily:'inherit'}}/>
-          </div>
-          <div className="card" style={{padding:'16px',background:'rgba(106,27,154,.04)',border:'1.5px solid rgba(106,27,154,.15)'}}>
-            <div style={{fontWeight:700,color:'#6A1B9A',marginBottom:10}}>{qform.quoteNumber} - {qform.companyName||'No customer'}</div>
-            <div style={{display:'flex',gap:10}}>
-              <button className="btn btn-primary" style={{flex:1,justifyContent:'center'}} onClick={qPDF}><Icon name="download" size={14}/> PDF</button>
-              <button className="btn btn-ghost" style={{flex:1,justifyContent:'center',borderColor:'#27AE60',color:'#27AE60'}} onClick={qSave}>Save</button>
-              <button className="btn btn-ghost" onClick={()=>setQform(mkQ(qtpl))}>Reset</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  const qPDF=function(){if(!qform)return;var f=qform;var rows=[];if(parseFloat(f.weeklyRate)>0)rows.push('<tr><td>Weekly Hire Rate</td><td>$'+parseFloat(f.weeklyRate).toLocaleString('en-NZ',{minimumFractionDigits:2})+'</td></tr>');if(parseFloat(f.monthlyRate)>0)rows.push('<tr><td>Monthly Hire Rate</td><td>$'+parseFloat(f.monthlyRate).toLocaleString('en-NZ',{minimumFractionDigits:2})+'</td></tr>');if(parseFloat(f.rucRate)>0)rows.push('<tr><td>RUC Charges</td><td>'+f.rucRate+' c/km</td></tr>');if(f.maxMileage)rows.push('<tr><td>Max Mileage</td><td>'+f.maxMileage+'</td></tr>');var notes=String(f.notes||'').split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');var fname='Quote_'+f.quoteNumber+'_'+String(f.companyName||'Draft').split(' ').join('_');var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm}h1{color:#FF6F00}h2{color:#6A1B9A;border-bottom:1.5px solid #FF6F00;padding-bottom:4px}table{width:100%;border-collapse:collapse;margin-bottom:14px}td{border:1px solid #ddd;padding:8px 12px}td:first-child{background:#f0f4f8;font-weight:600;width:45%}.notes{border:1px solid #ddd;padding:12px;white-space:pre-wrap}.sig{border-top:2px solid #6A1B9A;margin-top:24px;padding-top:10px}</style></head><body><h1>SS Rentals - Rental Quotation</h1><p>Quote: <b>'+f.quoteNumber+'</b> | Date: '+f.quoteDate+'</p><h2>Prepared For</h2><table><tr><td>Company</td><td>'+f.companyName+'</td></tr><tr><td>Contact</td><td>'+f.contactName+'</td></tr>'+(f.contactPhone?'<tr><td>Phone</td><td>'+f.contactPhone+'</td></tr>':'')+'</table><h2>Charges</h2><table>'+rows.join('')+'</table><h2>Notes</h2><div class="notes">'+notes+'</div><div class="sig"><p>Name: _________________________ Signature: _________________________</p><p>Date: _________________________</p></div></body></html>';var pr=html.replace('</head>','<scr'+'ipt>window.onload=function(){document.title="'+fname+'";setTimeout(window.print,400)};<'+'/scr'+'ipt></head>');var w=window.open('','_blank');if(!w){alert('Allow pop-ups.');return;}w.document.write(pr);w.document.close();};
+  if(qstep===0)return(<div><div style={{fontSize:20,fontWeight:800,marginBottom:16}}>Quotes</div><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:12,marginBottom:28}}>{QUOTE_TEMPLATES.map(tpl=>(<div key={tpl.id} className="card" style={{padding:'16px 18px',cursor:'pointer',border:'1.5px solid var(--border)'}} onClick={()=>{setQtpl(tpl);setQform(mkQ(tpl));setQstep(1);}}><div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{tpl.name}</div><div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>{tpl.chargeType==='weekly'?'Weekly':'Monthly'}</div>{tpl.weeklyRate>0&&<span className="badge badge-blue">{'$'+tpl.weeklyRate.toLocaleString()+'/wk'}</span>}{tpl.monthlyRate>0&&<span className="badge badge-blue">{'$'+tpl.monthlyRate.toLocaleString()+'/mo'}</span>}</div>))}<div className="card" style={{padding:'16px 18px',cursor:'pointer',border:'1.5px dashed var(--border2)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:90}} onClick={()=>{setQtpl(null);setQform(mkQ(null));setQstep(1);}}><div style={{fontSize:24,color:'var(--text3)'}}>+</div><div style={{fontWeight:700,color:'var(--text2)'}}>Blank Quote</div></div></div>{qlist.length>0&&(<div><div style={{fontWeight:700,fontSize:11,color:'var(--text3)',textTransform:'uppercase',marginBottom:10}}>Saved ({qlist.length})</div><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:10}}>{qlist.map(q=>(<div key={q.id} className="card" style={{padding:'14px 16px'}}><div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}><div style={{fontWeight:700,color:'#6A1B9A'}}>{q.form.quoteNumber}</div><button onClick={()=>qDel(q.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'var(--text3)',padding:0}}>x</button></div><div style={{fontWeight:600,marginBottom:6}}>{q.form.companyName}</div><button className="btn btn-primary btn-sm" style={{width:'100%',justifyContent:'center'}} onClick={()=>{setQform(Object.assign({},mkQ(null),q.form));setQtpl(null);setQstep(1);}}>Open</button></div>))}</div></div>)}</div>);
+  if(qstep===1&&qform)return(<div><div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={()=>setQstep(0)}>Back</button><span style={{fontWeight:600,color:'#6A1B9A'}}>{qtpl?qtpl.name:'New Quote'}</span></div><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}><div style={{display:'flex',flexDirection:'column',gap:14}}><div className="card" style={{padding:'14px 16px'}}><div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Quote Details</div><div className="form-group"><label>Quote No.</label><input value={qform.quoteNumber} onChange={e=>upd('quoteNumber',e.target.value)}/></div><div className="form-group"><label>Date</label><input type="date" value={qform.quoteDate} onChange={e=>upd('quoteDate',e.target.value)}/></div><div className="form-group"><label>Valid (days)</label><input type="number" value={qform.validDays} onChange={e=>upd('validDays',e.target.value)}/></div></div><div className="card" style={{padding:'14px 16px'}}><div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Customer</div><div className="form-group"><label>Company *</label><input placeholder="e.g. GSR Transport Ltd" value={qform.companyName} onChange={e=>upd('companyName',e.target.value)}/></div><div className="form-group"><label>Contact</label><input value={qform.contactName} onChange={e=>upd('contactName',e.target.value)}/></div><div className="form-group"><label>Phone</label><input value={qform.contactPhone} onChange={e=>upd('contactPhone',e.target.value)}/></div><div className="form-group"><label>Email</label><input type="email" value={qform.contactEmail} onChange={e=>upd('contactEmail',e.target.value)}/></div></div></div><div style={{display:'flex',flexDirection:'column',gap:14}}><div className="card" style={{padding:'14px 16px'}}><div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Charges</div><div className="form-group"><label>Charge Type</label><select value={qform.chargeType} onChange={e=>upd('chargeType',e.target.value)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div><div className="form-group"><label>Weekly Rate ($)</label><input type="text" value={qform.weeklyRate||''} onChange={e=>upd('weeklyRate',e.target.value)}/></div><div className="form-group"><label>Monthly Rate ($)</label><input type="text" value={qform.monthlyRate||''} onChange={e=>upd('monthlyRate',e.target.value)}/></div><div className="form-group"><label>RUC (c/km)</label><input type="text" value={qform.rucRate||''} onChange={e=>upd('rucRate',e.target.value)}/></div><div className="form-group"><label>Max Mileage</label><input placeholder="e.g. 130,000 km p.a." value={qform.maxMileage} onChange={e=>upd('maxMileage',e.target.value)}/></div></div><div className="card" style={{padding:'14px 16px'}}><div style={{fontWeight:700,fontSize:11,marginBottom:8,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Notes</div><textarea rows={5} value={qform.notes} onChange={e=>upd('notes',e.target.value)} style={{width:'100%',resize:'vertical',fontSize:12,fontFamily:'inherit'}}/></div><div className="card" style={{padding:'16px',background:'rgba(106,27,154,.04)',border:'1.5px solid rgba(106,27,154,.15)'}}><div style={{fontWeight:700,color:'#6A1B9A',marginBottom:10}}>{qform.quoteNumber} - {qform.companyName||'No customer'}</div><div style={{display:'flex',gap:10}}><button className="btn btn-primary" style={{flex:1,justifyContent:'center'}} onClick={qPDF}><Icon name="download" size={14}/> PDF</button><button className="btn btn-ghost" style={{flex:1,justifyContent:'center',borderColor:'#27AE60',color:'#27AE60'}} onClick={qSave}>Save</button><button className="btn btn-ghost" onClick={()=>setQform(mkQ(qtpl))}>Reset</button></div></div></div></div></div>);
   return null;
 };
 
@@ -8521,14 +8206,14 @@ const App = () => {
     const isTokenValid = (cfg) => cfg?.accessToken && cfg?.tokenExpiry && Date.now() < cfg.tokenExpiry - 60000;
     if (isTokenValid(sheetsConfig)) {
       doSync(sheetsConfig);
-      loadPnlFromSheet(sheetsConfig.accessToken).then(function(data){if(data&&data.length>0){setLivePnl(data);}});
+      loadPnlFromSheet(sheetsConfig.accessToken).then(function(data){if(data&&data.length>0)setLivePnl(data);});
     }
     // Every 5 min: sync ONLY if token still valid — no refresh, no popup ever
     autoSyncTimer.current = setInterval(()=>{
       const cfg = loadSheetsConfig();
       if (isTokenValid(cfg)) {
         doSync(cfg);
-        loadPnlFromSheet(cfg.accessToken).then(function(data){if(data&&data.length>0){setLivePnl(data);}});
+        loadPnlFromSheet(cfg.accessToken).then(function(data){if(data&&data.length>0)setLivePnl(data);});
       }
     }, 5*60*1000);
     return ()=>clearInterval(autoSyncTimer.current);
