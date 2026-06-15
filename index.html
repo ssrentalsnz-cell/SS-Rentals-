@@ -7043,6 +7043,13 @@ const generateAgreementHTML = (d) => {
   const title = d.docTitle || 'Truck and Trailer Agreement';
   const isLease = d.isLease === true; // only Lease if explicitly set
   const agreementWord = isLease ? 'Lease' : 'Rental';
+  const section6A = isLease ? '<h2>6A. Breakdown and Replacement Vehicle</h2>'
+    + '<p><strong>6A.1</strong> In the event that the leased Vehicle(s) become inoperable due to mechanical breakdown or failure, SS Rentals shall use reasonable endeavours to arrange the necessary repairs as soon as practicable.</p>'
+    + '<p><strong>6A.2</strong> Where the anticipated repair period exceeds three (3) consecutive calendar days from the date SS Rentals is notified of the breakdown, SS Rentals shall, subject to availability, provide the Lessee with a replacement vehicle of a similar class and operational capability for the duration of the repair period. For the avoidance of doubt, no obligation to provide a replacement vehicle arises where the repair period is three (3) days or fewer.</p>'
+    + '<p><strong>6A.3</strong> The provision of any replacement vehicle is conditional upon: (a) the Lessee having complied with all obligations under this Agreement at the time of the breakdown; (b) the breakdown not being attributable to the Lessee\'s negligence, misuse, or breach of this Agreement; and (c) a suitable replacement vehicle being available in SS Rentals\' fleet.</p>'
+    + '<p><strong>6A.4</strong> Any replacement vehicle provided shall be subject to the full terms and conditions of this Agreement. The Lessee shall remain responsible for all obligations in respect of the replacement vehicle for the duration of its supply, including insurance excess liability and compliance with all road transport regulations.</p>'
+    + '<p><strong>6A.5</strong> SS Rentals shall bear no liability for any consequential loss, loss of income, or business interruption suffered by the Lessee arising from any period during which the Vehicle(s) are unavailable due to breakdown or repair.</p>'
+    : '';
   const guaranteeSection = isLease
     ? '<div class="page-break"></div>' +
       '<h2>14. Personal Guarantee</h2>' +
@@ -7101,11 +7108,11 @@ p{margin:5px 0}
 
 <h2>3. Lease Term and Rental Charges</h2>
 <p><strong>3.1</strong> The Lease Term is set out in the Schedule. The Hirer agrees to pay the Rental Charges as specified in the Schedule.</p>
-<p><strong>Weekly Lease Rate:</strong> NZD $${d.weeklyRate} per week + GST${d.monthlyRate && d.monthlyRate !== "0.00" ? " &nbsp;|&nbsp; <strong>Monthly Lease Rate:</strong> NZD $"+d.monthlyRate+" per month + GST" : ""}</p>
-<p><strong>3.2</strong> Payments shall be deducted automatically from the Hirer's nominated account via direct debit following the issue of each invoice.</p>
+<p><strong>Monthly Lease Rate:</strong> NZD $${d.monthlyRate} per month + GST</p>
+<p><strong>3.2</strong> Payments shall be made monthly in advance by direct debit from the Hirer's nominated bank account. Invoices will be issued at the commencement of each month.</p>
 <p><strong>3.3</strong> A Direct Debit Dishonour Fee of 5% of the total invoice amount will be charged if any scheduled payment is declined or dishonoured.</p>
-<p><strong>3.4</strong> An additional charge of $0.50 + GST per kilometre applies for weekly usage exceeding 2,708 km.</p>
-<p><strong>3.5</strong> All Rental Charges are exclusive of GST unless otherwise stated. GST will be added at the prevailing rate.</p>
+<p><strong>3.4</strong> In addition to the Monthly Lease Rate, the Lessee shall pay to SS Rentals a monthly charge of <strong>$200.00 + GST</strong> in respect of Eroad GPS tracking and fleet monitoring services fitted to the Vehicle(s). This charge is payable concurrently with the monthly lease payment and shall be included in the monthly invoice.</p>
+<p><strong>3.5</strong> All charges under this Agreement are exclusive of GST unless otherwise stated. GST will be added at the prevailing rate.</p>
 
 <h2>4. Obligation to Pay Remaining Lease Term</h2>
 <p class="highlight"><strong>4.1 Critical Obligation:</strong> If the Hirer terminates this Agreement before the agreed Lease Term end date, for any reason whatsoever, the Hirer remains <strong>fully liable</strong> to pay the <strong>total remaining balance of the Rental Charges</strong> for the entire unexpired portion of the Lease Term.</p>
@@ -7130,6 +7137,7 @@ p{margin:5px 0}
 <p><strong>6.5</strong> Normal tyre wear is SS Rentals' responsibility. Puncture repairs and damage due to misuse are at the Hirer's cost.</p>
 <p><strong>6.6</strong> In the event of an accident, the Hirer must immediately notify SS Rentals and comply with all reporting and insurance procedures.</p>
 
+${section6A}
 <h2>7. Insurance and Liability</h2>
 <p><strong>7.1</strong> The Vehicle(s) will be covered under SS Rentals' insurance policy during the Lease Term, subject to its terms, conditions, and exclusions.</p>
 <p><strong>7.2</strong> The Hirer is solely responsible for the payment of any applicable insurance excess or deductible.</p>
