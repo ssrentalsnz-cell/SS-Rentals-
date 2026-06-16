@@ -2515,27 +2515,44 @@ const loadQuotes = () => { try { const q=JSON.parse(localStorage.getItem(QUOTES_
 const saveQuotesToStorage = q => localStorage.setItem(QUOTES_KEY, JSON.stringify(q));
 
 const QUOTE_TEMPLATES = [
-  { id:'QT001', name:'Truck & Trailer Rental Quote', type:'truck_trailer', chargeType:'weekly',
+  /* ── RENTAL QUOTES ── */
+  { id:'QT001', name:'Truck & Trailer Rental', type:'truck_trailer', chargeType:'weekly', isLease:false,
     truckDesc:'2019 Volvo 8x4 Curtainside Truck', trailerDesc:'2017 Domett 5-Axle Curtainside Pull Trailer',
     weeklyRate:2430.58, monthlyRate:0, dailyRate:0, rucRate:0.65, mileageRate:0.30, maxMileage:'130,000 km p.a. (10,833 km/month)',
     notes:'All prices are in NZD and exclude GST.\nRUC and mileage charges apply on top of weekly hire rates.\nContract maximum mileage is 130,000 km per annum.\nQuotes exclude GST, fuel, and insurance costs.\nThis is a fully maintained truck and trailer quote.' },
-  { id:'QT002', name:'Truck Only Rental Quote', type:'truck_only', chargeType:'weekly',
+  { id:'QT002', name:'Truck Only Rental', type:'truck_only', chargeType:'weekly', isLease:false,
     truckDesc:'2019 Volvo 8x4 Curtainside Truck', trailerDesc:'',
     weeklyRate:1716.99, monthlyRate:0, dailyRate:0, rucRate:0.45, mileageRate:0.22, maxMileage:'130,000 km p.a. (10,833 km/month)',
     notes:'All prices are in NZD and exclude GST.\nRUC and mileage charges apply on top of weekly hire rates.\nContract maximum mileage is 130,000 km per annum.\nQuotes exclude GST, fuel, and insurance costs.\nThis is a fully maintained truck quote.' },
-  { id:'QT003', name:'Truck & Trailer Monthly Quote (4-Axle)', type:'truck_trailer', chargeType:'monthly',
+  { id:'QT003', name:'Truck & Trailer Short-Term Rental', type:'truck_trailer', chargeType:'monthly', isLease:false,
     truckDesc:'2018 Hino 8x4 Curtainside Truck with Tail Lift', trailerDesc:'2011 Fruehauf 4-Axle Curtainside Pull Trailer',
     weeklyRate:0, monthlyRate:7830.58, dailyRate:0, rucRate:0.71, mileageRate:0.22, maxMileage:'130,000 km p.a. (10,833 km/month)',
     notes:'All prices are in NZD and exclude GST.\nRUC and mileage charges apply on top of monthly hire rates.\nContract maximum mileage is 130,000 km per annum.\nQuotes exclude GST, fuel, and insurance costs.\nThis is a fully maintained truck and trailer quote.' },
-  { id:'QT004', name:'5-Axle Pull Trailer Lease Quote', type:'trailer_only', chargeType:'monthly',
+  /* ── LEASE QUOTES ── */
+  { id:'QL001', name:'Truck & Trailer Full Lease', type:'truck_trailer', chargeType:'monthly', isLease:true,
+    truckDesc:'2022 Volvo FH 600 8x4 Prime Mover', trailerDesc:'2022 22-Pallet TMC 5-Axle Curtainside Pull Trailer',
+    weeklyRate:0, monthlyRate:9850.00, dailyRate:0, rucRate:0.18, mileageRate:0, maxMileage:'130,000 km p.a. (10,833 km/month)',
+    eroadMonthly:200,
+    extraTerms:[{label:'3-Year Lease Rate',monthly:9850.00},{label:'5-Year Lease Rate',monthly:8990.00}],
+    notes:'All prices are in NZD and exclude GST.\nMonthly lease rate is fixed for the lease term.\nEroad GPS monitoring charge of $200 + GST per month applies in addition to the monthly lease rate.\nLessee is responsible for all insurance, RUC, fuel, and operating costs.\nContract maximum mileage is 130,000 km per annum.\nThis is a fully maintained truck and trailer lease.' },
+  { id:'QL002', name:'Truck Only Full Lease', type:'truck_only', chargeType:'monthly', isLease:true,
+    truckDesc:'2022 Volvo FH 600 8x4 Prime Mover', trailerDesc:'',
+    weeklyRate:0, monthlyRate:6500.00, dailyRate:0, rucRate:0.18, mileageRate:0, maxMileage:'130,000 km p.a. (10,833 km/month)',
+    eroadMonthly:200,
+    extraTerms:[{label:'3-Year Lease Rate',monthly:6500.00},{label:'5-Year Lease Rate',monthly:5900.00}],
+    notes:'All prices are in NZD and exclude GST.\nMonthly lease rate is fixed for the lease term.\nEroad GPS monitoring charge of $200 + GST per month applies in addition to the monthly lease rate.\nLessee is responsible for all insurance, RUC, fuel, and operating costs.\nContract maximum mileage is 130,000 km per annum.\nThis is a fully maintained truck lease.' },
+  { id:'QL003', name:'Trailer Only Lease', type:'trailer_only', chargeType:'monthly', isLease:true,
     truckDesc:'', trailerDesc:'2022 22-Pallet TMC 5-Axle Curtainside Pull Trailer',
     weeklyRate:0, monthlyRate:3390.85, dailyRate:0, rucRate:0.18, mileageRate:0.15, maxMileage:'192,000 km p.a. (16,000 km/month)',
-    notes:'All prices are in NZD and exclude GST.\nTrailer will be fully branded to customer colours.\nRUC and mileage charges apply on top of monthly hire rates.\nContract maximum mileage is 192,000 km per annum.\nQuotes exclude GST and insurance costs.\nThis is a fully maintained trailer quote.' },
-  { id:'QT005', name:'Swinglift Lease Quote (Multi-Term)', type:'truck_trailer', chargeType:'monthly',
+    eroadMonthly:200,
+    extraTerms:[{label:'3-Year Lease Rate',monthly:3390.85},{label:'5-Year Lease Rate',monthly:3100.00}],
+    notes:'All prices are in NZD and exclude GST.\nTrailer will be fully branded to customer colours.\nEroad GPS monitoring charge of $200 + GST per month applies in addition to the monthly lease rate.\nLessee is responsible for all insurance, RUC, fuel, and operating costs.\nContract maximum mileage is 192,000 km per annum.\nThis is a fully maintained trailer lease.' },
+  { id:'QL004', name:'Swinglift Lease (Multi-Term)', type:'truck_trailer', chargeType:'monthly', isLease:true,
     truckDesc:'2022 Volvo 8x4 Sleeper-Cab Tractor Unit', trailerDesc:'2026 Patchell Quad-Axle Swinglift Trailer',
     weeklyRate:0, monthlyRate:11189.33, dailyRate:0, rucRate:0, mileageRate:0, maxMileage:'130,000 km p.a.',
-    extraTerms:[{label:'5-Year Rate',monthly:11189.33},{label:'3-Year Rate',monthly:12191.33},{label:'1-Year Rate',monthly:13289.33}],
-    notes:'All prices are in NZD and exclude GST.\nRUC charges will be paid by hirer via DDB.\nMileage charges are included in the monthly lease payment.\nContract maximum mileage is 130,000 km per annum.\nQuotes exclude GST, fuel, and insurance costs.\nThis is a fully maintained truck and trailer lease quote.' },
+    eroadMonthly:200,
+    extraTerms:[{label:'5-Year Lease Rate',monthly:11189.33},{label:'3-Year Lease Rate',monthly:12191.33},{label:'1-Year Lease Rate',monthly:13289.33}],
+    notes:'All prices are in NZD and exclude GST.\nRUC charges will be paid by hirer via DDB.\nMileage charges are included in the monthly lease payment.\nEroad GPS monitoring charge of $200 + GST per month applies in addition to the monthly lease rate.\nLessee is responsible for all insurance, fuel, and operating costs.\nContract maximum mileage is 130,000 km per annum.\nThis is a fully maintained truck and trailer lease.' },
 ];
 
 const HiresPage = ({refreshKey=0}) => {
@@ -7663,19 +7680,151 @@ const NavmanPage = () => {
 /* ─── SETTINGS PAGE ───────────────────────────────── */
 /* ─── QUOTES PAGE ─────────────────────────────────── */
 const QuotesPage = () => {
+  const [qtype,setQtype]=useState('rental');
   const [qstep,setQstep]=useState(0);
   const [qlist,setQlist]=useState(function(){try{var q=JSON.parse(localStorage.getItem('ss_rentals_quotes')||'[]');return q.filter(function(r){return r&&r.form&&r.form.companyName!==undefined;});}catch(e){return[];}});
   const [qtpl,setQtpl]=useState(null);
   const [qform,setQform]=useState(null);
   const upd=function(k,v){setQform(function(p){var n=Object.assign({},p);n[k]=v;return n;});};
-  const mkQ=function(t){return{quoteNumber:'Q-'+Date.now().toString().slice(-6),quoteDate:new Date().toISOString().slice(0,10),validDays:'14',customerMode:'new',useExistingCustomer:'',companyName:'',contactName:'',contactPhone:'',contactEmail:'',contactAddress:'',vehicleType:t?(t.type||'truck_trailer'):'truck_trailer',truckDesc:t?(t.truckDesc||''):'',trailerDesc:t?(t.trailerDesc||''):'',hireDuration:'',hireDurationUnit:'weeks',startDate:'',endDate:'',chargeType:t?(t.chargeType||'weekly'):'weekly',dailyRate:t?(t.dailyRate||0):0,weeklyRate:t?(t.weeklyRate||0):0,monthlyRate:t?(t.monthlyRate||0):0,rucRate:t?(t.rucRate||0):0,mileageRate:t?(t.mileageRate||0):0,maxMileage:t?(t.maxMileage||''):'',extraTerms:t?(t.extraTerms||[]):[],notes:t?(t.notes||''):'All prices are in NZD and exclude GST.',templateId:t?(t.id||''):'',};};
-  const qSave=function(){if(!qform||!qform.companyName){alert('Enter a company name.');return;}var ex=getAllCustomers().find(function(c){return c.company.toLowerCase().trim()===qform.companyName.toLowerCase().trim();});if(qform.customerMode==='new'&&!ex)createNewCustomer({company:qform.companyName,contact:qform.contactName||'',phone:qform.contactPhone||'',email:qform.contactEmail||'',address:qform.contactAddress||'',status:'prospect'});var u=[{id:'Q-'+Date.now(),savedAt:new Date().toISOString(),form:Object.assign({},qform)}].concat(qlist);setQlist(u);try{localStorage.setItem('ss_rentals_quotes',JSON.stringify(u));}catch(e){}alert('Quote saved!');};
+  const rentalTpls=QUOTE_TEMPLATES.filter(function(t){return !t.isLease;});
+  const leaseTpls=QUOTE_TEMPLATES.filter(function(t){return t.isLease;});
+  const mkQ=function(t){var il=!!(t&&t.isLease);return{quoteNumber:(il?'L':'Q')+'-'+Date.now().toString().slice(-6),quoteDate:new Date().toISOString().slice(0,10),validDays:'14',isLease:il,leaseTerm:il?'3':null,eroadMonthly:t&&t.eroadMonthly?t.eroadMonthly:200,customerMode:'new',useExistingCustomer:'',companyName:'',contactName:'',contactPhone:'',contactEmail:'',contactAddress:'',vehicleType:t?(t.type||'truck_trailer'):'truck_trailer',truckDesc:t?(t.truckDesc||''):'',trailerDesc:t?(t.trailerDesc||''):'',hireDuration:'',hireDurationUnit:il?'years':'weeks',startDate:'',endDate:'',chargeType:t?(t.chargeType||'weekly'):'weekly',dailyRate:0,weeklyRate:t?(t.weeklyRate||0):0,monthlyRate:t?(t.monthlyRate||0):0,rucRate:t?(t.rucRate||0):0,mileageRate:t?(t.mileageRate||0):0,maxMileage:t?(t.maxMileage||''):'',extraTerms:t?(t.extraTerms||[]):[],notes:t?(t.notes||''):'All prices are in NZD and exclude GST.',templateId:t?(t.id||''):'',};};
+  const qSave=function(){if(!qform||!qform.companyName){alert('Enter a company name.');return;}var ex=getAllCustomers().find(function(c){return c.company.toLowerCase().trim()===qform.companyName.toLowerCase().trim();});if(qform.customerMode==='new'&&!ex)createNewCustomer({company:qform.companyName,contact:qform.contactName||'',phone:qform.contactPhone||'',email:qform.contactEmail||'',address:qform.contactAddress||'',status:'prospect'});var u=[{id:(qform.isLease?'L':'Q')+'-'+Date.now(),savedAt:new Date().toISOString(),form:Object.assign({},qform)}].concat(qlist);setQlist(u);try{localStorage.setItem('ss_rentals_quotes',JSON.stringify(u));}catch(e){}alert((qform.isLease?'Lease quote':'Quote')+' saved!');};
   const qDel=function(id){if(!window.confirm('Delete?'))return;var u=qlist.filter(function(q){return q.id!==id;});setQlist(u);try{localStorage.setItem('ss_rentals_quotes',JSON.stringify(u));}catch(e){}};
-  const qPDF=function(){if(!qform)return;var f=qform;var rows=[];if(parseFloat(f.weeklyRate)>0)rows.push('<tr><td>Weekly Hire Rate</td><td>$'+parseFloat(f.weeklyRate).toLocaleString('en-NZ',{minimumFractionDigits:2})+'</td></tr>');if(parseFloat(f.monthlyRate)>0)rows.push('<tr><td>Monthly Hire Rate</td><td>$'+parseFloat(f.monthlyRate).toLocaleString('en-NZ',{minimumFractionDigits:2})+'</td></tr>');if(parseFloat(f.rucRate)>0)rows.push('<tr><td>RUC Charges</td><td>'+f.rucRate+' c/km</td></tr>');if(f.maxMileage)rows.push('<tr><td>Max Mileage</td><td>'+f.maxMileage+'</td></tr>');var notes=String(f.notes||'').split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');var fname='Quote_'+f.quoteNumber+'_'+String(f.companyName||'Draft').split(' ').join('_');var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm}h1{color:#FF6F00}h2{color:#6A1B9A;border-bottom:1.5px solid #FF6F00;padding-bottom:4px}table{width:100%;border-collapse:collapse;margin-bottom:14px}td{border:1px solid #ddd;padding:8px 12px}td:first-child{background:#f0f4f8;font-weight:600;width:45%}.notes{border:1px solid #ddd;padding:12px;white-space:pre-wrap}.sig{border-top:2px solid #6A1B9A;margin-top:24px;padding-top:10px}</style></head><body><h1>SS Rentals - Rental Quotation</h1><p>Quote: <b>'+f.quoteNumber+'</b> | Date: '+f.quoteDate+'</p><h2>Prepared For</h2><table><tr><td>Company</td><td>'+f.companyName+'</td></tr><tr><td>Contact</td><td>'+f.contactName+'</td></tr>'+(f.contactPhone?'<tr><td>Phone</td><td>'+f.contactPhone+'</td></tr>':'')+'</table><h2>Charges</h2><table>'+rows.join('')+'</table><h2>Notes</h2><div class="notes">'+notes+'</div><div class="sig"><p>Name: _________________________ Signature: _________________________</p><p>Date: _________________________</p></div></body></html>';var pr=html.replace('</head>','<scr'+'ipt>window.onload=function(){document.title="'+fname+'";setTimeout(window.print,400)};<'+'/scr'+'ipt></head>');var w=window.open('','_blank');if(!w){alert('Allow pop-ups.');return;}w.document.write(pr);w.document.close();};
-  if(qstep===0)return(<div><div style={{fontSize:20,fontWeight:800,marginBottom:16}}>Quotes</div><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:12,marginBottom:28}}>{QUOTE_TEMPLATES.map(tpl=>(<div key={tpl.id} className="card" style={{padding:'16px 18px',cursor:'pointer',border:'1.5px solid var(--border)'}} onClick={()=>{setQtpl(tpl);setQform(mkQ(tpl));setQstep(1);}}><div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{tpl.name}</div><div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>{tpl.chargeType==='weekly'?'Weekly':'Monthly'}</div>{tpl.weeklyRate>0&&<span className="badge badge-blue">{'$'+tpl.weeklyRate.toLocaleString()+'/wk'}</span>}{tpl.monthlyRate>0&&<span className="badge badge-blue">{'$'+tpl.monthlyRate.toLocaleString()+'/mo'}</span>}</div>))}<div className="card" style={{padding:'16px 18px',cursor:'pointer',border:'1.5px dashed var(--border2)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:90}} onClick={()=>{setQtpl(null);setQform(mkQ(null));setQstep(1);}}><div style={{fontSize:24,color:'var(--text3)'}}>+</div><div style={{fontWeight:700,color:'var(--text2)'}}>Blank Quote</div></div></div>{qlist.length>0&&(<div><div style={{fontWeight:700,fontSize:11,color:'var(--text3)',textTransform:'uppercase',marginBottom:10}}>Saved ({qlist.length})</div><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:10}}>{qlist.map(q=>(<div key={q.id} className="card" style={{padding:'14px 16px'}}><div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}><div style={{fontWeight:700,color:'#6A1B9A'}}>{q.form.quoteNumber}</div><button onClick={()=>qDel(q.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'var(--text3)',padding:0}}>x</button></div><div style={{fontWeight:600,marginBottom:6}}>{q.form.companyName}</div><button className="btn btn-primary btn-sm" style={{width:'100%',justifyContent:'center'}} onClick={()=>{setQform(Object.assign({},mkQ(null),q.form));setQtpl(null);setQstep(1);}}>Open</button></div>))}</div></div>)}</div>);
-  if(qstep===1&&qform)return(<div><div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={()=>setQstep(0)}>Back</button><span style={{fontWeight:600,color:'#6A1B9A'}}>{qtpl?qtpl.name:'New Quote'}</span></div><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}><div style={{display:'flex',flexDirection:'column',gap:14}}><div className="card" style={{padding:'14px 16px'}}><div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Quote Details</div><div className="form-group"><label>Quote No.</label><input value={qform.quoteNumber} onChange={e=>upd('quoteNumber',e.target.value)}/></div><div className="form-group"><label>Date</label><input type="date" value={qform.quoteDate} onChange={e=>upd('quoteDate',e.target.value)}/></div><div className="form-group"><label>Valid (days)</label><input type="number" value={qform.validDays} onChange={e=>upd('validDays',e.target.value)}/></div></div><div className="card" style={{padding:'14px 16px'}}><div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Customer</div><div className="form-group"><label>Company *</label><input placeholder="e.g. GSR Transport Ltd" value={qform.companyName} onChange={e=>upd('companyName',e.target.value)}/></div><div className="form-group"><label>Contact</label><input value={qform.contactName} onChange={e=>upd('contactName',e.target.value)}/></div><div className="form-group"><label>Phone</label><input value={qform.contactPhone} onChange={e=>upd('contactPhone',e.target.value)}/></div><div className="form-group"><label>Email</label><input type="email" value={qform.contactEmail} onChange={e=>upd('contactEmail',e.target.value)}/></div></div></div><div style={{display:'flex',flexDirection:'column',gap:14}}><div className="card" style={{padding:'14px 16px'}}><div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Charges</div><div className="form-group"><label>Charge Type</label><select value={qform.chargeType} onChange={e=>upd('chargeType',e.target.value)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div><div className="form-group"><label>Weekly Rate ($)</label><input type="text" value={qform.weeklyRate||''} onChange={e=>upd('weeklyRate',e.target.value)}/></div><div className="form-group"><label>Monthly Rate ($)</label><input type="text" value={qform.monthlyRate||''} onChange={e=>upd('monthlyRate',e.target.value)}/></div><div className="form-group"><label>RUC (c/km)</label><input type="text" value={qform.rucRate||''} onChange={e=>upd('rucRate',e.target.value)}/></div><div className="form-group"><label>Max Mileage</label><input placeholder="e.g. 130,000 km p.a." value={qform.maxMileage} onChange={e=>upd('maxMileage',e.target.value)}/></div></div><div className="card" style={{padding:'14px 16px'}}><div style={{fontWeight:700,fontSize:11,marginBottom:8,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Notes</div><textarea rows={5} value={qform.notes} onChange={e=>upd('notes',e.target.value)} style={{width:'100%',resize:'vertical',fontSize:12,fontFamily:'inherit'}}/></div><div className="card" style={{padding:'16px',background:'rgba(106,27,154,.04)',border:'1.5px solid rgba(106,27,154,.15)'}}><div style={{fontWeight:700,color:'#6A1B9A',marginBottom:10}}>{qform.quoteNumber} - {qform.companyName||'No customer'}</div><div style={{display:'flex',gap:10}}><button className="btn btn-primary" style={{flex:1,justifyContent:'center'}} onClick={qPDF}><Icon name="download" size={14}/> PDF</button><button className="btn btn-ghost" style={{flex:1,justifyContent:'center',borderColor:'#27AE60',color:'#27AE60'}} onClick={qSave}>Save</button><button className="btn btn-ghost" onClick={()=>setQform(mkQ(qtpl))}>Reset</button></div></div></div></div></div>);
+  const qPDF=function(){if(!qform)return;var f=qform;var il=f.isLease||false;var docTitle=il?'SS Rentals \u2013 Lease Quotation':'SS Rentals \u2013 Rental Quotation';var rows=[];if(parseFloat(f.weeklyRate)>0)rows.push('<tr><td>Weekly Hire Rate</td><td>$'+parseFloat(f.weeklyRate).toLocaleString('en-NZ',{minimumFractionDigits:2})+' + GST</td></tr>');if(parseFloat(f.monthlyRate)>0)rows.push('<tr><td>'+(il?'Monthly Lease Rate':'Monthly Hire Rate')+'</td><td>$'+parseFloat(f.monthlyRate).toLocaleString('en-NZ',{minimumFractionDigits:2})+' + GST</td></tr>');if(il)rows.push('<tr><td>Eroad GPS Monitoring</td><td>$'+parseFloat(f.eroadMonthly||200).toLocaleString('en-NZ',{minimumFractionDigits:2})+' + GST per month</td></tr>');if(parseFloat(f.rucRate)>0)rows.push('<tr><td>RUC Charges</td><td>'+f.rucRate+' cents per km</td></tr>');if(f.maxMileage)rows.push('<tr><td>Maximum Mileage</td><td>'+f.maxMileage+'</td></tr>');var et=f.extraTerms||[];var altRows='';for(var i=0;i<et.length;i++){if(et[i].label&&et[i].monthly)altRows+='<tr><td>'+et[i].label+'</td><td>$'+parseFloat(et[i].monthly).toLocaleString('en-NZ',{minimumFractionDigits:2})+' per month + GST</td></tr>';}var notes=String(f.notes||'').split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');var vLabel=f.vehicleType==='truck_only'?'Truck Only':f.vehicleType==='trailer_only'?'Trailer Only':'Truck + Trailer';var fname=(il?'LeaseQuote_':'Quote_')+f.quoteNumber+'_'+String(f.companyName||'Draft').split(' ').join('_');var leaseNote=il?'<div style="background:#fff8e1;border:1px solid #f9a825;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:10pt;color:#5d4037"><strong>Important:</strong> Lessee is responsible for all insurance, fuel, RUC and operating costs. Eroad GPS monitoring $200+GST/month included. Subject to execution of Lease Agreement.</div>':'';var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm;color:#1a1a2e;line-height:1.6}.hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;border-bottom:3px solid #FF6F00;padding-bottom:12px}.logo{font-size:22pt;font-weight:900;color:#6A1B9A}.logo span{color:#FF6F00}.ttl{text-align:right}.ttl h1{font-size:16pt;font-weight:bold;color:#FF6F00;margin:0}.ttl .sub{font-size:10.5pt;color:#555}.g2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}.box{border:1px solid #ddd;border-radius:6px;padding:12px 14px;background:#f9f9f9}.box h3{margin:0 0 7px;font-size:10.5pt;text-transform:uppercase;color:#6A1B9A;font-weight:700;border-bottom:1px solid #ddd;padding-bottom:5px}.box p{margin:2px 0;font-size:10pt}h2{font-size:11.5pt;font-weight:bold;color:#6A1B9A;text-transform:uppercase;border-bottom:1.5px solid #FF6F00;padding-bottom:3px;margin-top:18px;margin-bottom:9px}table{width:100%;border-collapse:collapse;margin-bottom:12px}td{border:1px solid #ddd;padding:7px 11px;font-size:10.5pt}td:first-child{background:#f0f4f8;font-weight:600;width:45%}td:last-child{font-weight:700}.notes{background:#f9f9f9;border:1px solid #ddd;border-radius:6px;padding:12px;font-size:10pt;white-space:pre-wrap;line-height:1.7}.sig{border-top:2px solid #6A1B9A;padding-top:10px;margin-top:28px;font-size:10.5pt}@media print{body{margin:1.5cm}@page{size:A4;margin:1.5cm}}</style></head><body><div class="hdr"><div class="logo">SS<span>R</span></div><div class="ttl"><h1>'+docTitle+'</h1><div class="sub">Quote No: '+f.quoteNumber+' | Date: '+new Date(f.quoteDate).toLocaleDateString('en-NZ',{day:'2-digit',month:'long',year:'numeric'})+'</div></div></div>'+leaseNote+'<div class="g2"><div class="box"><h3>Prepared For</h3><p><strong>'+f.companyName+'</strong></p><p>Attn: '+f.contactName+'</p>'+(f.contactPhone?'<p>Phone: '+f.contactPhone+'</p>':'')+(f.contactEmail?'<p>Email: '+f.contactEmail+'</p>':'')+'</div><div class="box"><h3>'+(il?'Lease Details':'Hire Details')+'</h3><p><strong>Type:</strong> '+vLabel+'</p>'+(f.hireDuration?'<p><strong>Term:</strong> '+f.hireDuration+' '+f.hireDurationUnit+'</p>':'')+'<p><strong>Valid:</strong> '+f.validDays+' days from issue</p></div></div>'+(f.truckDesc||f.trailerDesc?'<h2>Vehicle Description</h2><table>'+(f.truckDesc?'<tr><td>Truck</td><td>'+f.truckDesc+'</td></tr>':'')+(f.trailerDesc?'<tr><td>Trailer</td><td>'+f.trailerDesc+'</td></tr>':'')+'</table>':'')+'<h2>'+(il?'Lease Charges':'Hire Charges')+'</h2><table>'+rows.join('')+'</table>'+(altRows?'<h2>Alternative Lease Terms</h2><table>'+altRows+'</table>':'')+'<h2>Notes &amp; Conditions</h2><div class="notes">'+notes+'</div><div class="sig"><p><strong>To accept this quotation:</strong></p><br><p>Name: _________________________ &nbsp; Signature: _________________________</p><p>Date: _________________________ &nbsp; Position: _________________________</p></div>'+(il?'<p style="margin-top:12px;font-size:9pt;color:#888">Subject to satisfactory credit assessment and execution of SS Rentals standard Lease Agreement. Rates indicative only.</p>':'')+'<div style="margin-top:20px;font-size:9pt;color:#888;border-top:1px solid #eee;padding-top:10px;text-align:center">SS Rentals | 280a Peak Road, Cambridge, NZ | All amounts NZD excl GST</div></body></html>';var pr=html.replace('</head>','<scr'+'ipt>window.onload=function(){document.title="'+fname+'";setTimeout(window.print,400)};<'+'/scr'+'ipt></head>');var w=window.open('','_blank');if(!w){alert('Allow pop-ups.');return;}w.document.write(pr);w.document.close();};
+  const rentalSaved=qlist.filter(function(q){return !q.form.isLease;});
+  const leaseSaved=qlist.filter(function(q){return q.form.isLease;});
+  const activeSaved=qtype==='lease'?leaseSaved:rentalSaved;
+  const activeTpls=qtype==='lease'?leaseTpls:rentalTpls;
+  if(qstep===0)return(
+    <div>
+      <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>Quotes</div>
+      <div style={{fontSize:12,color:'var(--text2)',marginBottom:16}}>{rentalSaved.length} rental {rentalSaved.length===1?'quote':'quotes'} &middot; {leaseSaved.length} lease {leaseSaved.length===1?'quote':'quotes'}</div>
+      <div style={{display:'flex',marginBottom:20,borderRadius:10,overflow:'hidden',border:'2px solid #6A1B9A',width:'fit-content'}}>
+        {[['rental','\uD83D\uDE9B Rental Quotes'],['lease','\uD83D\uDCCB Lease Quotes']].map(function(pair){var active=qtype===pair[0];return(
+          <button key={pair[0]} onClick={function(){setQtype(pair[0]);}} style={{padding:'10px 24px',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,background:active?'#6A1B9A':'transparent',color:active?'#fff':'#6A1B9A',transition:'all .15s'}}>{pair[1]}</button>
+        );})}
+      </div>
+      {qtype==='lease'&&<div style={{background:'rgba(106,27,154,0.06)',border:'1px solid rgba(106,27,154,0.2)',borderRadius:8,padding:'10px 14px',marginBottom:16,fontSize:12,color:'#6A1B9A'}}><strong>Lease Quotes</strong> &mdash; Monthly rates only. $200 + GST Eroad charge included. Lessee responsible for all insurance, RUC and operating costs.</div>}
+      <div style={{fontWeight:700,fontSize:11,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.7px',marginBottom:12}}>{qtype==='lease'?'Lease Templates':'Rental Templates'}</div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:12,marginBottom:28}}>
+        {activeTpls.map(function(tpl){return(
+          <div key={tpl.id} className="card" style={{padding:'16px 18px',cursor:'pointer',border:'1.5px solid var(--border)',transition:'box-shadow .15s'}}
+            onClick={function(){setQtpl(tpl);setQform(mkQ(tpl));setQstep(1);}}
+            onMouseEnter={function(e){e.currentTarget.style.boxShadow='0 4px 16px rgba(106,27,154,.15)';e.currentTarget.style.borderColor='#6A1B9A';}}
+            onMouseLeave={function(e){e.currentTarget.style.boxShadow='none';e.currentTarget.style.borderColor='var(--border)';}}>
+            <div style={{fontWeight:700,fontSize:13,marginBottom:6}}>{tpl.name}</div>
+            <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>{tpl.type==='truck_only'?'Truck Only':tpl.type==='trailer_only'?'Trailer Only':'Truck + Trailer'}</div>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+              {tpl.weeklyRate>0&&<span className="badge badge-blue">{'$'+tpl.weeklyRate.toLocaleString()+'/wk'}</span>}
+              {tpl.monthlyRate>0&&<span className="badge badge-blue">{'$'+tpl.monthlyRate.toLocaleString()+'/mo'}</span>}
+              {tpl.isLease&&<span className="badge badge-gray">+$200 Eroad</span>}
+              {tpl.rucRate>0&&<span className="badge badge-gray">{tpl.rucRate+'c/km'}</span>}
+            </div>
+            {tpl.extraTerms&&tpl.extraTerms.length>0&&<div style={{fontSize:11,color:'var(--text3)',marginTop:6}}>{tpl.extraTerms.length} term options</div>}
+          </div>
+        );})}
+        <div className="card" style={{padding:'16px 18px',cursor:'pointer',border:'1.5px dashed var(--border2)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:100}}
+          onClick={function(){var il=qtype==='lease';setQtpl(null);setQform(Object.assign(mkQ(null),{isLease:il,quoteNumber:(il?'L':'Q')+'-'+Date.now().toString().slice(-6)}));setQstep(1);}}
+          onMouseEnter={function(e){e.currentTarget.style.borderColor='#6A1B9A';}}
+          onMouseLeave={function(e){e.currentTarget.style.borderColor='var(--border2)';}}>
+          <div style={{fontSize:26,color:'var(--text3)',marginBottom:4}}>+</div>
+          <div style={{fontWeight:700,fontSize:13,color:'var(--text2)'}}>Blank {qtype==='lease'?'Lease':'Rental'} Quote</div>
+        </div>
+      </div>
+      {activeSaved.length>0&&(
+        <div>
+          <div style={{fontWeight:700,fontSize:11,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.7px',marginBottom:12}}>
+            Saved {qtype==='lease'?'Lease':'Rental'} Quotes <span style={{background:'#6A1B9A',color:'#fff',borderRadius:10,padding:'1px 8px',fontSize:10,marginLeft:6}}>{activeSaved.length}</span>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:10}}>
+            {activeSaved.map(function(q){return(
+              <div key={q.id} className="card" style={{padding:'14px 16px'}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+                  <div><div style={{fontWeight:700,fontSize:13,color:q.form.isLease?'#6A1B9A':'#27AE60'}}>{q.form.quoteNumber}</div>{q.form.isLease&&<span style={{fontSize:10,background:'rgba(106,27,154,.1)',color:'#6A1B9A',borderRadius:4,padding:'1px 6px',fontWeight:700}}>LEASE</span>}</div>
+                  <button onClick={function(){qDel(q.id);}} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:20,padding:0,lineHeight:1}}>x</button>
+                </div>
+                <div style={{fontWeight:600,fontSize:13,marginBottom:2}}>{q.form.companyName}</div>
+                <div style={{fontSize:11,color:'var(--text2)',marginBottom:4}}>{q.form.vehicleType==='truck_only'?'Truck Only':q.form.vehicleType==='trailer_only'?'Trailer Only':'Truck + Trailer'}</div>
+                {q.form.monthlyRate>0&&<div style={{fontSize:11,color:'var(--text2)',marginBottom:4}}>{'$'+parseFloat(q.form.monthlyRate).toLocaleString()+'/mo'}{q.form.isLease?' + $200 Eroad':''}</div>}
+                <div style={{fontSize:10,color:'var(--text3)',marginBottom:10}}>{new Date(q.savedAt).toLocaleDateString('en-NZ',{day:'2-digit',month:'short',year:'numeric'})}</div>
+                <button className="btn btn-primary btn-sm" style={{width:'100%',justifyContent:'center'}} onClick={function(){setQform(Object.assign({},mkQ(null),q.form));setQtpl(null);setQstep(1);}}>Open</button>
+              </div>
+            );})}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+  if(qstep===1&&qform)return(
+    <div>
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}>
+        <button className="btn btn-ghost btn-sm" onClick={function(){setQstep(0);}}>Back</button>
+        <span style={{color:'var(--text3)'}}>/</span>
+        <span style={{fontWeight:600,color:'#6A1B9A'}}>{qtpl?qtpl.name:(qform.isLease?'New Lease Quote':'New Rental Quote')}</span>
+        {qform.isLease&&<span style={{fontSize:11,fontWeight:700,background:'rgba(106,27,154,.12)',color:'#6A1B9A',borderRadius:6,padding:'2px 8px'}}>LEASE</span>}
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+        <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          <div className="card" style={{padding:'14px 16px'}}>
+            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Quote Details</div>
+            <div className="form-group"><label>Quote No.</label><input value={qform.quoteNumber} onChange={function(e){upd('quoteNumber',e.target.value);}}/></div>
+            <div className="form-group"><label>Issue Date</label><input type="date" value={qform.quoteDate} onChange={function(e){upd('quoteDate',e.target.value);}}/></div>
+            <div className="form-group"><label>Valid For (days)</label><input type="number" value={qform.validDays} onChange={function(e){upd('validDays',e.target.value);}}/></div>
+            {qform.isLease&&<div className="form-group"><label>Proposed Lease Term</label><select value={qform.leaseTerm||'3'} onChange={function(e){upd('leaseTerm',e.target.value);}}><option value="1">1 Year</option><option value="2">2 Years</option><option value="3">3 Years</option><option value="5">5 Years</option></select></div>}
+          </div>
+          <div className="card" style={{padding:'14px 16px'}}>
+            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>{qform.isLease?'Lessee Details':'Customer Details'}</div>
+            <div className="form-group"><label>Company Name *</label><input placeholder="e.g. GSR Transport Ltd" value={qform.companyName} onChange={function(e){upd('companyName',e.target.value);}}/></div>
+            <div className="form-group"><label>Contact Person</label><input value={qform.contactName} onChange={function(e){upd('contactName',e.target.value);}}/></div>
+            <div className="form-group"><label>Phone</label><input value={qform.contactPhone} onChange={function(e){upd('contactPhone',e.target.value);}}/></div>
+            <div className="form-group"><label>Email</label><input type="email" value={qform.contactEmail} onChange={function(e){upd('contactEmail',e.target.value);}}/></div>
+          </div>
+          <div className="card" style={{padding:'14px 16px'}}>
+            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>{qform.isLease?'Lease Details':'Hire Details'}</div>
+            <div className="form-group"><label>Vehicle Type</label><select value={qform.vehicleType} onChange={function(e){upd('vehicleType',e.target.value);}}><option value="truck_trailer">Truck + Trailer</option><option value="truck_only">Truck Only</option><option value="trailer_only">Trailer Only</option></select></div>
+            <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:8}}>
+              <div className="form-group" style={{marginBottom:0}}><label>{qform.isLease?'Lease Duration':'Hire Duration'}</label><input type="number" min="1" value={qform.hireDuration} onChange={function(e){upd('hireDuration',e.target.value);}}/></div>
+              <div className="form-group" style={{marginBottom:0}}><label>Unit</label><select value={qform.hireDurationUnit} onChange={function(e){upd('hireDurationUnit',e.target.value);}}>{qform.isLease?[<option key="y" value="years">Years</option>,<option key="m" value="months">Months</option>]:[<option key="d" value="days">Days</option>,<option key="w" value="weeks">Weeks</option>,<option key="mo" value="months">Months</option>]}</select></div>
+            </div>
+          </div>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          <div className="card" style={{padding:'14px 16px'}}>
+            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Vehicle Description</div>
+            {(qform.vehicleType==='truck_only'||qform.vehicleType==='truck_trailer')&&<div className="form-group"><label>Truck</label><select value={qform.truckDesc} onChange={function(e){upd('truckDesc',e.target.value);}}><option value="">Select...</option>{TRUCKS.map(function(t){return <option key={t.id} value={t.year+' '+t.make+' '+t.model}>{t.rego} - {t.year} {t.make} {t.model}</option>;})}</select><input style={{marginTop:6}} placeholder="Or type custom..." value={qform.truckDesc} onChange={function(e){upd('truckDesc',e.target.value);}}/></div>}
+            {(qform.vehicleType==='trailer_only'||qform.vehicleType==='truck_trailer')&&<div className="form-group" style={{marginBottom:0}}><label>Trailer</label><select value={qform.trailerDesc} onChange={function(e){upd('trailerDesc',e.target.value);}}><option value="">Select...</option>{TRAILERS.map(function(t){return <option key={t.id} value={(t.year||'')+' '+t.make+' '+t.model}>{t.rego} - {t.make} {t.model}</option>;})}</select><input style={{marginTop:6}} placeholder="Or type custom..." value={qform.trailerDesc} onChange={function(e){upd('trailerDesc',e.target.value);}}/></div>}
+          </div>
+          <div className="card" style={{padding:'14px 16px'}}>
+            <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>{qform.isLease?'Lease Charges':'Hire Charges'}</div>
+            {!qform.isLease&&<div className="form-group"><label>Charge Type</label><select value={qform.chargeType} onChange={function(e){upd('chargeType',e.target.value);}}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>}
+            {!qform.isLease&&<div className="form-group"><label>Weekly Rate ($)</label><input type="text" value={qform.weeklyRate||''} onChange={function(e){upd('weeklyRate',e.target.value);}}/></div>}
+            <div className="form-group"><label>Monthly {qform.isLease?'Lease':'Hire'} Rate ($)</label><input type="text" value={qform.monthlyRate||''} onChange={function(e){upd('monthlyRate',e.target.value);}}/></div>
+            {qform.isLease&&<div className="form-group"><label>Eroad Monthly ($)</label><input type="text" value={qform.eroadMonthly||200} onChange={function(e){upd('eroadMonthly',e.target.value);}}/><div style={{fontSize:11,color:'var(--text3)',marginTop:3}}>GPS monitoring charge on top of lease rate</div></div>}
+            <div className="form-group"><label>RUC Rate (c/km)</label><input type="text" value={qform.rucRate||''} onChange={function(e){upd('rucRate',e.target.value);}}/></div>
+            <div className="form-group" style={{marginBottom:qform.isLease?10:0}}><label>Max Mileage</label><input placeholder="e.g. 130,000 km p.a." value={qform.maxMileage} onChange={function(e){upd('maxMileage',e.target.value);}}/></div>
+            {qform.isLease&&(qform.extraTerms||[]).length>0&&<div style={{marginTop:4}}><div style={{fontSize:11,fontWeight:700,color:'var(--text2)',textTransform:'uppercase',marginBottom:6}}>Alternative Lease Terms</div>{(qform.extraTerms||[]).map(function(et,i){return(<div key={i} style={{display:'grid',gridTemplateColumns:'1fr 1fr auto',gap:6,marginBottom:6}}><input value={et.label||''} placeholder="e.g. 5-Year Rate" onChange={function(e){var u=(qform.extraTerms||[]).map(function(x,j){return j===i?Object.assign({},x,{label:e.target.value}):x;});upd('extraTerms',u);}}/><input type="text" value={et.monthly||''} placeholder="Monthly rate" onChange={function(e){var u=(qform.extraTerms||[]).map(function(x,j){return j===i?Object.assign({},x,{monthly:e.target.value}):x;});upd('extraTerms',u);}}/><button className="btn btn-ghost btn-sm" onClick={function(){upd('extraTerms',(qform.extraTerms||[]).filter(function(_,j){return j!==i;}));}} style={{color:'#d32f2f'}}>x</button></div>);})} <button className="btn btn-ghost btn-sm" onClick={function(){upd('extraTerms',(qform.extraTerms||[]).concat([{label:'',monthly:''}]));}}>+ Add Term</button></div>}
+          </div>
+          <div className="card" style={{padding:'14px 16px'}}>
+            <div style={{fontWeight:700,fontSize:11,marginBottom:8,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Notes</div>
+            <textarea rows={5} value={qform.notes} onChange={function(e){upd('notes',e.target.value);}} style={{width:'100%',resize:'vertical',fontSize:12,fontFamily:'inherit'}}/>
+          </div>
+          <div className="card" style={{padding:'16px',background:qform.isLease?'rgba(106,27,154,.04)':'rgba(39,174,96,.04)',border:'1.5px solid '+(qform.isLease?'rgba(106,27,154,.2)':'rgba(39,174,96,.2)')}}>
+            <div style={{fontWeight:700,fontSize:13,color:qform.isLease?'#6A1B9A':'#27AE60',marginBottom:4}}>{qform.quoteNumber}</div>
+            <div style={{fontSize:12,color:'var(--text2)',marginBottom:12}}>{qform.companyName||'No customer'}{qform.isLease?' — Lease Quote':''}</div>
+            <div style={{display:'flex',gap:10}}>
+              <button className="btn btn-primary" style={{flex:1,justifyContent:'center'}} onClick={qPDF}><Icon name="download" size={14}/> Download PDF</button>
+              <button className="btn btn-ghost" style={{flex:1,justifyContent:'center',borderColor:'#27AE60',color:'#27AE60'}} onClick={qSave}>Save</button>
+              <button className="btn btn-ghost" onClick={function(){setQform(mkQ(qtpl));}} title="Reset">Reset</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
   return null;
 };
+
 
 const SettingsPage = ({sheetsConfig, syncState, onSheetsSetup, onManualSync, xeroConfig, xeroSyncState, onXeroConnect, onXeroSync, onXeroDisconnect, onXeroDiag}) => {
   const [tab,setTab]=useState('users');
