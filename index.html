@@ -7,7 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined')pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
@@ -3326,8 +3326,7 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
   );
 };
 
-/* ─── INVOICING PAGE ──────────────────────────────── */</script>
-<script type="text/babel">
+/* ─── INVOICING PAGE ──────────────────────────────── */
 const InvoicingPage = ({xeroConfig}) => {
   const [tab,setTab]=useState('all');
   const [sel,setSel]=useState(null);
@@ -6848,8 +6847,7 @@ ${d.trailerRego ? '<h2>2. TRAILER DESCRIPTION</h2><table><tr><td>Manufacturer</t
   </div>
 </div>
 </body></html>`;
-</script>
-<script type="text/babel">
+
 const generateAgreementHTML = (d) => {
   const title = d.docTitle || 'Truck and Trailer Agreement';
   const isLease = d.isLease === true; // only Lease if explicitly set
