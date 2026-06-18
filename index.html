@@ -3326,7 +3326,8 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
   );
 };
 
-/* ─── INVOICING PAGE ──────────────────────────────── */
+/* ─── INVOICING PAGE ──────────────────────────────── */</script>
+<script type="text/babel">
 const InvoicingPage = ({xeroConfig}) => {
   const [tab,setTab]=useState('all');
   const [sel,setSel]=useState(null);
@@ -6847,7 +6848,8 @@ ${d.trailerRego ? '<h2>2. TRAILER DESCRIPTION</h2><table><tr><td>Manufacturer</t
   </div>
 </div>
 </body></html>`;
-
+</script>
+<script type="text/babel">
 const generateAgreementHTML = (d) => {
   const title = d.docTitle || 'Truck and Trailer Agreement';
   const isLease = d.isLease === true; // only Lease if explicitly set
