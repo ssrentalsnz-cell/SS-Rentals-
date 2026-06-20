@@ -295,7 +295,7 @@ const PNL_DETAIL = [
 
 /* ─── HELPERS ─────────────────────────────────────── */
 const custName = id => CUSTOMERS.find(c=>c.id===id)?.company || id;
-const truckRego = id => TRUCKS.find(t=>t.id===id)?.rego || TRAILERS.find(t=>t.id===id)?.rego || id;
+const truckRego = id => getEffectiveTrucks().find(t=>t.id===id)?.rego || getEffectiveTrailers().find(t=>t.id===id)?.rego || id;
 const complianceStatus = d => {
   const d2 = daysDiff(d);
   if(d2<0) return 'red';
@@ -389,8 +389,8 @@ const buildSheetRows = () => ({
     ['Hire ID','Customer','Truck','Trailer','Start','End','Status','Weekly Rate','Mileage Rate','RUC Rate','Bond','Bond Paid','Signed','Insurance','Notes'],
     ...HIRES.map(h=>[h.id,
       CUSTOMERS.find(c=>c.id===h.customer)?.company||h.customer,
-      TRUCKS.find(t=>t.id===h.truck)?.rego||h.truck||'',
-      h.trailer?TRAILERS.find(t=>t.id===h.trailer)?.rego||h.trailer:'',
+      getEffectiveTrucks().find(t=>t.id===h.truck)?.rego||h.truck||'',
+      h.trailer?getEffectiveTrailers().find(t=>t.id===h.trailer)?.rego||h.trailer:'',
       h.start,h.end,h.status,h.weekly_truck+h.weekly_trailer,h.mileage_rate,h.ruc_rate,h.bond,h.bond_paid?'Yes':'No',h.signed?'Yes':'No',h.insurance_verified?'Yes':'No',h.notes]),
   ],
   invoices: [
@@ -676,7 +676,7 @@ const pullHiresFromSheet1 = (rows, extLog) => {
     }
 
     // Save overrides to localStorage so they persist across renders
-    const truck = TRUCKS.find(t => t.id === hire.truck);
+    const truck = getEffectiveTrucks().find(t => t.id === hire.truck);
     const endDate = new Date(period.end + 'T23:59:59');
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const newStatus = endDate >= todayStart ? 'active' : 'completed';
@@ -1555,7 +1555,7 @@ const Dashboard = ({theme,setPage,livePnl:dashLivePnl}) => {
               <thead><tr><th>Truck</th><th>Customer</th><th>Rate/wk</th><th>End Date</th></tr></thead>
               <tbody>
                 {HIRES.filter(h=>h.status==='active').map(h=>{
-                  const t=TRUCKS.find(x=>x.id===h.truck);
+                  const t=getEffectiveTrucks().find(x=>x.id===h.truck);
                   return <tr key={h.id}><td style={{fontWeight:600}}>{t?.rego}</td><td>{custName(h.customer)}</td><td>{fmtCur(h.weekly_truck+h.weekly_trailer)}</td><td>{fmt(h.end)}</td></tr>;
                 })}
               </tbody>
@@ -2478,7 +2478,7 @@ const CustomersPage = ({refreshKey=0, sheetsConfig}) => {
           <tbody>
             {filtered.map(c=>{
               const activeHire = getEffectiveHires().find(h=>h.customer===c.id&&h.status==='active');
-              const truck = activeHire ? TRUCKS.find(t=>t.id===activeHire.truck) : null;
+              const truck = activeHire ? getEffectiveTrucks().find(t=>t.id===activeHire.truck) : null;
               return (
                 <tr key={c.id} className="tr-link" onClick={()=>setSel(c)}>
                   <td style={{fontWeight:700}}>{c.company}</td>
@@ -2578,8 +2578,8 @@ const HiresPage = ({refreshKey=0}) => {
     const [editMode,setEditMode]=useState(false);
     const [vals,setVals]=useState({...h});
     const c=CUSTOMERS.find(x=>x.id===h.customer);
-    const t=TRUCKS.find(x=>x.id===h.truck);
-    const tr=TRAILERS.find(x=>x.id===h.trailer);
+    const t=getEffectiveTrucks().find(x=>x.id===h.truck);
+    const tr=getEffectiveTrailers().find(x=>x.id===h.trailer);
     const weeks=Math.ceil((new Date(vals.end)-new Date(vals.start))/604800000)||0;
     const totalEst=(vals.weekly_truck+vals.weekly_trailer)*weeks;
 
@@ -2594,7 +2594,7 @@ const HiresPage = ({refreshKey=0}) => {
         footer={
           editMode
             ? <><button className="btn btn-ghost" onClick={()=>setEditMode(false)}>Cancel</button><button className="btn btn-primary" onClick={handleSave}><Icon name="check" size={14}/> Save Changes</button></>
-            : <><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-ghost" onClick={()=>setEditMode(true)}><Icon name="edit" size={14}/> Edit</button><button className="btn btn-ghost" style={{borderColor:'var(--blue)',color:'var(--blue)'}} onClick={()=>{onClose();setDocHire(h);}}><Icon name="template" size={14}/> Generate Docs</button><button className="btn btn-ghost" style={{color:'var(--red-light)',borderColor:'var(--red-light)'}} onClick={()=>{if(window.confirm('Delete hire '+h.id+' for '+custName(h.customer)+'? This cannot be undone.')){const idx=HIRES.findIndex(x=>x.id===h.id);if(idx!==-1)HIRES.splice(idx,1);const truck=TRUCKS.find(t=>t.id===h.truck);if(truck&&truck.hirer===h.customer){truck.status='available';truck.hirer=null;}setHireData(getEffectiveHires());onClose();}}}><Icon name="close" size={14}/> Delete</button><button className="btn btn-primary"><Icon name="invoice" size={14}/> Generate Invoice</button></>
+            : <><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-ghost" onClick={()=>setEditMode(true)}><Icon name="edit" size={14}/> Edit</button><button className="btn btn-ghost" style={{borderColor:'var(--blue)',color:'var(--blue)'}} onClick={()=>{onClose();setDocHire(h);}}><Icon name="template" size={14}/> Generate Docs</button><button className="btn btn-ghost" style={{color:'var(--red-light)',borderColor:'var(--red-light)'}} onClick={()=>{if(window.confirm('Delete hire '+h.id+' for '+custName(h.customer)+'? This cannot be undone.')){const idx=HIRES.findIndex(x=>x.id===h.id);if(idx!==-1)HIRES.splice(idx,1);const truck=getEffectiveTrucks().find(t=>t.id===h.truck);if(truck&&truck.hirer===h.customer){truck.status='available';truck.hirer=null;}setHireData(getEffectiveHires());onClose();}}}><Icon name="close" size={14}/> Delete</button><button className="btn btn-primary"><Icon name="invoice" size={14}/> Generate Invoice</button></>
         }>
         {editMode ? (
           <div>
@@ -2945,7 +2945,7 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
                     <Icon name="template" size={13}/>
                   </button>
                   <button className="btn btn-ghost btn-sm" style={{color:'var(--red-light)'}} title="Delete hire"
-                    onClick={e=>{e.stopPropagation();if(window.confirm('Delete hire '+h.id+' for '+custName(h.customer)+'?')){const idx=HIRES.findIndex(x=>x.id===h.id);if(idx!==-1)HIRES.splice(idx,1);const truck=TRUCKS.find(t=>t.id===h.truck);if(truck&&truck.hirer===h.customer){truck.status='available';truck.hirer=null;}setHireData(getEffectiveHires());}}}>
+                    onClick={e=>{e.stopPropagation();if(window.confirm('Delete hire '+h.id+' for '+custName(h.customer)+'?')){const idx=HIRES.findIndex(x=>x.id===h.id);if(idx!==-1)HIRES.splice(idx,1);const truck=getEffectiveTrucks().find(t=>t.id===h.truck);if(truck&&truck.hirer===h.customer){truck.status='available';truck.hirer=null;}setHireData(getEffectiveHires());}}}>
                     <Icon name="close" size={13}/>
                   </button>
                 </td>
@@ -2963,7 +2963,7 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
               {['Week 1','Week 2','Week 3','Week 4','Week 5','Week 6','Week 7','Week 8'].map(w=><div key={w} style={{fontSize:11,fontWeight:600,color:'var(--text3)',textAlign:'center'}}>{w}</div>)}
             </div>
             {hireData.filter(h=>h.status==='active').map(h=>{
-              const t=TRUCKS.find(x=>x.id===h.truck);
+              const t=getEffectiveTrucks().find(x=>x.id===h.truck);
               return (
                 <div key={h.id} style={{display:'grid',gridTemplateColumns:'180px repeat(8,1fr)',gap:4,marginBottom:6,alignItems:'center'}}>
                   <div style={{fontSize:12,fontWeight:600}}>{t?.rego} — {custName(h.customer).split(' ')[0]}</div>
@@ -3465,8 +3465,8 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
   const selectedVehicle = vehicles.find(v=>v.id===selVehicle);
   const hire = selectedVehicle?.hireObj || allHires.find(h=>h.truck===selVehicle||h.trailer===selVehicle);
   const customer = hire ? getAllCustomers().find(c=>c.id===hire.customer) : null;
-  const truck = hire ? TRUCKS.find(t=>t.id===hire.truck) : null;
-  const trailer = hire ? TRAILERS.find(t=>t.id===hire.trailer) : null;
+  const truck = hire ? getEffectiveTrucks().find(t=>t.id===hire.truck) : null;
+  const trailer = hire ? getEffectiveTrailers().find(t=>t.id===hire.trailer) : null;
 
   const getPeriodDays = () => {
     const d1 = new Date(periodFrom), d2 = new Date(periodTo);
@@ -6119,7 +6119,7 @@ const CommunicationsPage = () => {
     const overdue = invs.filter(i=>i.status==='overdue');
     const latest = overdue[0]||invs[0];
     const hire = getEffectiveHires().find(h=>h.customer===cust.id&&h.status==='active');
-    const truck = hire ? TRUCKS.find(t=>t.id===hire.truck) : null;
+    const truck = hire ? getEffectiveTrucks().find(t=>t.id===hire.truck) : null;
     return {
       company: cust.company,
       contact: cust.contact.split(' ')[0],
@@ -6552,8 +6552,8 @@ const saveDocLog = log => localStorage.setItem(DOC_LOG_KEY, JSON.stringify(log))
 
 const generateDocData = (hire) => {
   const cust = getAllCustomers().find(c=>c.id===hire.customer) || {};
-  const truck = TRUCKS.find(t=>t.id===hire.truck) || {};
-  const trailer = TRAILERS.find(t=>t.id===hire.trailer);
+  const truck = getEffectiveTrucks().find(t=>t.id===hire.truck) || {};
+  const trailer = getEffectiveTrailers().find(t=>t.id===hire.trailer);
   const now = new Date();
   const day = now.getDate();
   const suffix = day===1?'st':day===2?'nd':day===3?'rd':'th';
@@ -6624,8 +6624,8 @@ const HireDocModal = ({hire, onClose}) => {
   const [docData, setDocData] = useState(() => generateDocData(hire));
   const [editMode, setEditMode] = useState(false);
   const cust = getAllCustomers().find(c=>c.id===hire.customer);
-  const truck = TRUCKS.find(t=>t.id===hire.truck);
-  const trailer = TRAILERS.find(t=>t.id===hire.trailer);
+  const truck = getEffectiveTrucks().find(t=>t.id===hire.truck);
+  const trailer = getEffectiveTrailers().find(t=>t.id===hire.trailer);
 
   const sv = (k,v) => setDocData(p=>({...p,[k]:v}));
 
