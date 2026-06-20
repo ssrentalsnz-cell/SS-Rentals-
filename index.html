@@ -2675,7 +2675,7 @@ const HiresPage = ({refreshKey=0}) => {
           <div className="form-group"><label>Assign Truck</label>
             <select value={vals.truck} onChange={e=>setVals(v=>({...v,truck:e.target.value}))}>
               <option value="">Select truck…</option>
-              {TRUCKS.filter(t=>t.status==='available').map(t=><option key={t.id} value={t.id}>{t.rego} — {t.make} {t.model}</option>)}
+              {getEffectiveTrucks().filter(t=>t.status==='available').map(t=><option key={t.id} value={t.id}>{t.rego} — {t.make} {t.model}</option>)}
             </select>
           </div>
         </div>
@@ -2683,7 +2683,7 @@ const HiresPage = ({refreshKey=0}) => {
           <div className="form-group"><label>Assign Trailer (optional)</label>
             <select value={vals.trailer} onChange={e=>setVals(v=>({...v,trailer:e.target.value}))}>
               <option value="">No trailer</option>
-              {TRAILERS.filter(t=>t.status==='available').map(t=><option key={t.id} value={t.id}>{t.rego} — {t.make} {t.model}</option>)}
+              {getEffectiveTrailers().filter(t=>t.status==='available').map(t=><option key={t.id} value={t.id}>{t.rego} — {t.make} {t.model}</option>)}
             </select>
           </div>
           <div className="form-group"><label>Hire Start Date</label><input type="date" value={vals.start} onChange={e=>setVals(v=>({...v,start:e.target.value}))}/></div>
@@ -3214,7 +3214,7 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
                         <label className="form-label">Truck</label>
                         <select className="form-control" value={quoteForm.truckDesc} onChange={e=>setQF('truckDesc',e.target.value)}>
                           <option value="">— Select truck or type below —</option>
-                          {TRUCKS.map(t=><option key={t.id} value={`${t.year} ${t.make} ${t.model}`}>{t.rego} — {t.year} {t.make} {t.model}</option>)}
+                          {getEffectiveTrucks().map(t=><option key={t.id} value={`${t.year} ${t.make} ${t.model}`}>{t.rego} — {t.year} {t.make} {t.model}</option>)}
                           <option value="2019 Volvo 8x4 Curtainside Truck">2019 Volvo 8x4 Curtainside Truck</option>
                           <option value="2022 Volvo 8x4 Sleeper-Cab Tractor Unit">2022 Volvo 8x4 Sleeper-Cab Tractor Unit</option>
                           <option value="2018 Hino 8x4 Curtainside Truck with Tail Lift">2018 Hino 8x4 Curtainside Truck with Tail Lift</option>
@@ -3227,7 +3227,7 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
                         <label className="form-label">Trailer</label>
                         <select className="form-control" value={quoteForm.trailerDesc} onChange={e=>setQF('trailerDesc',e.target.value)}>
                           <option value="">— Select trailer or type below —</option>
-                          {TRAILERS.map(t=><option key={t.id} value={`${t.year} ${t.make} ${t.model}`}>{t.rego} — {t.year||''} {t.make} {t.model}</option>)}
+                          {getEffectiveTrailers().map(t=><option key={t.id} value={`${t.year} ${t.make} ${t.model}`}>{t.rego} — {t.year||''} {t.make} {t.model}</option>)}
                           <option value="2017 Domett 5-Axle Curtainside Pull Trailer">2017 Domett 5-Axle Curtainside Pull Trailer</option>
                           <option value="2022 22-Pallet TMC 5-Axle Curtainside Pull Trailer">2022 22-Pallet TMC 5-Axle Curtainside Pull Trailer</option>
                           <option value="2011 Fruehauf 4-Axle Curtainside Pull Trailer">2011 Fruehauf 4-Axle Curtainside Pull Trailer</option>
@@ -7238,12 +7238,12 @@ const DocumentsPage = () => {
                 <div className="form-group" style={{marginBottom:0}}>
                   <label className="form-label">Registration Number</label>
                   <select className="form-control" value={form.truckRego} onChange={e=>{
-                    const t=TRUCKS.find(t=>t.rego===e.target.value);
+                    const t=getEffectiveTrucks().find(t=>t.rego===e.target.value);
                     if(t) setForm(f=>({...f,truckRego:t.rego,truckMake:t.make,truckModel:t.model,truckYear:(t.year||'').toString(),truckVIN:t.vin||'',truckCOF:t.cof_expiry||'',truckRegoExp:t.rego_expiry||''}));
                     else set('truckRego',e.target.value);
                   }}>
                     <option value="">Select truck…</option>
-                    {TRUCKS.map(t=><option key={t.id} value={t.rego}>{t.rego} — {t.make} {t.model}</option>)}
+                    {getEffectiveTrucks().map(t=><option key={t.id} value={t.rego}>{t.rego} — {t.make} {t.model}</option>)}
                   </select>
                 </div>
                 {inputRow('truckMake','Make')}
@@ -7260,12 +7260,12 @@ const DocumentsPage = () => {
                   <div className="form-group" style={{marginBottom:0}}>
                     <label className="form-label">Trailer Registration</label>
                     <select className="form-control" value={form.trailerRego} onChange={e=>{
-                      const t=TRAILERS.find(t=>t.rego===e.target.value);
+                      const t=getEffectiveTrailers().find(t=>t.rego===e.target.value);
                       if(t) setForm(f=>({...f,trailerRego:t.rego,trailerMake:t.make,trailerYear:(t.year||'').toString(),trailerCOF:t.cof_expiry||'',trailerRegoExp:t.rego_expiry||''}));
                       else set('trailerRego',e.target.value);
                     }}>
                       <option value="">Select trailer…</option>
-                      {TRAILERS.map(t=><option key={t.id} value={t.rego}>{t.rego} — {t.make}</option>)}
+                      {getEffectiveTrailers().map(t=><option key={t.id} value={t.rego}>{t.rego} — {t.make}</option>)}
                     </select>
                   </div>
                   {inputRow('trailerMake','Make / Model')}
@@ -7793,8 +7793,8 @@ const QuotesPage = () => {
         <div style={{display:'flex',flexDirection:'column',gap:14}}>
           <div className="card" style={{padding:'14px 16px'}}>
             <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Vehicle Description</div>
-            {(qform.vehicleType==='truck_only'||qform.vehicleType==='truck_trailer')&&<div className="form-group"><label>Truck</label><select value={qform.truckDesc} onChange={function(e){upd('truckDesc',e.target.value);}}><option value="">Select...</option>{TRUCKS.map(function(t){return <option key={t.id} value={t.year+' '+t.make+' '+t.model}>{t.rego} - {t.year} {t.make} {t.model}</option>;})}</select><input style={{marginTop:6}} placeholder="Or type custom..." value={qform.truckDesc} onChange={function(e){upd('truckDesc',e.target.value);}}/></div>}
-            {(qform.vehicleType==='trailer_only'||qform.vehicleType==='truck_trailer')&&<div className="form-group" style={{marginBottom:0}}><label>Trailer</label><select value={qform.trailerDesc} onChange={function(e){upd('trailerDesc',e.target.value);}}><option value="">Select...</option>{TRAILERS.map(function(t){return <option key={t.id} value={(t.year||'')+' '+t.make+' '+t.model}>{t.rego} - {t.make} {t.model}</option>;})}</select><input style={{marginTop:6}} placeholder="Or type custom..." value={qform.trailerDesc} onChange={function(e){upd('trailerDesc',e.target.value);}}/></div>}
+            {(qform.vehicleType==='truck_only'||qform.vehicleType==='truck_trailer')&&<div className="form-group"><label>Truck</label><select value={qform.truckDesc} onChange={function(e){upd('truckDesc',e.target.value);}}><option value="">Select...</option>{getEffectiveTrucks().map(function(t){return <option key={t.id} value={t.year+' '+t.make+' '+t.model}>{t.rego} - {t.year} {t.make} {t.model}</option>;})}</select><input style={{marginTop:6}} placeholder="Or type custom..." value={qform.truckDesc} onChange={function(e){upd('truckDesc',e.target.value);}}/></div>}
+            {(qform.vehicleType==='trailer_only'||qform.vehicleType==='truck_trailer')&&<div className="form-group" style={{marginBottom:0}}><label>Trailer</label><select value={qform.trailerDesc} onChange={function(e){upd('trailerDesc',e.target.value);}}><option value="">Select...</option>{getEffectiveTrailers().map(function(t){return <option key={t.id} value={(t.year||'')+' '+t.make+' '+t.model}>{t.rego} - {t.make} {t.model}</option>;})}</select><input style={{marginTop:6}} placeholder="Or type custom..." value={qform.trailerDesc} onChange={function(e){upd('trailerDesc',e.target.value);}}/></div>}
           </div>
           <div className="card" style={{padding:'14px 16px'}}>
             <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>{qform.isLease?'Lease Charges':'Hire Charges'}</div>
