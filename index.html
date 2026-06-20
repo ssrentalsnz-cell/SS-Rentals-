@@ -5088,9 +5088,9 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
 
   // Get available trucks for selected dates
   const getAvailableTrucks = () => {
-    if (!form.startDate || !form.endDate) return TRUCKS;
+    if (!form.startDate || !form.endDate) return getEffectiveTrucks();
     const effHires = getEffectiveHires().filter(h => h.status === 'active');
-    return TRUCKS.filter(t => {
+    return getEffectiveTrucks().filter(t => {
       if (t.status === 'maintenance') return false;
       const conflict = effHires.find(h => {
         if (h.truck !== t.id) return false;
@@ -5103,9 +5103,9 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
   };
 
   const getAvailableTrailers = () => {
-    if (!form.startDate || !form.endDate) return TRAILERS;
+    if (!form.startDate || !form.endDate) return getEffectiveTrailers();
     const effHires = getEffectiveHires().filter(h => h.status === 'active');
-    return TRAILERS.filter(t => {
+    return getEffectiveTrailers().filter(t => {
       if (t.status === 'maintenance') return false;
       const conflict = effHires.find(h => {
         if (h.trailer !== t.id) return false;
@@ -5128,7 +5128,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
     const cust = CUSTOMERS.find(c => c.id === form.customer);
     if (cust && cust.weekly_truck) set('weeklyTruck', cust.weekly_truck);
     else {
-      const t = TRUCKS.find(t => t.id === truckId);
+      const t = getEffectiveTrucks().find(t => t.id === truckId);
       set('weeklyTruck', t?.weekly_rate || 2650);
     }
   };
@@ -5179,9 +5179,9 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
     };
     HIRES.unshift(newHire);
     // Update truck status
-    const truck = TRUCKS.find(t => t.id === form.truck);
+    const truck = getEffectiveTrucks().find(t => t.id === form.truck);
     if (truck) { truck.status = 'on_hire'; truck.hirer = form.customer; }
-    const trailer = TRAILERS.find(t => t.id === form.trailer);
+    const trailer = getEffectiveTrailers().find(t => t.id === form.trailer);
     if (trailer && !form.noTrailer) { trailer.status = 'on_hire'; trailer.hirer = form.customer; }
     // Save override
     // Auto-upgrade customer status from prospect → active when hire is created
@@ -5217,8 +5217,8 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
         ...allHires.map(h=>[
           h.id,
           CUSTOMERS.find(c=>c.id===h.customer)?.company||h.customer||'',
-          TRUCKS.find(t=>t.id===h.truck)?.rego||h.truck||'',
-          h.trailer?TRAILERS.find(t=>t.id===h.trailer)?.rego||h.trailer:'',
+          getEffectiveTrucks().find(t=>t.id===h.truck)?.rego||h.truck||'',
+          h.trailer?getEffectiveTrailers().find(t=>t.id===h.trailer)?.rego||h.trailer:'',
           h.start,h.end,h.status,
           (h.weekly_truck||0)+(h.weekly_trailer||0),
           h.mileage_rate||0,h.ruc_rate||0,h.bond||0,
@@ -5245,8 +5245,8 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
 
   if (confirmed) {
     const cust = CUSTOMERS.find(c => c.id === form.customer);
-    const truck = TRUCKS.find(t => t.id === form.truck);
-    const trailer = TRAILERS.find(t => t.id === form.trailer);
+    const truck = getEffectiveTrucks().find(t => t.id === form.truck);
+    const trailer = getEffectiveTrailers().find(t => t.id === form.trailer);
     return (
       <div className="modal-overlay">
         <div className="modal" style={{maxWidth:560, textAlign:'center'}}>
@@ -5510,7 +5510,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
 
           {/* STEP 4: Rates & Terms */}
           {step===4&&(()=>{
-            const selTruck = TRUCKS.find(t=>t.id===form.truck);
+            const selTruck = getEffectiveTrucks().find(t=>t.id===form.truck);
             const selCust = getAllCustomers().find(c=>c.id===form.customer);
             const prevHire = HIRES.filter(h=>h.customer===form.customer&&h.truck===form.truck).sort((a,b)=>new Date(b.start)-new Date(a.start))[0];
             return (
@@ -5685,8 +5685,8 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
           {/* STEP 5: Confirm */}
           {step===5&&(()=>{
             const cust = CUSTOMERS.find(c=>c.id===form.customer);
-            const truck = TRUCKS.find(t=>t.id===form.truck);
-            const trailer = TRAILERS.find(t=>t.id===form.trailer);
+            const truck = getEffectiveTrucks().find(t=>t.id===form.truck);
+            const trailer = getEffectiveTrailers().find(t=>t.id===form.trailer);
             return (
               <div>
                 <div style={{marginBottom:16}}>
