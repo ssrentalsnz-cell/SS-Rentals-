@@ -3182,7 +3182,7 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
                       </div>
                       <div className="form-group" style={{marginBottom:0}}>
                         <label className="form-label">Unit</label>
-                        <select className="form-control" value={quoteForm.hireDurationUnit} onChange={e=>setQF('hireDurationUnit',e.target.value)}>
+                        <select className="form-control" value={quoteForm.hireDurationUnit} onChange={e=>{const u=e.target.value;setQF('hireDurationUnit',u);const map={days:'daily',weeks:'weekly',months:'monthly',years:'monthly'};setQF('chargeType',map[u]||quoteForm.chargeType);}}>
                           <option value="days">Days</option>
                           <option value="weeks">Weeks</option>
                           <option value="months">Months</option>
@@ -3243,7 +3243,7 @@ ${extraRows.length>0?'<h2>Alternative Lease Terms</h2><table>'+extraRows.map(([l
                     <div style={{fontWeight:700,fontSize:11,marginBottom:12,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>Hire Charges</div>
                     <div className="form-group" style={{marginBottom:10}}>
                       <label className="form-label">Primary Charge Type</label>
-                      <select className="form-control" value={quoteForm.chargeType} onChange={e=>setQF('chargeType',e.target.value)}>
+                      <select className="form-control" value={quoteForm.chargeType} onChange={e=>{const c=e.target.value;setQF('chargeType',c);const map={daily:'days',weekly:'weeks',monthly:'months'};setQF('hireDurationUnit',map[c]||quoteForm.hireDurationUnit);}}>
                         <option value="daily">Daily</option>
                         <option value="weekly">Weekly</option>
                         <option value="monthly">Monthly</option>
@@ -7786,7 +7786,7 @@ const QuotesPage = () => {
             <div className="form-group"><label>Vehicle Type</label><select value={qform.vehicleType} onChange={function(e){upd('vehicleType',e.target.value);}}><option value="truck_trailer">Truck + Trailer</option><option value="truck_only">Truck Only</option><option value="trailer_only">Trailer Only</option></select></div>
             <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:8}}>
               <div className="form-group" style={{marginBottom:0}}><label>{qform.isLease?'Lease Duration':'Hire Duration'}</label><input type="number" min="1" value={qform.hireDuration} onChange={function(e){upd('hireDuration',e.target.value);}}/></div>
-              <div className="form-group" style={{marginBottom:0}}><label>Unit</label><select value={qform.hireDurationUnit} onChange={function(e){upd('hireDurationUnit',e.target.value);}}>{qform.isLease?[<option key="y" value="years">Years</option>,<option key="m" value="months">Months</option>]:[<option key="d" value="days">Days</option>,<option key="w" value="weeks">Weeks</option>,<option key="mo" value="months">Months</option>]}</select></div>
+              <div className="form-group" style={{marginBottom:0}}><label>Unit</label><select value={qform.hireDurationUnit} onChange={function(e){var u=e.target.value;upd('hireDurationUnit',u);if(!qform.isLease){var map={days:'daily',weeks:'weekly',months:'monthly'};upd('chargeType',map[u]||qform.chargeType);}}}>{qform.isLease?[<option key="y" value="years">Years</option>,<option key="m" value="months">Months</option>]:[<option key="d" value="days">Days</option>,<option key="w" value="weeks">Weeks</option>,<option key="mo" value="months">Months</option>]}</select></div>
             </div>
           </div>
         </div>
@@ -7798,7 +7798,7 @@ const QuotesPage = () => {
           </div>
           <div className="card" style={{padding:'14px 16px'}}>
             <div style={{fontWeight:700,fontSize:11,marginBottom:10,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px'}}>{qform.isLease?'Lease Charges':'Hire Charges'}</div>
-            {!qform.isLease&&<div className="form-group"><label>Charge Type</label><select value={qform.chargeType} onChange={function(e){upd('chargeType',e.target.value);}}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>}
+            {!qform.isLease&&<div className="form-group"><label>Charge Type</label><select value={qform.chargeType} onChange={function(e){var c=e.target.value;upd('chargeType',c);var map={daily:'days',weekly:'weeks',monthly:'months'};upd('hireDurationUnit',map[c]||qform.hireDurationUnit);}}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>}
             {!qform.isLease&&<div className="form-group"><label>Daily Rate ($)</label><input type="text" value={qform.dailyRate||''} onChange={function(e){upd('dailyRate',e.target.value);}}/></div>}
             {!qform.isLease&&<div className="form-group"><label>Weekly Rate ($)</label><input type="text" value={qform.weeklyRate||''} onChange={function(e){upd('weeklyRate',e.target.value);}}/></div>}
             <div className="form-group"><label>Monthly {qform.isLease?'Lease':'Hire'} Rate ($)</label><input type="text" value={qform.monthlyRate||''} onChange={function(e){upd('monthlyRate',e.target.value);}}/></div>
