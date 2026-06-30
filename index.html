@@ -1070,6 +1070,7 @@ const Icon = ({name,size=16,color='currentColor'}) => {
     customers:'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
     hires:'M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z',
     invoice:'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z',
+    mail:'M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z',
     maintenance:'M13.78 15.3L19.78 21.3L21.89 19.14L15.89 13.14L13.78 15.3ZM17.5 10C19.43 10 21 8.43 21 6.5C21 5.85 20.82 5.24 20.5 4.72L17.25 7.97L16.03 6.75L19.28 3.5C18.76 3.18 18.15 3 17.5 3C15.57 3 14 4.57 14 6.5C14 6.94 14.08 7.37 14.22 7.75L3 18.95C2.94 19 2.94 19.08 3 19.14L4.86 21C4.91 21.06 5 21.06 5.05 21L7.5 18.55L9.61 20.67L10.32 19.95L8.2 17.84L9.27 16.77L11.38 18.88L12.1 18.17L10 16.05L16.25 9.78C16.63 9.92 17.06 10 17.5 10Z',
     reports:'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z',
     documents:'M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z',
@@ -3336,9 +3337,80 @@ const InvoicingPage = ({xeroConfig}) => {
 
   const InvoiceModal = ({inv,onClose}) => {
     const c=CUSTOMERS.find(x=>x.id===inv.customer);
+    const subtotalAmt = inv.total/1.15;
+    const gstAmt = inv.total - subtotalAmt;
+    const downloadInvoicePDF = () => {
+      const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'
+        +'body{font-family:Arial,sans-serif;font-size:11pt;margin:2cm;color:#1a1a2e}'
+        +'.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;border-bottom:3px solid #1a1a2e;padding-bottom:14px}'
+        +'h1{font-size:16pt;margin:0;font-weight:800}.sub{font-size:10pt;color:#666;margin-top:4px}'
+        +'.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}'
+        +'.box{border:1px solid #ddd;border-radius:6px;padding:12px 14px;background:#f9f9f9}'
+        +'.box h3{margin:0 0 8px;font-size:10pt;text-transform:uppercase;color:#666;border-bottom:1px solid #ddd;padding-bottom:6px}'
+        +'.box p{margin:3px 0;font-size:10pt}'
+        +'table{width:100%;border-collapse:collapse;margin-bottom:16px}'
+        +'th{background:#1a1a2e;color:#fff;padding:7px 10px;text-align:left;font-size:10pt}'
+        +'th:last-child,td:last-child{text-align:right}'
+        +'td{padding:7px 10px;border-bottom:1px solid #eee;font-size:10pt}'
+        +'.totals{float:right;min-width:220px}'
+        +'.total-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #eee;font-size:11pt;color:#555}'
+        +'.grand{display:flex;justify-content:space-between;padding:8px 0;font-size:15pt;font-weight:800}'
+        +'@media print{@page{size:A4;margin:1.5cm}}'
+        +'</style></head><body>'
+        +'<div class="header"><div><h1>TAX INVOICE</h1><div class="sub">SS Rentals Ltd &mdash; Auckland, New Zealand &mdash; GST 123-456-789</div></div>'
+        +'<div style="text-align:right"><div style="font-weight:700;font-size:13pt">'+inv.id+'</div><div class="sub">Status: '+statusLabel(inv.status)+'</div></div></div>'
+        +'<div class="grid2"><div class="box"><h3>Bill To</h3><p><strong>'+(c?.company||'')+'</strong></p><p>'+(c?.contact||'')+'</p><p>'+(c?.email||'')+'</p></div>'
+        +'<div class="box"><h3>Invoice Details</h3><p><strong>Issue Date:</strong> '+fmt(inv.date)+'</p><p><strong>Due Date:</strong> '+fmt(inv.due)+'</p><p><strong>Hire Period:</strong> '+inv.period+'</p>'+(inv.xero_id?'<p><strong>Xero Ref:</strong> '+inv.xero_id+'</p>':'')+'</div></div>'
+        +'<table><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody>'
+        +'<tr><td>Weekly Truck Hire &mdash; '+(truckRego(HIRES.find(h=>h.id===inv.hire)?.truck)||'')+'</td><td>'+fmtCur(inv.truck_hire)+'</td></tr>'
+        +(inv.trailer_hire>0?'<tr><td>Weekly Trailer Hire</td><td>'+fmtCur(inv.trailer_hire)+'</td></tr>':'')
+        +'<tr><td>Mileage Charges</td><td>'+fmtCur(inv.mileage)+'</td></tr>'
+        +'<tr><td>RUC Charges</td><td>'+fmtCur(inv.ruc)+'</td></tr>'
+        +(inv.damage>0?'<tr><td>Damage Charges</td><td>'+fmtCur(inv.damage)+'</td></tr>':'')
+        +(inv.extras>0?'<tr><td>Additional Fees</td><td>'+fmtCur(inv.extras)+'</td></tr>':'')
+        +'</tbody></table>'
+        +'<div class="totals">'
+        +'<div class="total-row"><span>Subtotal (excl. GST)</span><span>'+fmtCur(subtotalAmt)+'</span></div>'
+        +'<div class="total-row"><span>GST (15%)</span><span>'+fmtCur(gstAmt)+'</span></div>'
+        +'<div class="grand"><span>Total (NZD)</span><span>'+fmtCur(inv.total)+'</span></div>'
+        +'</div>'
+        +'</body></html>';
+      const printHTML = html.replace('</head>','<scr'+'ipt>window.onload=function(){document.title="'+inv.id+'";setTimeout(function(){window.print();},400);};</'+'script></head>');
+      const win = window.open('','_blank');
+      if (!win) { alert('Please allow pop-ups for this site to download PDF documents.'); return; }
+      win.document.write(printHTML);
+      win.document.close();
+    };
+    const emailInvoice = () => {
+      if (!c?.email) { alert('No email address on file for '+(c?.company||'this customer')+'. Add one in Customers first.'); return; }
+      const subject = 'Invoice '+inv.id+' — SS Rentals — '+fmtCur(inv.total)+' due '+fmt(inv.due);
+      const body = [
+        'Hi '+(c?.contact||c?.company||''),
+        '',
+        'Please find your invoice details below for the period '+inv.period+'.',
+        '',
+        'Invoice: '+inv.id,
+        'Hire Period: '+inv.period,
+        'Truck Hire: '+fmtCur(inv.truck_hire),
+        inv.trailer_hire>0?'Trailer Hire: '+fmtCur(inv.trailer_hire):'',
+        'Mileage Charges: '+fmtCur(inv.mileage),
+        'RUC Charges: '+fmtCur(inv.ruc),
+        inv.damage>0?'Damage Charges: '+fmtCur(inv.damage):'',
+        inv.extras>0?'Additional Fees: '+fmtCur(inv.extras):'',
+        '',
+        'Total (incl. GST): '+fmtCur(inv.total),
+        'Due Date: '+fmt(inv.due),
+        '',
+        'A PDF copy is attached. Please let us know if you have any questions.',
+        '',
+        'Kind regards,',
+        'SS Rentals',
+      ].filter(Boolean).join('\n');
+      window.location.href = 'mailto:'+encodeURIComponent(c.email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+    };
     return (
       <Modal open onClose={onClose} title={inv.id} size="modal-lg"
-        footer={<><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-ghost btn-sm"><Icon name="xero" size={13}/> Push to Xero</button><button className="btn btn-primary"><Icon name="download" size={13}/> Download PDF</button></>}>
+        footer={<><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-ghost btn-sm" onClick={emailInvoice}><Icon name="mail" size={13}/> Email Invoice</button><button className="btn btn-ghost btn-sm"><Icon name="xero" size={13}/> Push to Xero</button><button className="btn btn-primary" onClick={downloadInvoicePDF}><Icon name="download" size={13}/> Download PDF</button></>}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20}}>
           <div>
             <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>SS Rentals Ltd</div>
@@ -3924,6 +3996,37 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
                     <Icon name="download" size={14}/> Download PDF
                   </button>
                   <button className="btn btn-ghost" onClick={()=>{
+                    if (!customer?.email) { alert('No email address on file for '+(customer?.company||'this customer')+'. Add one in Customers first.'); return; }
+                    const finalInv = {baseRate:br, trailerCharge:tc, mileage:mileageAmt, ruc:rucAmt, subtotal, gst, total};
+                    const subject = 'Invoice '+inv.id+' — SS Rentals — '+fmtCur(total)+' due '+fmt(inv.due);
+                    const body = [
+                      'Hi '+(customer?.contact||customer?.company||''),
+                      '',
+                      'Please find your invoice details below for the period '+inv.period+'.',
+                      '',
+                      'Invoice: '+inv.id,
+                      'Hire Period: '+inv.period,
+                      inv.baseLabel+': '+fmtCur(br),
+                      tc>0?'Trailer Hire: '+fmtCur(tc):'',
+                      mileageAmt>0?'Mileage Charges: '+fmtCur(mileageAmt):'',
+                      rucAmt>0?'RUC Charges: '+fmtCur(rucAmt):'',
+                      extra!==0?'Additional: '+fmtCur(extra):'',
+                      '',
+                      'Subtotal (excl. GST): '+fmtCur(subtotal),
+                      'GST 15%: '+fmtCur(gst),
+                      'Total (incl. GST): '+fmtCur(total),
+                      'Due Date: '+fmt(inv.due),
+                      '',
+                      'A PDF copy is attached. Please let us know if you have any questions.',
+                      '',
+                      'Kind regards,',
+                      'SS Rentals',
+                    ].filter(Boolean).join('\n');
+                    window.location.href = 'mailto:'+encodeURIComponent(customer.email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+                  }}>
+                    <Icon name="mail" size={14}/> Email Invoice
+                  </button>
+                  <button className="btn btn-ghost" onClick={()=>{
                     const finalInv = {...inv, baseRate:br, trailerCharge:tc, periodKm:km, mileageRate:mr, rucRate:rr, mileage:mileageAmt, ruc:rucAmt, subtotal, gst, total, extraCharge:extra, days};
                     const txt = [
                       'Invoice: '+finalInv.id,
@@ -3964,7 +4067,46 @@ const GenerateInvoiceWizard = ({xeroConfig, onClose}) => {
               <div style={{fontWeight:700,fontSize:18,marginBottom:8}}>Invoice Created in Xero!</div>
               <div style={{fontSize:13,color:'var(--text2)',marginBottom:4}}>{pushResult.msg}</div>
               <div style={{fontSize:12,color:'var(--text3)',marginBottom:24}}>The invoice is saved as Draft in Xero. Review and approve it there before sending to the customer.</div>
-              <div style={{display:'flex',gap:10,justifyContent:'center'}}>
+              <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
+                <button className="btn btn-ghost" onClick={()=>{
+                  const html = buildInvoicePrintHTML(inv);
+                  const printHTML = html.replace('</head>','<scr'+'ipt>window.onload=function(){document.title="'+inv.id+'";setTimeout(function(){window.print();},400);};</'+'script></head>');
+                  const win = window.open('','_blank');
+                  if (!win) { alert('Please allow pop-ups for this site to download PDF documents.'); return; }
+                  win.document.write(printHTML);
+                  win.document.close();
+                }}>
+                  <Icon name="download" size={14}/> Download PDF
+                </button>
+                <button className="btn btn-ghost" onClick={()=>{
+                  if (!customer?.email) { alert('No email address on file for '+(customer?.company||'this customer')+'. Add one in Customers first.'); return; }
+                  const subject = 'Invoice '+inv.id+' — SS Rentals — '+fmtCur(inv.total)+' due '+fmt(inv.due);
+                  const body = [
+                    'Hi '+(customer?.contact||customer?.company||''),
+                    '',
+                    'Please find your invoice details below for the period '+inv.period+'.',
+                    '',
+                    'Invoice: '+inv.id,
+                    'Hire Period: '+inv.period,
+                    inv.baseLabel+': '+fmtCur(inv.baseRate),
+                    inv.trailerCharge>0?'Trailer Hire: '+fmtCur(inv.trailerCharge):'',
+                    inv.mileage>0?'Mileage Charges: '+fmtCur(inv.mileage):'',
+                    inv.ruc>0?'RUC Charges: '+fmtCur(inv.ruc):'',
+                    '',
+                    'Subtotal (excl. GST): '+fmtCur(inv.subtotal),
+                    'GST 15%: '+fmtCur(inv.gst),
+                    'Total (incl. GST): '+fmtCur(inv.total),
+                    'Due Date: '+fmt(inv.due),
+                    '',
+                    'A PDF copy is attached. Please let us know if you have any questions.',
+                    '',
+                    'Kind regards,',
+                    'SS Rentals',
+                  ].filter(Boolean).join('\n');
+                  window.location.href = 'mailto:'+encodeURIComponent(customer.email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+                }}>
+                  <Icon name="mail" size={14}/> Email Invoice
+                </button>
                 <button className="btn btn-ghost" onClick={()=>{setStep(1);setInv(null);setPushResult(null);setSelVehicle('');}}>
                   Generate Another Invoice
                 </button>
