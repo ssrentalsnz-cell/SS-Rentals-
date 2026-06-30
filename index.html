@@ -6584,7 +6584,7 @@ const DOC_LOG_KEY = 'ss_rentals_doc_log';
 const loadDocLog = () => { try { return JSON.parse(localStorage.getItem(DOC_LOG_KEY)||'[]'); } catch { return []; } };
 const saveDocLog = log => localStorage.setItem(DOC_LOG_KEY, JSON.stringify(log));
 
-const generateDocData = (hire) => {
+const generateDocData = (hire, forceIsLease) => {
   const cust = getAllCustomers().find(c=>c.id===hire.customer) || {};
   const truck = getEffectiveTrucks().find(t=>t.id===hire.truck) || {};
   const trailer = getEffectiveTrailers().find(t=>t.id===hire.trailer);
@@ -6601,7 +6601,8 @@ const generateDocData = (hire) => {
   const hireDays = hire.start && hire.end
     ? Math.round((new Date(hire.end) - new Date(hire.start)) / (1000*60*60*24))
     : 0;
-  const isLease = hireDays >= 180; // 6 months = ~180 days
+  // Default suggestion: Lease if 6+ months, but user can override via forceIsLease
+  const isLease = typeof forceIsLease === 'boolean' ? forceIsLease : (hireDays >= 180);
   const agreementType = isLease ? 'Lease Agreement' : 'Rental Agreement';
   const vehiclePrefix = hasTruck && hasTrailer ? 'Truck and Trailer'
     : hasTruck ? 'Truck' : 'Trailer';
@@ -6655,13 +6656,20 @@ const generateDocData = (hire) => {
 const HireDocModal = ({hire, onClose}) => {
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState(false);
-  const [docData, setDocData] = useState(() => generateDocData(hire));
+  const hireDaysCalc = hire.start && hire.end ? Math.round((new Date(hire.end) - new Date(hire.start)) / (1000*60*60*24)) : 0;
+  const [docTypeChoice, setDocTypeChoice] = useState(hireDaysCalc >= 180 ? 'lease' : 'rental');
+  const [docData, setDocData] = useState(() => generateDocData(hire, docTypeChoice==='lease'));
   const [editMode, setEditMode] = useState(false);
   const cust = getAllCustomers().find(c=>c.id===hire.customer);
   const truck = getEffectiveTrucks().find(t=>t.id===hire.truck);
   const trailer = getEffectiveTrailers().find(t=>t.id===hire.trailer);
 
   const sv = (k,v) => setDocData(p=>({...p,[k]:v}));
+
+  const handleDocTypeChange = (choice) => {
+    setDocTypeChoice(choice);
+    setDocData(generateDocData(hire, choice==='lease'));
+  };
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -6712,10 +6720,25 @@ const HireDocModal = ({hire, onClose}) => {
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="modal" style={{maxWidth:720}}>
         <div className="modal-header">
-          <span className="modal-title"><Icon name="template" size={18}/> {docData.docTitle||'Agreement'} — {hire.id} <span style={{fontSize:10,padding:'2px 8px',borderRadius:10,marginLeft:6,background:docData.isLease?'rgba(106,27,154,0.12)':'rgba(39,174,96,0.12)',color:docData.isLease?'#6A1B9A':'#27AE60',fontWeight:700}}>{docData.isLease?'Lease':'Rental'}</span></span>
+          <span className="modal-title"><Icon name="template" size={18}/> {docData.docTitle||'Agreement'} — {hire.id} <span style={{fontSize:10,padding:'2px 8px',borderRadius:10,marginLeft:6,background:docTypeChoice==='lease'?'rgba(106,27,154,0.12)':'rgba(39,174,96,0.12)',color:docTypeChoice==='lease'?'#6A1B9A':'#27AE60',fontWeight:700}}>{docTypeChoice==='lease'?'Lease':'Rental'}</span></span>
           <button className="icon-btn" onClick={onClose}><Icon name="close" size={18}/></button>
         </div>
         <div className="modal-body">
+          {/* Document type selector */}
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:700,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:8}}>Document Type</div>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>handleDocTypeChange('rental')} style={{flex:1,padding:'10px 14px',borderRadius:8,border:'2px solid '+(docTypeChoice==='rental'?'#27AE60':'var(--border)'),background:docTypeChoice==='rental'?'rgba(39,174,96,0.08)':'var(--card)',color:docTypeChoice==='rental'?'#27AE60':'var(--text2)',fontWeight:700,fontSize:13,cursor:'pointer'}}>
+                Rental Agreement
+              </button>
+              <button onClick={()=>handleDocTypeChange('lease')} style={{flex:1,padding:'10px 14px',borderRadius:8,border:'2px solid '+(docTypeChoice==='lease'?'#6A1B9A':'var(--border)'),background:docTypeChoice==='lease'?'rgba(106,27,154,0.08)':'var(--card)',color:docTypeChoice==='lease'?'#6A1B9A':'var(--text2)',fontWeight:700,fontSize:13,cursor:'pointer'}}>
+                Lease Agreement
+              </button>
+            </div>
+            <div style={{fontSize:11,color:'var(--text3)',marginTop:6}}>
+              Hire duration: {hireDaysCalc} days. {hireDaysCalc>=180?'Suggested: Lease (6+ months).':'Suggested: Rental (under 6 months).'} You can override this for any hire length.
+            </div>
+          </div>
           {/* Summary card */}
           <div style={{background:'var(--bg3)',borderRadius:10,padding:'14px 16px',marginBottom:16,display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:12}}>
             {[
