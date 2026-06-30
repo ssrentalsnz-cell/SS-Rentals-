@@ -3350,7 +3350,7 @@ const InvoicingPage = ({xeroConfig}) => {
   const xeroSynced=getInvoices().filter(i=>i.xero_id).length;
 
   const InvoiceModal = ({inv,onClose}) => {
-    const c=CUSTOMERS.find(x=>x.id===inv.customer);
+    const c=getAllCustomers().find(x=>x.id===inv.customer);
     const subtotalAmt = inv.total/1.15;
     const gstAmt = inv.total - subtotalAmt;
     const downloadInvoicePDF = () => {
@@ -5290,7 +5290,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
   // Auto-fill rate when truck selected
   const handleTruckSelect = (truckId) => {
     set('truck', truckId);
-    const cust = CUSTOMERS.find(c => c.id === form.customer);
+    const cust = getAllCustomers().find(c => c.id === form.customer);
     if (cust && cust.weekly_truck) set('weeklyTruck', cust.weekly_truck);
     else {
       const t = getEffectiveTrucks().find(t => t.id === truckId);
@@ -5300,14 +5300,14 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
 
   const handleTrailerSelect = (trailerId) => {
     set('trailer', trailerId);
-    const cust = CUSTOMERS.find(c => c.id === form.customer);
+    const cust = getAllCustomers().find(c => c.id === form.customer);
     if (cust && cust.weekly_trailer) set('weeklyTrailer', cust.weekly_trailer);
     else set('weeklyTrailer', 550);
   };
 
   const handleCustomerSelect = (custId) => {
     set('customer', custId);
-    const cust = CUSTOMERS.find(c => c.id === custId);
+    const cust = getAllCustomers().find(c => c.id === custId);
     if (cust) {
       if (cust.weekly_truck) set('weeklyTruck', cust.weekly_truck);
       if (cust.weekly_trailer) set('weeklyTrailer', cust.weekly_trailer);
@@ -5409,7 +5409,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
   const steps = ['Dates & Type', 'Select Units', 'Customer', 'Rates & Terms', 'Confirm'];
 
   if (confirmed) {
-    const cust = CUSTOMERS.find(c => c.id === form.customer);
+    const cust = getAllCustomers().find(c => c.id === form.customer);
     const truck = getEffectiveTrucks().find(t => t.id === form.truck);
     const trailer = getEffectiveTrailers().find(t => t.id === form.trailer);
     return (
@@ -5874,7 +5874,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
 
           {/* STEP 5: Confirm */}
           {step===5&&(()=>{
-            const cust = CUSTOMERS.find(c=>c.id===form.customer);
+            const cust = getAllCustomers().find(c=>c.id===form.customer);
             const truck = getEffectiveTrucks().find(t=>t.id===form.truck);
             const trailer = getEffectiveTrailers().find(t=>t.id===form.trailer);
             return (
@@ -6519,13 +6519,13 @@ const CommunicationsPage = () => {
               {/* Preview */}
               {(channel==='sms'||channel==='both')&&(
                 <div style={{marginBottom:10}}>
-                  <div style={{fontSize:11,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',marginBottom:4}}>SMS Preview {selectedCustomers.length>0&&<span style={{color:'var(--text2)',fontWeight:400,textTransform:'none'}}>— filled for {CUSTOMERS.find(c=>c.id===selectedCustomers[0])?.company}</span>}</div>
+                  <div style={{fontSize:11,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',marginBottom:4}}>SMS Preview {selectedCustomers.length>0&&<span style={{color:'var(--text2)',fontWeight:400,textTransform:'none'}}>— filled for {getAllCustomers().find(c=>c.id===selectedCustomers[0])?.company}</span>}</div>
                   {useCustom?(
                     <textarea value={customMsg.sms} onChange={e=>setCustomMsg(p=>({...p,sms:e.target.value}))} placeholder="Write SMS message… Use {{contact}}, {{invoice_id}}, {{amount}}, {{due_date}}, {{days_overdue}}" rows={3} style={{fontSize:12}}/>
                   ):(
                     <div style={{padding:'10px 12px',background:'var(--bg3)',borderRadius:8,fontSize:12,lineHeight:1.6,color:'var(--text2)',fontFamily:'monospace',maxHeight:80,overflow:'auto'}}>
                       {selectedCustomers.length>0
-                        ? fillTemplate(tpl?.sms||'', buildVars(CUSTOMERS.find(c=>c.id===selectedCustomers[0])||CUSTOMERS[0]))
+                        ? fillTemplate(tpl?.sms||'', buildVars(getAllCustomers().find(c=>c.id===selectedCustomers[0])||CUSTOMERS[0]))
                         : (tpl?.sms||'')}
                     </div>
                   )}
@@ -6545,7 +6545,7 @@ const CommunicationsPage = () => {
                   ):(
                     <div style={{padding:'10px 12px',background:'var(--bg3)',borderRadius:8,fontSize:12,lineHeight:1.7,color:'var(--text2)',maxHeight:120,overflow:'auto',whiteSpace:'pre-wrap'}}>
                       {selectedCustomers.length>0
-                        ? fillTemplate(tpl?.email||'', buildVars(CUSTOMERS.find(c=>c.id===selectedCustomers[0])||CUSTOMERS[0])).slice(0,300)+'…'
+                        ? fillTemplate(tpl?.email||'', buildVars(getAllCustomers().find(c=>c.id===selectedCustomers[0])||CUSTOMERS[0])).slice(0,300)+'…'
                         : (tpl?.email||'').slice(0,200)+'…'}
                     </div>
                   )}
