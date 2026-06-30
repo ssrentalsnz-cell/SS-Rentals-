@@ -5059,7 +5059,8 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
   const [form, setForm] = useState({
     customer: '', customCustomer: '', isNewCustomer: false,
     startDate: '', endDate: '', hireType: 'weekly',
-    truck: '', trailer: '', noTrailer: false,
+    truck: '', trailer: '', noTrailer: false, noTruck: false,
+    showOnHireTrucks: false, showOnHireTrailers: false,
     weeklyTruck: 0, weeklyTrailer: 0, mileageRate: 0.18, rucRate: 0.062,
     maxMileage: '',
     bond: 5000, bondPaid: false, signed: false, insuranceVerified: false, checklistDone: false,
@@ -5082,12 +5083,17 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
   const calcCost = () => {
     const dur = calcDuration();
     if (!dur.weeks) return 0;
-    const total = (form.weeklyTruck + form.weeklyTrailer) * dur.weeks;
+    const truckRate = form.noTruck ? 0 : form.weeklyTruck;
+    const trailerRate = form.noTrailer ? 0 : form.weeklyTrailer;
+    const total = (truckRate + trailerRate) * dur.weeks;
     return total;
   };
 
   // Get available trucks for selected dates
   const getAvailableTrucks = () => {
+    if (form.showOnHireTrucks) {
+      return getEffectiveTrucks().filter(t => t.status !== 'maintenance');
+    }
     if (!form.startDate || !form.endDate) return getEffectiveTrucks();
     const effHires = getEffectiveHires().filter(h => h.status === 'active');
     return getEffectiveTrucks().filter(t => {
@@ -5103,6 +5109,9 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
   };
 
   const getAvailableTrailers = () => {
+    if (form.showOnHireTrailers) {
+      return getEffectiveTrailers().filter(t => t.status !== 'maintenance');
+    }
     if (!form.startDate || !form.endDate) return getEffectiveTrailers();
     const effHires = getEffectiveHires().filter(h => h.status === 'active');
     return getEffectiveTrailers().filter(t => {
@@ -5164,11 +5173,11 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
     }
     const id = 'H' + String(HIRES.length + 1).padStart(3, '0');
     const newHire = {
-      id, customer: custId||form.customer, truck: form.truck,
+      id, customer: custId||form.customer, truck: form.noTruck ? '' : form.truck,
       trailer: form.noTrailer ? '' : form.trailer,
       start: form.startDate, end: form.endDate,
       status: 'active', hireType: form.hireType,
-      weekly_truck: form.weeklyTruck, weekly_trailer: form.noTrailer ? 0 : form.weeklyTrailer,
+      weekly_truck: form.noTruck ? 0 : form.weeklyTruck, weekly_trailer: form.noTrailer ? 0 : form.weeklyTrailer,
       mileage_rate: form.mileageRate, ruc_rate: form.rucRate,
       bond: form.bond, bond_paid: form.bondPaid,
       signed: form.signed, insurance_verified: form.insuranceVerified,
@@ -5180,7 +5189,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
     HIRES.unshift(newHire);
     // Update truck status
     const truck = getEffectiveTrucks().find(t => t.id === form.truck);
-    if (truck) { truck.status = 'on_hire'; truck.hirer = form.customer; }
+    if (truck && !form.noTruck) { truck.status = 'on_hire'; truck.hirer = form.customer; }
     const trailer = getEffectiveTrailers().find(t => t.id === form.trailer);
     if (trailer && !form.noTrailer) { trailer.status = 'on_hire'; trailer.hirer = form.customer; }
     // Save override
@@ -5198,7 +5207,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
     // Save full hire to localStorage overrides so it persists across reloads
     saveHireOverride(id, {
       status:'active', end: form.endDate, start: form.startDate,
-      weekly_truck: form.weeklyTruck, weekly_trailer: form.noTrailer ? 0 : form.weeklyTrailer,
+      weekly_truck: form.noTruck ? 0 : form.weeklyTruck, weekly_trailer: form.noTrailer ? 0 : form.weeklyTrailer,
       mileage_rate: form.mileageRate, ruc_rate: form.rucRate,
       bond: form.bond, bond_paid: form.bondPaid,
       signed: form.signed, insurance_verified: form.insuranceVerified,
@@ -5206,7 +5215,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
       max_mileage: form.maxMileage || '',
       notes: form.notes,
       customer: custId || form.customer,
-      truck: form.truck,
+      truck: form.noTruck ? '' : form.truck,
       trailer: form.noTrailer ? '' : form.trailer,
     });
     // Auto-sync new hire to Google Sheets if connected
@@ -5235,9 +5244,9 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
 
   const canProceed = () => {
     if (step === 1) return form.startDate && form.endDate && new Date(form.endDate) > new Date(form.startDate);
-    if (step === 2) return form.truck;
+    if (step === 2) return (form.noTruck ? true : !!form.truck) && (form.noTrailer ? true : !!form.trailer) && !(form.noTruck && form.noTrailer);
     if (step === 3) return form.customer || (form.customerMode==='new' && form.newCompany && form.newPhone);
-    if (step === 4) return form.weeklyTruck > 0;
+    if (step === 4) return (form.noTruck ? true : form.weeklyTruck > 0) && (form.noTrailer ? true : form.weeklyTrailer > 0);
     return true;
   };
 
@@ -5258,12 +5267,12 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
               <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
                 {[
                   ['Customer', cust?.company],
-                  ['Truck', truck ? truck.rego+' '+truck.make+' '+truck.model : '—'],
+                  ['Truck', truck&&!form.noTruck ? truck.rego+' '+truck.make+' '+truck.model : 'None'],
                   ['Trailer', trailer&&!form.noTrailer ? trailer.rego+' '+trailer.make : 'None'],
                   ['Start Date', fmt(form.startDate)],
                   ['End Date', fmt(form.endDate)],
                   ['Duration', dur.label],
-                  ['Weekly Rate', fmtCur(form.weeklyTruck + (form.noTrailer?0:form.weeklyTrailer))+'/wk'],
+                  ['Weekly Rate', fmtCur((form.noTruck?0:form.weeklyTruck) + (form.noTrailer?0:form.weeklyTrailer))+'/wk'],
                   ['Est. Total', fmtCur(totalCost)],
                 ].map(([l,v])=>(
                   <div key={l} style={{padding:'8px 10px', background:'var(--bg4)', borderRadius:8}}>
@@ -5364,26 +5373,41 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
 
               {/* Trucks */}
               <div style={{marginBottom:20}}>
-                <div style={{fontWeight:700, fontSize:13, marginBottom:10, display:'flex', alignItems:'center', gap:8}}>
-                  Trucks <span style={{fontSize:11, color:'var(--green)', fontWeight:400}}>{availTrucks.length} available</span>
+                <div style={{fontWeight:700, fontSize:13, marginBottom:10, display:'flex', alignItems:'center', gap:8, justifyContent:'space-between'}}>
+                  <span>Trucks <span style={{fontSize:11, color:'var(--green)', fontWeight:400}}>{availTrucks.length} available</span></span>
+                  <label style={{display:'flex', alignItems:'center', gap:6, fontSize:12, cursor:'pointer', textTransform:'none', marginBottom:0, fontWeight:400}}>
+                    <input type="checkbox" checked={form.noTruck} onChange={e=>set('noTruck',e.target.checked)} style={{width:'auto'}}/>
+                    No truck needed (trailer only)
+                  </label>
                 </div>
-                {availTrucks.length===0&&<div style={{padding:16, background:'var(--bg3)', borderRadius:8, color:'var(--text3)', fontSize:13, textAlign:'center'}}>No trucks available for these dates</div>}
-                <div style={{display:'grid', gap:8}}>
-                  {availTrucks.map(t=>(
-                    <div key={t.id} onClick={()=>handleTruckSelect(t.id)}
-                      style={{padding:'12px 16px', border:`2px solid ${form.truck===t.id?'var(--red)':'var(--border)'}`,
-                        borderRadius:10, cursor:'pointer', background:form.truck===t.id?'rgba(217,43,43,0.06)':'var(--card)',
-                        display:'flex', alignItems:'center', gap:14, transition:'all 0.15s'}}>
-                      <div style={{width:20, height:20, borderRadius:'50%', border:`2px solid ${form.truck===t.id?'var(--red)':'var(--border2)'}`,
-                        background:form.truck===t.id?'var(--red)':'transparent', flexShrink:0}}/>
-                      <div style={{flex:1}}>
-                        <div style={{fontWeight:800, fontSize:14}}>{t.rego} <span style={{fontWeight:400, color:'var(--text2)', fontSize:12}}>— {t.make} {t.model} {t.year}</span></div>
-                        <div style={{fontSize:11, color:'var(--text3)', marginTop:2}}>Odometer: {t.odometer.toLocaleString()} km · COF: {fmt(t.cof_expiry)} · {statusLabel(t.status)}</div>
-                      </div>
-                      {t.weekly_rate>0&&<div style={{fontSize:13, fontWeight:700, color:'var(--green)'}}>{fmtCur(t.weekly_rate)}/wk</div>}
+                {!form.noTruck&&(
+                  <div>
+                    <label style={{display:'flex', alignItems:'center', gap:6, fontSize:11, cursor:'pointer', color:'var(--text2)', marginBottom:8}}>
+                      <input type="checkbox" checked={form.showOnHireTrucks} onChange={e=>set('showOnHireTrucks',e.target.checked)} style={{width:'auto'}}/>
+                      Show trucks currently on hire (use to swap/reassign a truck)
+                    </label>
+                    {form.showOnHireTrucks&&<div style={{padding:'8px 12px', background:'rgba(243,156,18,0.1)', border:'1px solid rgba(243,156,18,0.3)', borderRadius:8, fontSize:12, color:'#b8730a', marginBottom:10}}>
+                      ⚠️ Selecting a truck that's currently on hire will reassign it to this new hire. End the existing hire separately if needed.
+                    </div>}
+                    {availTrucks.length===0&&<div style={{padding:16, background:'var(--bg3)', borderRadius:8, color:'var(--text3)', fontSize:13, textAlign:'center'}}>No trucks available for these dates</div>}
+                    <div style={{display:'grid', gap:8}}>
+                      {availTrucks.map(t=>(
+                        <div key={t.id} onClick={()=>handleTruckSelect(t.id)}
+                          style={{padding:'12px 16px', border:`2px solid ${form.truck===t.id?'var(--red)':'var(--border)'}`,
+                            borderRadius:10, cursor:'pointer', background:form.truck===t.id?'rgba(217,43,43,0.06)':'var(--card)',
+                            display:'flex', alignItems:'center', gap:14, transition:'all 0.15s'}}>
+                          <div style={{width:20, height:20, borderRadius:'50%', border:`2px solid ${form.truck===t.id?'var(--red)':'var(--border2)'}`,
+                            background:form.truck===t.id?'var(--red)':'transparent', flexShrink:0}}/>
+                          <div style={{flex:1}}>
+                            <div style={{fontWeight:800, fontSize:14}}>{t.rego} <span style={{fontWeight:400, color:'var(--text2)', fontSize:12}}>— {t.make} {t.model} {t.year}</span></div>
+                            <div style={{fontSize:11, color:'var(--text3)', marginTop:2}}>Odometer: {t.odometer.toLocaleString()} km · COF: {fmt(t.cof_expiry)} · {statusLabel(t.status)}{t.status==='on_hire'?' (currently on hire)':''}</div>
+                          </div>
+                          {t.weekly_rate>0&&<div style={{fontSize:13, fontWeight:700, color:'var(--green)'}}>{fmtCur(t.weekly_rate)}/wk</div>}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
               </div>
 
               {/* Trailers */}
@@ -5396,20 +5420,29 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
                   </label>
                 </div>
                 {!form.noTrailer&&(
-                  <div style={{display:'grid', gap:8}}>
-                    {availTrailers.map(t=>(
-                      <div key={t.id} onClick={()=>handleTrailerSelect(t.id)}
-                        style={{padding:'12px 16px', border:`2px solid ${form.trailer===t.id?'var(--blue)':'var(--border)'}`,
-                          borderRadius:10, cursor:'pointer', background:form.trailer===t.id?'rgba(41,128,185,0.06)':'var(--card)',
-                          display:'flex', alignItems:'center', gap:14, transition:'all 0.15s'}}>
-                        <div style={{width:20, height:20, borderRadius:'50%', border:`2px solid ${form.trailer===t.id?'var(--blue)':'var(--border2)'}`,
-                          background:form.trailer===t.id?'var(--blue)':'transparent', flexShrink:0}}/>
-                        <div style={{flex:1}}>
-                          <div style={{fontWeight:800, fontSize:14}}>{t.rego} <span style={{fontWeight:400, color:'var(--text2)', fontSize:12}}>— {t.make} {t.model}</span></div>
-                          <div style={{fontSize:11, color:'var(--text3)', marginTop:2}}>COF: {fmt(t.cof_expiry)} · {statusLabel(t.status)}</div>
+                  <div>
+                    <label style={{display:'flex', alignItems:'center', gap:6, fontSize:11, cursor:'pointer', color:'var(--text2)', marginBottom:8}}>
+                      <input type="checkbox" checked={form.showOnHireTrailers} onChange={e=>set('showOnHireTrailers',e.target.checked)} style={{width:'auto'}}/>
+                      Show trailers currently on hire (use to swap/reassign a trailer)
+                    </label>
+                    {form.showOnHireTrailers&&<div style={{padding:'8px 12px', background:'rgba(243,156,18,0.1)', border:'1px solid rgba(243,156,18,0.3)', borderRadius:8, fontSize:12, color:'#b8730a', marginBottom:10}}>
+                      ⚠️ Selecting a trailer that's currently on hire will reassign it to this new hire. End the existing hire separately if needed.
+                    </div>}
+                    <div style={{display:'grid', gap:8}}>
+                      {availTrailers.map(t=>(
+                        <div key={t.id} onClick={()=>handleTrailerSelect(t.id)}
+                          style={{padding:'12px 16px', border:`2px solid ${form.trailer===t.id?'var(--blue)':'var(--border)'}`,
+                            borderRadius:10, cursor:'pointer', background:form.trailer===t.id?'rgba(41,128,185,0.06)':'var(--card)',
+                            display:'flex', alignItems:'center', gap:14, transition:'all 0.15s'}}>
+                          <div style={{width:20, height:20, borderRadius:'50%', border:`2px solid ${form.trailer===t.id?'var(--blue)':'var(--border2)'}`,
+                            background:form.trailer===t.id?'var(--blue)':'transparent', flexShrink:0}}/>
+                          <div style={{flex:1}}>
+                            <div style={{fontWeight:800, fontSize:14}}>{t.rego} <span style={{fontWeight:400, color:'var(--text2)', fontSize:12}}>— {t.make} {t.model}</span></div>
+                            <div style={{fontSize:11, color:'var(--text3)', marginTop:2}}>COF: {fmt(t.cof_expiry)} · {statusLabel(t.status)}{t.status==='on_hire'?' (currently on hire)':''}</div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -5568,15 +5601,16 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
                 <div className="form-group" style={{marginBottom:0}}>
                   <label style={{display:'flex',justifyContent:'space-between'}}>
-                    <span>{form.hireType==='daily'?'Daily':'Weekly'} Truck Rate (NZD) <span style={{color:'var(--red)'}}>*</span></span>
+                    <span>{form.hireType==='daily'?'Daily':'Weekly'} Truck Rate (NZD) {!form.noTruck&&<span style={{color:'var(--red)'}}>*</span>}</span>
                     {selTruck&&<span style={{color:'var(--text3)',fontWeight:400,fontSize:10}}>{selTruck.rego}</span>}
                   </label>
-                  <input type="number" step="0.01" value={form.weeklyTruck} onChange={e=>set('weeklyTruck',parseFloat(e.target.value)||0)}
-                    style={{borderColor:form.weeklyTruck>0?'var(--green)':'var(--red)'}}/>
+                  <input type="number" step="0.01" value={form.weeklyTruck} onChange={e=>set('weeklyTruck',parseFloat(e.target.value)||0)} disabled={form.noTruck}
+                    style={{borderColor:form.noTruck?'var(--border)':(form.weeklyTruck>0?'var(--green)':'var(--red)'),opacity:form.noTruck?0.5:1}}/>
                   <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>
-                    {form.hireType==='daily'&&form.weeklyTruck>0&&`≈ ${fmtCur(form.weeklyTruck*7)}/week`}
-                    {form.hireType==='monthly'&&form.weeklyTruck>0&&`≈ ${fmtCur(form.weeklyTruck/4)}/week`}
-                    {form.hireType==='weekly'&&form.weeklyTruck>0&&`≈ ${fmtCur(form.weeklyTruck/7)}/day`}
+                    {form.noTruck&&'No truck selected'}
+                    {!form.noTruck&&form.hireType==='daily'&&form.weeklyTruck>0&&`≈ ${fmtCur(form.weeklyTruck*7)}/week`}
+                    {!form.noTruck&&form.hireType==='monthly'&&form.weeklyTruck>0&&`≈ ${fmtCur(form.weeklyTruck/4)}/week`}
+                    {!form.noTruck&&form.hireType==='weekly'&&form.weeklyTruck>0&&`≈ ${fmtCur(form.weeklyTruck/7)}/day`}
                   </div>
                 </div>
                 <div className="form-group" style={{marginBottom:0}}>
@@ -5621,7 +5655,7 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
               <div style={{padding:'12px 16px', background:'rgba(39,174,96,0.08)', border:'1px solid rgba(39,174,96,0.2)', borderRadius:8, marginBottom:16}}>
                 <div style={{fontWeight:700, color:'var(--green)', marginBottom:8, fontSize:13}}>Estimated Cost Summary</div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:12,marginBottom:8}}>
-                  <div><span style={{color:'var(--text3)'}}>Truck hire:</span> <strong>{fmtCur(form.weeklyTruck)}/{form.hireType==='daily'?'day':'wk'}</strong></div>
+                  {!form.noTruck&&<div><span style={{color:'var(--text3)'}}>Truck hire:</span> <strong>{fmtCur(form.weeklyTruck)}/{form.hireType==='daily'?'day':'wk'}</strong></div>}
                   {!form.noTrailer&&<div><span style={{color:'var(--text3)'}}>Trailer hire:</span> <strong>{fmtCur(form.weeklyTrailer)}/{form.hireType==='daily'?'day':'wk'}</strong></div>}
                   <div><span style={{color:'var(--text3)'}}>Mileage rate:</span> <strong>{'$'+form.mileageRate+'/km'}</strong></div>
                   <div><span style={{color:'var(--text3)'}}>RUC rate:</span> <strong>{'$'+form.rucRate+'/km'}</strong></div>
@@ -5700,9 +5734,9 @@ const NewHireWizard = ({onClose, onCreated, sheetsConfig}) => {
                     ['Start Date', fmt(form.startDate)],
                     ['End Date', fmt(form.endDate)],
                     ['Duration', dur.label],
-                    ['Truck', truck?`${truck.rego} ${truck.make} ${truck.model}`:'—'],
+                    ['Truck', truck&&!form.noTruck?`${truck.rego} ${truck.make} ${truck.model}`:'None'],
                     ['Trailer', trailer&&!form.noTrailer?`${trailer.rego} ${trailer.make}`:'None'],
-                    ['Weekly Rate', fmtCur(form.weeklyTruck+(form.noTrailer?0:form.weeklyTrailer))+'/wk'],
+                    ['Weekly Rate', fmtCur((form.noTruck?0:form.weeklyTruck)+(form.noTrailer?0:form.weeklyTrailer))+'/wk'],
                     ['Mileage Rate', '$'+form.mileageRate+'/km'],
                     ['RUC Rate', '$'+form.rucRate+'/km'],
                     ['Bond', fmtCur(form.bond)],
